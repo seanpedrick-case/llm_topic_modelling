@@ -1000,7 +1000,7 @@ def llm_query(file_data:pd.DataFrame,
                 if candidate_topics:
                     # 'Zero shot topics' are those supplied by the user
                     zero_shot_topics = read_file(candidate_topics.name)
-                    zero_shot_topics_series = zero_shot_topics.iloc[:, 0].str.strip().str.lower()
+                    zero_shot_topics_series = zero_shot_topics.iloc[:, 0].str.strip().str.lower().str.capitalize()
                     # Max 150 topics allowed
                     if len(zero_shot_topics_series) > 120:
                         print("Maximum 120 topics allowed to fit within large language model context limits.")
