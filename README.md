@@ -3,7 +3,7 @@ title: Large language model topic modeller
 emoji: 📝
 colorFrom: purple
 colorTo: yellow
-sdk: 5.6.0
+sdk: gradio
 app_file: app.py
 pinned: false
 license: cc-by-nc-4.0
