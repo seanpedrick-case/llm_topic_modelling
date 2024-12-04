@@ -1,0 +1,16 @@
+*.pdf
+*.url
+*.jpg
+*.png
+*.ipynb
+*.xls
+*.xlsx
+examples/*
+output/*
+tools/__pycache__/*
+build/*
+dist/*
+logs/*
+usage/*
+feedback/*
+test_code/*
