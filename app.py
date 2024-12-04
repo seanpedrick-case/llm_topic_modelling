@@ -249,12 +249,21 @@ with app:
 
     in_view_table.upload(view_table, inputs=[in_view_table], outputs=[view_table_markdown])
 
-# Launch the Gradio app
+# Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
+MAX_QUEUE_SIZE = int(get_or_create_env_var('MAX_QUEUE_SIZE', '5'))
+print(f'The value of RUN_DIRECT_MODE is {MAX_QUEUE_SIZE}')
+
+MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '100mb')
+print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
+
+GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))
+print(f'The value of GRADIO_SERVER_PORT is {GRADIO_SERVER_PORT}')
+
 if __name__ == "__main__":
     if os.environ['COGNITO_AUTH'] == "1":
-        app.queue().launch(show_error=True, auth=authenticate_user, max_file_size='50mb')
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT)
     else:
-        app.queue().launch(show_error=True, inbrowser=True, max_file_size='50mb')
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT)
