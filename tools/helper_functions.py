@@ -3,6 +3,35 @@ import gradio as gr
 import pandas as pd
 
 
+def empty_output_vars_extract_topics():
+    # Empty output objects before processing a new file
+
+    master_topic_df_state = pd.DataFrame()
+    master_unique_topics_df_state = pd.DataFrame()
+    master_reference_df_state = pd.DataFrame()
+    text_output_file = []
+    text_output_file_list_state = []
+    latest_batch_completed = 0
+    log_files_output = []
+    log_files_output_list_state = []
+    conversation_metadata_textbox = ""
+    estimated_time_taken_number = 0
+
+    return master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number
+
+def empty_output_vars_summarise():
+    # Empty output objects before summarising files
+
+    summary_reference_table_sample_state = pd.DataFrame()
+    master_unique_topics_df_revised_summaries_state = pd.DataFrame()
+    master_reference_df_revised_summaries_state = pd.DataFrame()
+    summary_output_files = []
+    summarised_outputs_list = []
+    latest_summary_completed_num = 0
+    conversation_metadata_textbox = ""
+
+    return summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox
+
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists

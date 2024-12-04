@@ -1,6 +1,6 @@
 import os
 import socket
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise
 from tools.aws_functions import upload_file_to_s3
 from tools.llm_api_call import llm_query, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics
 from tools.auth import authenticate_user
@@ -69,13 +69,11 @@ with app:
     gr.Markdown(
     """# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemini Flash/Pro, or Claude 3 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemini Flash/Pro, or Claude 3 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify). Instructions on use can be found in the README.md file.
 
-    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). Due to the strict API limits for the best model (Pro 1.5), the use of Gemini requires an API key. To set up your own Gemini API key, go here: https://aistudio.google.com/app/u/1/plan_information.
-    
-    NOTE: that **API calls to Gemini are not considered secure**, so please only submit redacted, non-sensitive tabular files to this source. AWS Bedrock API calls are considered to be secure.
+    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). Due to the strict API limits for the best model (Pro 1.5), the use of Gemini requires an API key. To set up your own Gemini API key, go here: https://aistudio.google.com/app/u/1/plan_information. 
 
-    Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
+    NOTE: that **API calls to Gemini are not considered secure**, so please only submit redacted, non-sensitive tabular files to this source. Also, large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
     
     with gr.Tab(label="Extract topics"):
         gr.Markdown(
@@ -94,7 +92,7 @@ with app:
         in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = False, label="Select column that contains the responses (showing columns present across all files).", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
-            candidate_topics = gr.File(label="Input topics from file (csv). File should have at least one column with a header and topic keywords in cells below. Topics will be taken from the first column of the file.")
+            candidate_topics = gr.File(label="Input topics from file (csv). File should have a single column with a header, and all topic keywords below.")
 
         context_textbox = gr.Textbox(label="Write a short description (one sentence of less) giving context to the large language model about the your consultation and any relevant context")
 
@@ -197,7 +195,8 @@ with app:
      # Tabular data upload
     in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets, data_file_names_textbox]) 
 
-    extract_topics_btn.click(load_in_data_file,                           
+    extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number]).\
+    then(load_in_data_file,                           
         inputs = [in_data_files, in_colnames, batch_size_number], outputs = [file_data_state, data_file_names_textbox, total_number_of_batches], api_name="load_data").then(\
         fn=llm_query,                           
         inputs=[file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],        
@@ -210,17 +209,18 @@ with app:
         then(fn = reveal_feedback_buttons,
         outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title], scroll_to_output=True)
     
-    # If uploaded partially completed consultation files do this. This should then start up the 'latest_batch_completed' change action above to continue extracting topics.
-    continue_previous_data_files_btn.click(
-            load_in_data_file, inputs = [in_data_files, in_colnames, batch_size_number], outputs = [file_data_state, data_file_names_textbox, total_number_of_batches]).\
-            then(load_in_previous_data_files, inputs=[in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed, in_previous_data_files_status, data_file_names_textbox])
-
     # When button pressed, summarise previous data
-    summarise_previous_data_btn.click(load_in_previous_data_files, inputs=[summarisation_in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, summarisation_in_previous_data_files_status, data_file_names_textbox]).\
+    summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox]).\
+    then(load_in_previous_data_files, inputs=[summarisation_in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, summarisation_in_previous_data_files_status, data_file_names_textbox]).\
     then(sample_reference_table_summaries, inputs=[master_reference_df_state, master_unique_topics_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown, master_reference_df_state, master_unique_topics_df_state]).\
     then(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, summarised_references_markdown, temperature_slide, data_file_names_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox])
 
     latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, summarised_references_markdown, temperature_slide, data_file_names_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox])
+
+    # If uploaded partially completed consultation files do this. This should then start up the 'latest_batch_completed' change action above to continue extracting topics.
+    continue_previous_data_files_btn.click(
+            load_in_data_file, inputs = [in_data_files, in_colnames, batch_size_number], outputs = [file_data_state, data_file_names_textbox, total_number_of_batches]).\
+            then(load_in_previous_data_files, inputs=[in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed, in_previous_data_files_status, data_file_names_textbox])
 
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS

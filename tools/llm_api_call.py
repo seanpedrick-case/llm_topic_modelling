@@ -1242,8 +1242,6 @@ def deduplicate_categories(category_series: pd.Series, join_series:pd.Series, th
         if category in deduplication_map:
             continue
 
-        print("old_category:", category)
-        
         # Find close matches to the current category, excluding the current category itself
         matches = process.extract(category, [cat for cat in category_series.unique() if cat != category], scorer=fuzz.token_set_ratio, score_cutoff=threshold)
         
@@ -1251,7 +1249,7 @@ def deduplicate_categories(category_series: pd.Series, join_series:pd.Series, th
         if matches:  # Check if there are any matches
             best_match = max(matches, key=lambda x: x[1])  # Get the match with the highest score
             match, score, _ = best_match  # Unpack the best match
-            print("Best match:", match, "score:", score)
+            #print("Best match:", match, "score:", score)
             deduplication_map[match] = category  # Map the best match to the current category
     
     # Create the result DataFrame
@@ -1282,8 +1280,6 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
             reference_df_unique = reference_df.drop_duplicates("old_category")
 
-            print("reference_df_unique_old_categories:", reference_df_unique["old_category"])
-
             reference_df_unique[["old_category"]].to_csv(output_folder + "reference_df_unique_old_categories_" + str(i) + ".csv", index=None)
 
             # Deduplicate categories within each sentiment group
@@ -1293,7 +1289,6 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
            
             if deduplicated_topic_map_df['deduplicated_category'].isnull().all():
             # Check if 'deduplicated_category' contains any values
-            
                 print("No deduplicated categories found, skipping the following code.")
 
             else:
@@ -1301,7 +1296,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
                 # Remove rows where 'deduplicated_category' is blank or NaN
                 deduplicated_topic_map_df = deduplicated_topic_map_df.loc[(deduplicated_topic_map_df['deduplicated_category'].str.strip() != '') & ~(deduplicated_topic_map_df['deduplicated_category'].isnull()), :]
 
-                deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
+                #deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
 
                 reference_df = reference_df.merge(deduplicated_topic_map_df, on="old_category", how="left")
 
@@ -1314,7 +1309,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
                 reference_df["Subtopic"] = reference_df["deduplicated_category"].combine_first(reference_df["Subtopic_old"])
                 reference_df["Sentiment"] = reference_df["Sentiment"].combine_first(reference_df["Sentiment_old"])
 
-            reference_df.to_csv(output_folder + "reference_df_after_dedup.csv", index=None)
+            #reference_df.to_csv(output_folder + "reference_table_after_dedup.csv", index=None)
 
             reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")
 
@@ -1323,8 +1318,6 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
             reference_df["General Topic"] = reference_df["General Topic"].str.lower().str.capitalize() 
             reference_df["Subtopic"] = reference_df["Subtopic"].str.lower().str.capitalize() 
             reference_df["Sentiment"] = reference_df["Sentiment"].str.lower().str.capitalize() 
-
-
 
         # Remake unique_topics_df based on new reference_df
         unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
@@ -1351,7 +1344,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
             all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
 
-    all_summaries.to_csv(output_folder + "all_summaries.csv", index=None)
+    #all_summaries.to_csv(output_folder + "all_summaries.csv", index=None)
     
     summarised_references = all_summaries.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
     'Response References': 'size',  # Count the number of references
@@ -1360,7 +1353,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     summarised_references = summarised_references.loc[(summarised_references["Sentiment"] != "Not Mentioned") & (summarised_references["Response References"] > 1)]
 
-    summarised_references.to_csv(output_folder + "summarised_references.csv", index=None)
+    #summarised_references.to_csv(output_folder + "summarised_references.csv", index=None)
 
     summarised_references_markdown = summarised_references.to_markdown(index=False)
 
@@ -1420,8 +1413,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     length_all_summaries = len(all_summaries)
 
-    print("latest_summary_completed:", latest_summary_completed)
-    print("length_all_summaries:", length_all_summaries)
+    #print("latest_summary_completed:", latest_summary_completed)
+    #print("length_all_summaries:", length_all_summaries)
 
     if latest_summary_completed >= length_all_summaries:
         print("All summaries completed. Creating outputs.")
@@ -1463,7 +1456,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         unique_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
         unique_table_df_revised.to_csv(unique_table_df_revised_path, index = None)
 
-        reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_df_table_" + model_choice_clean + ".csv"
+        reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
         reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None)
 
         output_files.extend([reference_table_df_revised_path, unique_table_df_revised_path])
