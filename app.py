@@ -154,7 +154,7 @@ with app:
     gr.Markdown(
     """# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemini Flash/Pro, or Claude 3 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify). Instructions on use can be found in the README.md file.
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 2b instruct if local, Gemini Flash/Pro, or Claude 3 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify). Instructions on use can be found in the README.md file.
 
     You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). Due to the strict API limits for the best model (Pro 1.5), the use of Gemini requires an API key. To set up your own Gemini API key, go here: https://aistudio.google.com/app/u/1/plan_information. 
 
