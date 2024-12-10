@@ -8,7 +8,7 @@ RUN apt-get update \
 
 WORKDIR /src
 
-COPY requirements.txt .
+COPY requirements_cpu.txt .
 
 RUN pip uninstall -y typing_extensions \
 && pip install --no-cache-dir --target=/install typing_extensions==4.12.2 \

@@ -347,8 +347,11 @@ print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
 GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7861'))
 print(f'The value of GRADIO_SERVER_PORT is {GRADIO_SERVER_PORT}')
 
+ROOT_PATH = get_or_create_env_var('ROOT_PATH', '')
+print(f'The value of ROOT_PATH is {ROOT_PATH}')
+
 if __name__ == "__main__":
     if os.environ['COGNITO_AUTH'] == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
     else:
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)

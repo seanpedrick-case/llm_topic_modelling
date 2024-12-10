@@ -29,7 +29,7 @@ Topics known to be relevant to this dataset are shown in the following Topics ta
 
 Your task is to create one new markdown table, assigning responses from the Response table to existing topics, or to create new topics if no existing topics are relevant.  
 Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Summary', and 'Response references'.
-In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above if they are very relevant to the text of the Response. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible.
+In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above if they are very relevant to the text of the Response. Fill in the General Topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible.
 In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
 In the fifth and final column, write a short summary of the Subtopic based on relevant responses. Highlight specific issues that appear in relevant responses.

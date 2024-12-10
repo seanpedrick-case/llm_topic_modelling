@@ -1648,6 +1648,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
             summarised_output = response
             summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
             summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
+            summarised_output = summarised_output.strip()
         except Exception as e:
             print(e)
             summarised_output = ""
