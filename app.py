@@ -1,15 +1,20 @@
 import os
 import socket
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, RUN_LOCAL_MODEL
 from tools.aws_functions import upload_file_to_s3
-from tools.llm_api_call import llm_query, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics
+from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
 import pandas as pd
-
+import tools.chatfuncs as chatf
+from tools.chatfuncs import llama_cpp_init_config_gpu, llama_cpp_init_config_cpu
+from llama_cpp import Llama
+from huggingface_hub import hf_hub_download
+from torch import cuda, backends
 from datetime import datetime
+
 today_rev = datetime.now().strftime("%Y%m%d")
 
 ensure_output_folder_exists()
@@ -20,7 +25,87 @@ access_logs_data_folder = 'logs/' + today_rev + '/' + host_name + '/'
 feedback_data_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 usage_data_folder = 'usage/' + today_rev + '/' + host_name + '/'
 
-batch_size_default = 20
+###
+# Load local model
+###
+
+# Check for torch cuda
+print("Is CUDA enabled? ", cuda.is_available())
+print("Is a CUDA device available on this computer?", backends.cudnn.enabled)
+if cuda.is_available():
+    torch_device = "cuda"
+    os.system("nvidia-smi")
+else: 
+    torch_device =  "cpu"
+
+print("Device used is: ", torch_device)
+
+def load_model(local_model_type:str, gpu_layers:int, max_context_length:int, gpu_config:llama_cpp_init_config_gpu=chatf.gpu_config, cpu_config:llama_cpp_init_config_cpu=chatf.cpu_config, torch_device:str=chatf.torch_device):
+    '''
+    Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
+    '''
+    print("Loading model ", local_model_type)
+
+    if local_model_type == "Gemma 2b":
+        if torch_device == "cuda":
+            gpu_config.update_gpu(gpu_layers)
+            gpu_config.update_context(max_context_length)
+            print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU. And a maximum context length of ", gpu_config.n_ctx)
+        else:
+            gpu_config.update_gpu(gpu_layers)
+            cpu_config.update_gpu(gpu_layers)
+
+            # Update context length according to slider
+            gpu_config.update_context(max_context_length)
+            cpu_config.update_context(max_context_length)
+
+            print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU. And a maximum context length of ", gpu_config.n_ctx)
+
+        #print(vars(gpu_config))
+        #print(vars(cpu_config))
+
+        def get_model_path():
+            repo_id = os.environ.get("REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
+            filename = os.environ.get("MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
+            model_dir = "model/gemma" #"model/phi"  # Assuming this is your intended directory
+
+            # Construct the expected local path
+            local_path = os.path.join(model_dir, filename)
+
+            if os.path.exists(local_path):
+                print(f"Model already exists at: {local_path}")
+                return local_path
+            else:
+                print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
+                return hf_hub_download(repo_id=repo_id, filename=filename)
+            
+        model_path = get_model_path()        
+
+        try:
+            print(vars(gpu_config))
+            llama_model = Llama(model_path=model_path, **vars(gpu_config)) #  type_k=8, type_v = 8, flash_attn=True, 
+        
+        except Exception as e:
+            print("GPU load failed")
+            print(e)
+            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) # type_v = 8, flash_attn=True, 
+
+        tokenizer = []
+
+    chatf.model = llama_model
+    chatf.tokenizer = tokenizer
+    chatf.local_model_type = local_model_type
+
+    load_confirmation = "Finished loading model: " + local_model_type
+
+    print(load_confirmation)
+    return local_model_type, load_confirmation, local_model_type
+
+
+# Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
+local_model_type = "Gemma 2b"
+if RUN_LOCAL_MODEL == "1":
+    load_model(local_model_type, chatf.gpu_layers, chatf.context_length, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
@@ -94,7 +179,7 @@ with app:
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
             candidate_topics = gr.File(label="Input topics from file (csv). File should have a single column with a header, and all topic keywords below.")
 
-        context_textbox = gr.Textbox(label="Write a short description (one sentence of less) giving context to the large language model about the your consultation and any relevant context")
+        context_textbox = gr.Textbox(label="Write a short description (up to one sentence) giving context to the large language model about the your consultation and any relevant context")
 
         extract_topics_btn = gr.Button("Extract topics from open text", variant="primary")
         
@@ -151,7 +236,7 @@ with app:
         Define settings that affect large language model output.
         """)
         with gr.Accordion("Settings for LLM generation", open = True):
-            temperature_slide = gr.Slider(minimum=0.1, maximum=1.0, value=0.3, label="Choose LLM temperature setting")
+            temperature_slide = gr.Slider(minimum=0.1, maximum=1.0, value=0.1, label="Choose LLM temperature setting")
             batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query", value = batch_size_default, precision=0)
             random_seed = gr.Number(value=42, label="Random seed for LLM generation", visible=False)            
 
@@ -198,13 +283,13 @@ with app:
     extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number]).\
     then(load_in_data_file,                           
         inputs = [in_data_files, in_colnames, batch_size_number], outputs = [file_data_state, data_file_names_textbox, total_number_of_batches], api_name="load_data").then(\
-        fn=llm_query,                           
-        inputs=[file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],        
-        outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files], api_name="llm_query")
+        fn=extract_topics,                           
+        inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],        
+        outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files], api_name="extract_topics")
 
     # If the output file count text box changes, keep going with redacting each data file until done. Then reveal the feedback buttons.
-    latest_batch_completed.change(fn=llm_query,                                  
-        inputs=[file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, second_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],
+    latest_batch_completed.change(fn=extract_topics,                                  
+        inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, second_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],
         outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files]).\
         then(fn = reveal_feedback_buttons,
         outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title], scroll_to_output=True)
@@ -224,7 +309,7 @@ with app:
 
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS
-    ###    
+    ###
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, s3_output_folder_state, session_hash_textbox])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
@@ -259,7 +344,7 @@ print(f'The value of RUN_DIRECT_MODE is {MAX_QUEUE_SIZE}')
 MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '100mb')
 print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
 
-GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7860'))
+GRADIO_SERVER_PORT = int(get_or_create_env_var('GRADIO_SERVER_PORT', '7861'))
 print(f'The value of GRADIO_SERVER_PORT is {GRADIO_SERVER_PORT}')
 
 if __name__ == "__main__":

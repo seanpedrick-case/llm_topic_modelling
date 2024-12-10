@@ -1,9 +1,9 @@
 ---
-title: Large language model topic modeller
+title: Large language model topic modelling
 emoji: 📝
 colorFrom: purple
 colorTo: yellow
-sdk: gradio
+sdk: 5.8.0
 app_file: app.py
 pinned: true
 license: cc-by-nc-4.0

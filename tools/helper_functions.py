@@ -2,7 +2,6 @@ import os
 import gradio as gr
 import pandas as pd
 
-
 def empty_output_vars_extract_topics():
     # Empty output objects before processing a new file
 
@@ -47,12 +46,19 @@ def get_or_create_env_var(var_name, default_value):
 RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
+RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "0")
+print(f'The value of RUN_LOCAL_MODEL is {RUN_LOCAL_MODEL}')
+
 if RUN_AWS_FUNCTIONS == "1":
-    model_full_names = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "gemini-1.5-flash-002", "gemini-1.5-pro-002"]
-    model_short_names = ["haiku", "sonnet", "gemini_flash", "gemini_pro"]
+    model_full_names = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "gemini-1.5-flash-002", "gemini-1.5-pro-002", "gemma_2b_it_local"]
+    model_short_names = ["haiku", "sonnet", "gemini_flash", "gemini_pro", "gemma_local"]
 else:
-    model_full_names = ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]
-    model_short_names = ["gemini_flash", "gemini_pro"]
+    model_full_names = ["gemini-1.5-flash-002", "gemini-1.5-pro-002", "gemma_2b_it_local"]
+    model_short_names = ["gemini_flash", "gemini_pro", "gemma_local"]
+
+if RUN_LOCAL_MODEL == "0":
+    model_full_names.remove("gemma_2b_it_local")
+    model_short_names.remove("gemma_local")
 
 model_name_map = {short: full for short, full in zip(model_full_names, model_short_names)}
 

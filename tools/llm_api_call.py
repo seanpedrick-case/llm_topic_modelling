@@ -15,8 +15,11 @@ from gradio import Progress
 from typing import List, Tuple
 from io import StringIO
 
+GradioFileData = gr.FileData
+
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
-from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map
+from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map, put_columns_in_df
+from tools.chatfuncs import model, CtransGenGenerationConfig, temperature, context_length, call_llama_cpp_model
 
 # ResponseObject class for AWS Bedrock calls
 class ResponseObject:
@@ -27,8 +30,8 @@ class ResponseObject:
 max_tokens = 4096
 timeout_wait = 30 # AWS now seems to have a 60 second minimum wait between API calls
 number_of_api_retry_attempts = 5
-max_time_for_loop = 180
-
+max_time_for_loop = 99999
+batch_size_default = 5
 
 AWS_DEFAULT_REGION = get_or_create_env_var('AWS_DEFAULT_REGION', 'eu-west-2')
 print(f'The value of AWS_DEFAULT_REGION is {AWS_DEFAULT_REGION}')
@@ -64,7 +67,7 @@ def load_in_file(file_path: str, colname:str=""):
 
         file_data[colname] = file_data[colname].astype(str).str.replace("\bnan\b", "", regex=True)  
         
-        print(file_data[colname])
+        #print(file_data[colname])
 
     return file_data, file_name
 
@@ -172,16 +175,24 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
 
     simple_file = simple_file[start_row:end_row]  # Select the current batch
 
-    print("simple_file:", simple_file)
+    # Now replace the reference numbers with numbers starting from 1
+    simple_file["Reference"] = simple_file["Reference"] - start_row
+
+    #print("simple_file:", simple_file)
 
     # Remove problematic characters including ASCII and various quote marks
         # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
     simple_file["Response"] = simple_file["Response"].str.replace(r'[\x00-\x1F\x7F]|[""<>]|\\', '', regex=True)  # Remove control and special characters
     simple_file["Response"] = simple_file["Response"].str.strip()  # Remove leading and trailing whitespace
     simple_file["Response"] = simple_file["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
+    simple_file["Response"] = simple_file["Response"].str.replace(r'\n{2,}', '\n', regex=True)  # Replace multiple line breaks with a single line break
+    simple_file["Response"] = simple_file["Response"].str.slice(0, 2500) # Maximum 1,500 character responses
 
     # Remove blank and extremely short responses
-    simple_file = simple_file.loc[~(simple_file["Response"].isnull()) & ~(simple_file["Response"] == "None") & ~(simple_file["Response"] == " ") & ~(simple_file["Response"] == ""),:]#~(simple_file["Response"].str.len() < 5), :]
+    simple_file = simple_file.loc[~(simple_file["Response"].isnull()) &\
+                                  ~(simple_file["Response"] == "None") &\
+                                  ~(simple_file["Response"] == " ") &\
+                                  ~(simple_file["Response"] == ""),:]#~(simple_file["Response"].str.len() < 5), :]
 
     simplified_csv_table_path = output_folder + 'simple_markdown_table_' + file_name + '_row_' + str(start_row) + '_to_' + str(end_row) + '.csv'
     simple_file.to_csv(simplified_csv_table_path, index=None)
@@ -353,7 +364,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
 
         for i in progress_bar:
             try:
-                print("Calling Gemini model")
+                print("Calling Gemini model, attempt", i + 1)
                 #print("full_prompt:", full_prompt)
                 #print("generation_config:", config)
 
@@ -372,10 +383,10 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
             
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-    else:
+    elif model_choice in ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"]:
         for i in progress_bar:
             try:
-                print("Calling AWS Claude model, attempt", i)
+                print("Calling AWS Claude model, attempt", i + 1)
                 response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
 
                 #progress_bar.close()
@@ -392,11 +403,43 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-                
+    else:
+        # This is the Gemma model
+        for i in progress_bar:
+            try:
+                print("Calling Gemma 2B Instruct model, attempt", i + 1)
+
+                gen_config = CtransGenGenerationConfig()
+                gen_config.update_temp(temperature)
+
+                response = call_llama_cpp_model(prompt, gen_config)
+
+                #progress_bar.close()
+                #tqdm._instances.clear()
+
+                print("Successful call to Gemma model.")
+                print("Response:", response)
+                break
+            except Exception as e:
+                # If fails, try again after X seconds in case there is a throttle limit
+                print("Call to Gemma model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
+
+                time.sleep(timeout_wait)
+                #response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
+
+            if i == number_of_api_retry_attempts:
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history       
 
     # Update the conversation history with the new prompt and response
     conversation_history.append({'role': 'user', 'parts': [prompt]})
-    conversation_history.append({'role': 'assistant', 'parts': [response.text]})
+
+# output_str = output['choices'][0]['text']
+
+    # Check if is a LLama.cpp model response
+    if 'choices' in response:
+        conversation_history.append({'role': 'assistant', 'parts': [response['choices'][0]['text']]})
+    else:
+        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
     
     # Print the updated conversation history
     #print("conversation_history:", conversation_history)
@@ -433,16 +476,22 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
         #print("prompt to LLM:", prompt)
 
         response, conversation_history = send_request(prompt, conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature)
-                
-        if not isinstance(response, str):
+
+        if 'choices' in response:            
+            responses.append(response)      
+
+            # Create conversation txt object
+            whole_conversation.append(prompt)
+            whole_conversation.append(response['choices'][0]['text'])
+
+        else:
+            responses.append(response)
             #print("response.usage_metadata:", response.usage_metadata)
             #print("Response.text:", response.text)
             #print("responses:", responses)
-            responses.append(response)       
-
-        # Create conversation txt object
-        whole_conversation.append(prompt)
-        whole_conversation.append(response.text)
+            # Create conversation txt object
+            whole_conversation.append(prompt)
+            whole_conversation.append(response.text)
 
         # Create conversation metadata
         if master == False:
@@ -459,12 +508,15 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
                     whole_conversation_metadata.append(str(response.usage_metadata['HTTPHeaders']['x-amzn-bedrock-output-token-count']))
                     whole_conversation_metadata.append('x-amzn-bedrock-input-token-count:')
                     whole_conversation_metadata.append(str(response.usage_metadata['HTTPHeaders']['x-amzn-bedrock-input-token-count']))
-                else:
+                elif "gemini" in model_choice:
                     whole_conversation_metadata.append(str(response.usage_metadata))
+                else:
+                    whole_conversation_metadata.append(str(response['usage']))
             except KeyError as e:
                 print(f"Key error: {e} - Check the structure of response.usage_metadata")
         else:
             print("Response is a string object.")
+            whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
 
 
     return responses, conversation_history, whole_conversation, whole_conversation_metadata
@@ -494,19 +546,25 @@ def clean_markdown_table(text: str):
     if buffer:
         merged_lines.append(buffer)
 
-    # Ensure consistent number of pipes in each row based on the header
-    header_pipes = merged_lines[0].count('|')  # Use the first row to count number of pipes
+    # Fix the header separator row if necessary
+    if len(merged_lines) > 1:
+        header_pipes = merged_lines[0].count('|')  # Count pipes in the header row
+        header_separator = '|---|' * (header_pipes - 1) + '|---|'  # Generate proper separator
+        
+        # Replace or insert the separator row
+        if not re.match(r'^\|[-:|]+$', merged_lines[1]):  # Check if the second row is a valid separator
+            merged_lines.insert(1, header_separator)
+        else:
+            # Adjust the separator to match the header pipes
+            merged_lines[1] = '|---|' * (header_pipes - 1) + '|'
+
+    # Ensure consistent number of pipes in each row
     result = []
+    header_pipes = merged_lines[0].count('|')  # Use the header row to count the number of pipes
 
     for line in merged_lines:
         # Strip excessive whitespace around pipes
         line = re.sub(r'\s*\|\s*', '|', line.strip())
-
-        # Replace numbers between pipes with commas and a space
-        line = re.sub(r'(?<=\|)(\s*\d+)(,\s*\d+)+(?=\|)', lambda m: ', '.join(m.group(0).split(',')), line)
-
-        # Replace groups of numbers separated by spaces with commas and a space
-        line = re.sub(r'(?<=\|)(\s*\d+)(\s+\d+)+(?=\|)', lambda m: ', '.join(m.group(0).split()), line)
 
         # Fix inconsistent number of pipes by adjusting them to match the header
         pipe_count = line.count('|')
@@ -516,11 +574,16 @@ def clean_markdown_table(text: str):
             # If too many pipes, split line and keep the first `header_pipes` columns
             columns = line.split('|')[:header_pipes + 1]  # +1 to keep last pipe at the end
             line = '|'.join(columns)
+        
+        line = re.sub(r'(\d),(?=\d)', r'\1, ', line)
 
         result.append(line)
 
     # Join lines back into the cleaned markdown text
     cleaned_text = '\n'.join(result)
+
+    # Replace numbers next to commas and other numbers with a space
+    
 
     return cleaned_text
 
@@ -642,8 +705,23 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     log_files_output_paths.append(whole_conversation_path_meta)
 
     # Convert output table to markdown and then to a pandas dataframe to csv
-    # try:
-    cleaned_response = clean_markdown_table(responses[-1].text)
+    def remove_before_last_term(input_string: str) -> str:
+        # Use regex to find the last occurrence of the term
+        match = re.search(r'(\| ?General Topic)', input_string)
+        if match:
+            # Find the last occurrence by using rfind
+            last_index = input_string.rfind(match.group(0))
+            return input_string[last_index:]  # Return everything from the last match onward
+        return input_string  # Return the original string if the term is not found
+
+    if "choices" in responses[-1]:
+        print("Text response:", responses[-1]["choices"][0]['text'])
+        start_of_table_response = remove_before_last_term(responses[-1]["choices"][0]['text'])
+        cleaned_response = clean_markdown_table(start_of_table_response)
+        print("cleaned_response:", cleaned_response)
+    else:
+        start_of_table_response = remove_before_last_term(responses[-1].text)
+        cleaned_response = clean_markdown_table(start_of_table_response)
     
     markdown_table = markdown.markdown(cleaned_response, extensions=['tables'])
 
@@ -653,20 +731,24 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     html_table = re.sub(r'<p>(.*?)</p>', r'\1', markdown_table)
     html_table = html_table.replace('<p>', '').replace('</p>', '').strip()
 
-    print("html_table:", html_table)
-
     # Now ensure that the HTML structure is correct
     if "<table>" not in html_table:
         html_table = f"""
         <table>
+            <tr>
+                <th>General Topic</th>
+                <th>Subtopic</th>
+                <th>Sentiment</th>                
+                <th>Response References</th>
+                <th>Summary</th>
+            </tr>
             {html_table}
         </table>
         """
 
     # print("Markdown table as HTML:", html_table)
 
-    html_buffer = StringIO(html_table)
-    
+    html_buffer = StringIO(html_table)    
 
     try:
         topic_with_response_df = pd.read_html(html_buffer)[0]  # Assuming the first table in the HTML is the one you want
@@ -678,10 +760,15 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
 
     # Rename columns to ensure consistent use of data frames later in code
-    topic_with_response_df.columns = ["General Topic", "Subtopic", "Sentiment", "Summary", "Response References"]
+    topic_with_response_df.columns = ["General Topic", "Subtopic", "Sentiment", "Response References", "Summary"]
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
+
+    #print("topic_with_response_df:", topic_with_response_df)
+
+    # For instances where you end up with float values in Response references
+    topic_with_response_df["Response References"] = topic_with_response_df["Response References"].astype(str).str.replace(".0", "", regex=False)
 
     # Strip and lower case topic names to remove issues where model is randomly capitalising topics/sentiment
     topic_with_response_df["General Topic"] = topic_with_response_df["General Topic"].str.strip().str.lower().str.capitalize()
@@ -695,18 +782,32 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
-        references = re.split(r',\s*|\s+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
+        #references = re.split(r',\s*|\s+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
+        references = re.findall(r'\d+', str(row.iloc[3])) if pd.notna(row.iloc[3]) else []
+        # If no numbers found in the Response References column, check the Summary column in case reference numbers were put there by mistake
+        if not references:
+            references = re.findall(r'\d+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else []
         topic = row.iloc[0] if pd.notna(row.iloc[0]) else ""
         subtopic = row.iloc[1] if pd.notna(row.iloc[1]) else ""
         sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
-        summary = row.iloc[3] if pd.notna(row.iloc[3]) else ""
+        summary = row.iloc[4] if pd.notna(row.iloc[4]) else ""
+        # If the reference response column is very long, and there's nothing in the summary column, assume that the summary was put in the reference column
+        if not summary and len(row.iloc[3] > 30):
+            summary = row.iloc[3]
 
         summary = row_number_string_start + summary
 
         # Create a new entry for each reference number
         for ref in references:
+            # Add start_row back onto reference_number
+            try:
+                response_ref_no =  str(int(ref) + int(start_row))
+            except ValueError:
+                print("Reference is not a number")
+                continue
+
             reference_data.append({
-                'Response References': ref,
+                'Response References': response_ref_no,
                 'General Topic': topic,
                 'Subtopic': subtopic,
                 'Sentiment': sentiment,
@@ -716,6 +817,8 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     # Create a new DataFrame from the reference data
     new_reference_df = pd.DataFrame(reference_data)
+
+    print("new_reference_df:", new_reference_df)
     
     # Append on old reference data
     out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(how='all')
@@ -759,7 +862,10 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
 
-def llm_query(file_data:pd.DataFrame,
+
+
+def extract_topics(in_data_file,
+              file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
               existing_reference_df:pd.DataFrame,
               existing_unique_topics_df:pd.DataFrame,
@@ -770,7 +876,7 @@ def llm_query(file_data:pd.DataFrame,
               temperature:float,
               chosen_cols:List[str],
               model_choice:str,
-              candidate_topics: List=[],
+              candidate_topics: GradioFileData = [],
               latest_batch_completed:int=0,
               out_message:List=[],
               out_file_paths:List = [],
@@ -783,7 +889,7 @@ def llm_query(file_data:pd.DataFrame,
               system_prompt:str=system_prompt,
               add_existing_topics_system_prompt:str=add_existing_topics_system_prompt,
               add_existing_topics_prompt:str=add_existing_topics_prompt,
-              number_of_requests:int=1,
+              number_of_prompts_used:int=1,
               batch_size:int=50,
               context_textbox:str="",
               time_taken:float = 0,
@@ -796,6 +902,7 @@ def llm_query(file_data:pd.DataFrame,
     Query an LLM (Gemini or AWS Anthropic-based) with up to three prompts about a table of open text data. Up to 'batch_size' rows will be queried at a time.
 
     Parameters:
+    - in_data_file (gr.File): Gradio file object containing input data
     - file_data (pd.DataFrame): Pandas dataframe containing the consultation response data.
     - existing_topics_table (pd.DataFrame): Pandas dataframe containing the latest master topic table that has been iterated through batches.
     - existing_reference_df (pd.DataFrame): Pandas dataframe containing the list of Response reference numbers alongside the derived topics and subtopics.
@@ -806,7 +913,7 @@ def llm_query(file_data:pd.DataFrame,
     - in_api_key (str): The API key for authentication.
     - temperature (float): The temperature parameter for the model.
     - chosen_cols (List[str]): A list of chosen columns to process.
-    - candidate_topics (List): A list of existing candidate topics submitted by the user.
+    - candidate_topics (gr.FileData): A Gradio FileData object of existing candidate topics submitted by the user.
     - model_choice (str): The choice of model to use.
     - latest_batch_completed (int): The index of the latest file completed.
     - out_message (list): A list to store output messages.
@@ -835,16 +942,37 @@ def llm_query(file_data:pd.DataFrame,
     config = ""
     final_time = 0.0
     whole_conversation_metadata = []
-    #all_topic_tables_df = []
-    #all_markdown_topic_tables = []
     is_error = False
+    #llama_system_prefix = "<|start_header_id|>system<|end_header_id|>\n" #"<start_of_turn>user\n"
+    #llama_system_suffix = "<|eot_id|>" #"<end_of_turn>\n<start_of_turn>model\n"
+    #llama_prefix = "<|start_header_id|>system<|end_header_id|>\nYou are an AI assistant that follows instruction extremely well. Help as much as you can.<|eot_id|><|start_header_id|>user<|end_header_id|>\n" #"<start_of_turn>user\n"
+    #llama_suffix = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n" #"<end_of_turn>\n<start_of_turn>model\n"
+    #llama_prefix = "<|user|>\n" # This is for phi 3.5
+    #llama_suffix = "<|end|>\n<|assistant|>" # This is for phi 3.5
+    llama_prefix = "<start_of_turn>user\n"
+    llama_suffix = "<end_of_turn>\n<start_of_turn>model\n"
 
     # Reset output files on each run:
     # out_file_paths = []
 
+    # If you have a file input but no file data it hasn't yet been loaded. Load it here.
+    if file_data.empty:
+        print("No data table found, loading from file")
+        try:
+            print("in_data_file:", in_data_file)
+            in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_file)
+            print("in_colnames:", in_colnames_drop)
+            file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default)
+            print("file_data loaded in:", file_data)
+        except:
+            # Check if files and text exist
+            out_message = "Please enter a data file to summarise."
+            print(out_message)
+            return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, out_message
+
+
     #model_choice_clean = replace_punctuation_with_underscore(model_choice)
-    model_choice_clean = model_name_map[model_choice]
-    print("model_choice_clean:", model_choice_clean)
+    model_choice_clean = model_name_map[model_choice]    
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -852,8 +980,9 @@ def llm_query(file_data:pd.DataFrame,
             latest_batch_completed = 0
             out_message = []
             out_file_paths = []
+            print("model_choice_clean:", model_choice_clean)
 
-    print("latest_batch_completed:", str(latest_batch_completed))
+    #print("latest_batch_completed:", str(latest_batch_completed))
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
     if latest_batch_completed >= num_batches:
@@ -865,7 +994,6 @@ def llm_query(file_data:pd.DataFrame,
         final_time = (toc - tic) + time_taken
         out_time = f"Everything finished in {final_time} seconds."
         print(out_time)
-
 
         print("All summaries completed. Creating outputs.")
 
@@ -931,7 +1059,7 @@ def llm_query(file_data:pd.DataFrame,
         print("out_file_paths:", out_file_paths)
 
         #final_out_message = '\n'.join(out_message)
-        return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths
+        return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, out_message
     
     
     
@@ -949,18 +1077,14 @@ def llm_query(file_data:pd.DataFrame,
     if not out_file_paths:
         out_file_paths = []
 
-    # Check if files and text exist
-    if file_data.empty:
-        out_message = "Please enter a data file to summarise."
-        print(out_message)
-        return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, out_message
+    
     
     if model_choice == "anthropic.claude-3-sonnet-20240229-v1:0" and file_data.shape[1] > 300:
         out_message = "Your data has more than 300 rows, using the Sonnet model will be too expensive. Please choose the Haiku model instead."
         print(out_message)
         return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, out_message
         
-    topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses). " + str(latest_batch_completed) + " batches completed."
+    topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
     topics_loop = tqdm(range(latest_batch_completed, num_batches), desc = topics_loop_description, unit="batches remaining")
 
     for i in topics_loop:       
@@ -994,39 +1118,53 @@ def llm_query(file_data:pd.DataFrame,
                 if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
                     print("Using Gemini model:", model_choice)
                     model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=add_existing_topics_system_prompt, max_tokens=max_tokens)
-                else:
+                elif model_choice in ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"]:
                     print("Using AWS Bedrock model:", model_choice)
+                else:
+                    print("Using local model:", model_choice)
 
                 if candidate_topics:
                     # 'Zero shot topics' are those supplied by the user
+                    max_topic_no = 120
+
                     zero_shot_topics = read_file(candidate_topics.name)
-                    zero_shot_topics_series = zero_shot_topics.iloc[:, 0].str.strip().str.lower().str.capitalize()
-                    # Max 150 topics allowed
-                    if len(zero_shot_topics_series) > 120:
-                        print("Maximum 120 topics allowed to fit within large language model context limits.")
-                        zero_shot_topics_series = zero_shot_topics_series.iloc[:120]
+                    if zero_shot_topics.shape[1] == 1:  # Check if there is only one column
+                        zero_shot_topics_series = zero_shot_topics.iloc[:, 0].str.strip().str.lower().str.capitalize()
+                        # Max 120 topics allowed
+                        if len(zero_shot_topics_series) > max_topic_no:
+                            print("Maximum", max_topic_no, "topics allowed to fit within large language model context limits.")
+                            zero_shot_topics_series = zero_shot_topics_series.iloc[:max_topic_no]
 
-                    zero_shot_topics_list = list(zero_shot_topics_series)
+                        zero_shot_topics_list = list(zero_shot_topics_series)
 
-                    print("Zero shot topics are:", zero_shot_topics_list)
+                        print("Zero shot topics are:", zero_shot_topics_list)
+                    
+                        # Create the most up to date list of topics and subtopics.
+                        # If there are candidate topics, but the existing_unique_topics_df hasn't yet been constructed, then create.
+                        if existing_unique_topics_df.empty:
+                            existing_unique_topics_df = pd.DataFrame(data={'General Topic':'', 'Subtopic':zero_shot_topics_list, 'Sentiment':''})
 
-                #all_topic_tables_df_merged = existing_unique_topics_df
-                existing_unique_topics_df["Response References"] = ""
+                        # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
+                        elif not existing_unique_topics_df.empty:
+                            zero_shot_topics_df = pd.DataFrame(data={'General Topic':'', 'Subtopic':zero_shot_topics_list, 'Sentiment':''})
+                            existing_unique_topics_df = pd.concat([existing_unique_topics_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
+                            zero_shot_topics_list_str = zero_shot_topics_list
+
+                    elif set(["General Topic", "Subtopic", "Sentiment"]).issubset(zero_shot_topics.columns):
+                        # Max 120 topics allowed
+                        if zero_shot_topics.shape[0] > max_topic_no:
+                            print("Maximum", max_topic_no, "topics allowed to fit within large language model context limits.")
+                            zero_shot_topics = zero_shot_topics.iloc[:max_topic_no,:]
+
+                        if existing_unique_topics_df.empty:
+                            existing_unique_topics_df = pd.DataFrame(data={'General Topic':zero_shot_topics.iloc[:,0], 'Subtopic':zero_shot_topics.iloc[:,1], 'Sentiment':zero_shot_topics.iloc[:,2]})
 
                 
-                # Create the most up to date list of topics and subtopics.
-                # If there are candidate topics, but the existing_unique_topics_df hasn't yet been constructed, then create.
-                if candidate_topics and existing_unique_topics_df.empty:
-                    existing_unique_topics_df = pd.DataFrame(data={'General Topic':'', 'Subtopic':zero_shot_topics_list, 'Sentiment':''})
-
-                # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
-                elif candidate_topics and not existing_unique_topics_df.empty:
-                    zero_shot_topics_df = pd.DataFrame(data={'General Topic':'', 'Subtopic':zero_shot_topics_list, 'Sentiment':''})
-                    existing_unique_topics_df = pd.concat([existing_unique_topics_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
-                    zero_shot_topics_list_str = zero_shot_topics_list
 
                     #existing_unique_topics_df.to_csv(output_folder + "Existing topics with zero shot dropped.csv", index = None)
 
+                #all_topic_tables_df_merged = existing_unique_topics_df
+                existing_unique_topics_df["Response References"] = ""
 
                 unique_topics_markdown = existing_unique_topics_df[["General Topic", "Subtopic", "Sentiment"]].drop_duplicates(["General Topic", "Subtopic", "Sentiment"]).to_markdown(index=False)
             
@@ -1034,6 +1172,13 @@ def llm_query(file_data:pd.DataFrame,
 
                 # Format the summary prompt with the response table and topics
                 formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown, consultation_context=context_textbox, column_name=chosen_cols)
+
+                if model_choice == "gemma_2b_it_local":
+                    # add_existing_topics_system_prompt = llama_system_prefix + add_existing_topics_system_prompt + llama_system_suffix
+                    # formatted_initial_table_prompt = llama_prefix + formatted_summary_prompt + llama_suffix
+
+                    formatted_initial_table_prompt = llama_prefix + add_existing_topics_system_prompt + formatted_summary_prompt + llama_suffix
+                    
 
                 # Define the output file path for the formatted prompt
                 formatted_prompt_output_path = output_folder + file_name + "_full_prompt_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
@@ -1130,7 +1275,17 @@ def llm_query(file_data:pd.DataFrame,
                 if prompt3: formatted_prompt3 = prompt3.format(response_table=normalised_simple_markdown_table)
                 else: formatted_prompt3 = prompt3
 
-                batch_prompts = [formatted_initial_table_prompt, formatted_prompt2, formatted_prompt3][:number_of_requests]  # Adjust this list to send fewer requests 
+                if model_choice == "gemma_2b_it_local":
+                    # system_prompt = llama_system_prefix + system_prompt + llama_system_suffix                    
+                    # formatted_initial_table_prompt = llama_prefix + formatted_initial_table_prompt + llama_suffix
+                    # formatted_prompt2 = llama_prefix + formatted_prompt2 + llama_suffix
+                    # formatted_prompt3 = llama_prefix + formatted_prompt3 + llama_suffix
+
+                    formatted_initial_table_prompt = llama_prefix + system_prompt + formatted_initial_table_prompt + llama_suffix
+                    formatted_prompt2 = llama_prefix + system_prompt + formatted_prompt2 + llama_suffix
+                    formatted_prompt3 = llama_prefix + system_prompt + formatted_prompt3 + llama_suffix
+
+                batch_prompts = [formatted_initial_table_prompt, formatted_prompt2, formatted_prompt3][:number_of_prompts_used]  # Adjust this list to send fewer requests 
                 
                 whole_conversation = [system_prompt] 
 
@@ -1173,15 +1328,21 @@ def llm_query(file_data:pd.DataFrame,
                 try:
                     final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
-                    with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
-                        f.write(responses[-1].text)
+                    if "choices" in responses[-1]:
+                        with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            f.write(responses[-1]["choices"][0]['text'])
+                        display_table =responses[-1]["choices"][0]['text']
+
+                    else:
+                        with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            f.write(responses[-1].text)
+                        display_table = responses[-1].text
 
                     log_files_output_paths.append(final_table_output_path)
 
                 except Exception as e:
                     print(e)
-
-                display_table = responses[-1].text
+                
                 new_topic_df = topic_table_df
                 new_reference_df = reference_df
 
@@ -1259,7 +1420,6 @@ def deduplicate_categories(category_series: pd.Series, join_series:pd.Series, th
     })
     
     return result_df
-
 
 def sample_reference_table_summaries(reference_df:pd.DataFrame,
                                      unique_topics_df:pd.DataFrame,
@@ -1380,7 +1540,11 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     print("Finished summary query")
 
     # Extract text from the `responses` list
-    response_texts = [resp.text for resp in responses]
+    if "choices" in responses[-1]:
+        response_texts = [resp["choices"][0]['text'] for resp in responses]
+    else:
+        response_texts = [resp.text for resp in responses]
+
     latest_response_text = response_texts[-1]
 
     #print("latest_response_text:", latest_response_text)
@@ -1482,6 +1646,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         try:
             response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt)
             summarised_output = response
+            summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
+            summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
         except Exception as e:
             print(e)
             summarised_output = ""
