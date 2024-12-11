@@ -5,6 +5,7 @@ from typing import TypeVar
 import torch.cuda
 from transformers import pipeline
 import time
+import spaces
 
 torch.cuda.empty_cache()
 
@@ -132,7 +133,7 @@ def llama_cpp_streaming(history, full_prompt, temperature=temperature):
     print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
     print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-
+@spaces.GPU
 def call_llama_cpp_model(formatted_string, gen_config):
     """
     Calls your generation model with parameters from the CtransGenGenerationConfig object.

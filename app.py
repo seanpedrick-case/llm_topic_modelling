@@ -1,5 +1,6 @@
 import os
 import socket
+import spaces
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, RUN_LOCAL_MODEL
 from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
 from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default
@@ -20,6 +21,7 @@ today_rev = datetime.now().strftime("%Y%m%d")
 ensure_output_folder_exists()
 
 host_name = socket.gethostname()
+print("host_name is:", host_name)
 
 access_logs_data_folder = 'logs/' + today_rev + '/' + host_name + '/'
 feedback_data_folder = 'feedback/' + today_rev + '/' + host_name + '/'
@@ -35,11 +37,15 @@ print("Is a CUDA device available on this computer?", backends.cudnn.enabled)
 if cuda.is_available():
     torch_device = "cuda"
     os.system("nvidia-smi")
+elif "spaces" in host_name:
+    torch_device = "cuda"
 else: 
     torch_device =  "cpu"
 
 print("Device used is: ", torch_device)
 
+
+@spaces.GPU
 def load_model(local_model_type:str, gpu_layers:int, max_context_length:int, gpu_config:llama_cpp_init_config_gpu=chatf.gpu_config, cpu_config:llama_cpp_init_config_cpu=chatf.cpu_config, torch_device:str=chatf.torch_device):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
