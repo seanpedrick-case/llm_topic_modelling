@@ -18,7 +18,7 @@ COPY requirements_aws.txt .
 
 RUN pip uninstall -y typing_extensions \
 && pip install --no-cache-dir --target=/install typing_extensions==4.12.2 \
-&& pip install torch==2.5.1+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
+&& pip install --no-cache-dir --target=/install torch==2.5.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
 RUN rm requirements_aws.txt

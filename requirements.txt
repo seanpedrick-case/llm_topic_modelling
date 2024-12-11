@@ -12,7 +12,9 @@ html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.10.1
 torch==2.4.1 --extra-index-url https://download.pytorch.org/whl/cu121
-llama-cpp-python==0.2.90 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+#llama-cpp-python==0.2.90 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+# Specify exact llama_cpp wheel for huggingface compatibility
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.2.90-cu121/llama_cpp_python-0.2.90-cp310-cp310-linux_x86_64.whl
 transformers==4.47.0
 numpy==1.26.4
 typing_extensions==4.12.2

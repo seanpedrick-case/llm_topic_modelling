@@ -37,8 +37,6 @@ print("Is a CUDA device available on this computer?", backends.cudnn.enabled)
 if cuda.is_available():
     torch_device = "cuda"
     os.system("nvidia-smi")
-elif "spaces" in host_name:
-    torch_device = "cuda"
 else: 
     torch_device =  "cpu"
 
