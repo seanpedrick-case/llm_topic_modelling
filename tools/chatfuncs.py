@@ -217,7 +217,7 @@ def llama_cpp_streaming(history, full_prompt, temperature=temperature):
     print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
 @spaces.GPU
-def call_llama_cpp_model(formatted_string:str, gen_config:str):
+def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
     """
     Calls your generation model with parameters from the LlamaCPPGenerationConfig object.
 

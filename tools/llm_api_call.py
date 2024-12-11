@@ -19,7 +19,7 @@ GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
 from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map, put_columns_in_df
-from tools.chatfuncs import model, LlamaCPPGenerationConfig, temperature, context_length, call_llama_cpp_model
+from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model
 
 # ResponseObject class for AWS Bedrock calls
 class ResponseObject:
