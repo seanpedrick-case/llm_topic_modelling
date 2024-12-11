@@ -9,11 +9,6 @@ from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
 import pandas as pd
-import tools.chatfuncs as chatf
-from tools.chatfuncs import llama_cpp_init_config_gpu, llama_cpp_init_config_cpu
-from llama_cpp import Llama
-from huggingface_hub import hf_hub_download
-from torch import cuda, backends
 from datetime import datetime
 
 today_rev = datetime.now().strftime("%Y%m%d")
@@ -27,90 +22,9 @@ access_logs_data_folder = 'logs/' + today_rev + '/' + host_name + '/'
 feedback_data_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 usage_data_folder = 'usage/' + today_rev + '/' + host_name + '/'
 
-###
-# Load local model
-###
+print("RUN_LOCAL_MODEL is:", RUN_LOCAL_MODEL)
 
-# Check for torch cuda
-print("Is CUDA enabled? ", cuda.is_available())
-print("Is a CUDA device available on this computer?", backends.cudnn.enabled)
-if cuda.is_available():
-    torch_device = "cuda"
-    os.system("nvidia-smi")
-else: 
-    torch_device =  "cpu"
-
-print("Device used is: ", torch_device)
-
-
-@spaces.GPU
-def load_model(local_model_type:str, gpu_layers:int, max_context_length:int, gpu_config:llama_cpp_init_config_gpu=chatf.gpu_config, cpu_config:llama_cpp_init_config_cpu=chatf.cpu_config, torch_device:str=chatf.torch_device):
-    '''
-    Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
-    '''
-    print("Loading model ", local_model_type)
-
-    if local_model_type == "Gemma 2b":
-        if torch_device == "cuda":
-            gpu_config.update_gpu(gpu_layers)
-            gpu_config.update_context(max_context_length)
-            print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU. And a maximum context length of ", gpu_config.n_ctx)
-        else:
-            gpu_config.update_gpu(gpu_layers)
-            cpu_config.update_gpu(gpu_layers)
-
-            # Update context length according to slider
-            gpu_config.update_context(max_context_length)
-            cpu_config.update_context(max_context_length)
-
-            print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU. And a maximum context length of ", gpu_config.n_ctx)
-
-        #print(vars(gpu_config))
-        #print(vars(cpu_config))
-
-        def get_model_path():
-            repo_id = os.environ.get("REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
-            filename = os.environ.get("MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
-            model_dir = "model/gemma" #"model/phi"  # Assuming this is your intended directory
-
-            # Construct the expected local path
-            local_path = os.path.join(model_dir, filename)
-
-            if os.path.exists(local_path):
-                print(f"Model already exists at: {local_path}")
-                return local_path
-            else:
-                print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
-                return hf_hub_download(repo_id=repo_id, filename=filename)
-            
-        model_path = get_model_path()        
-
-        try:
-            print(vars(gpu_config))
-            llama_model = Llama(model_path=model_path, **vars(gpu_config)) #  type_k=8, type_v = 8, flash_attn=True, 
-        
-        except Exception as e:
-            print("GPU load failed")
-            print(e)
-            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) # type_v = 8, flash_attn=True, 
-
-        tokenizer = []
-
-    chatf.model = llama_model
-    chatf.tokenizer = tokenizer
-    chatf.local_model_type = local_model_type
-
-    load_confirmation = "Finished loading model: " + local_model_type
-
-    print(load_confirmation)
-    return local_model_type, load_confirmation, local_model_type
-
-
-# Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-local_model_type = "Gemma 2b"
 if RUN_LOCAL_MODEL == "1":
-    load_model(local_model_type, chatf.gpu_layers, chatf.context_length, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
-
     default_model_choice = "gemma_2b_it_local"
 
 elif RUN_AWS_FUNCTIONS == "1":
@@ -351,7 +265,7 @@ COGNITO_AUTH = get_or_create_env_var('COGNITO_AUTH', '0')
 print(f'The value of COGNITO_AUTH is {COGNITO_AUTH}')
 
 MAX_QUEUE_SIZE = int(get_or_create_env_var('MAX_QUEUE_SIZE', '5'))
-print(f'The value of RUN_DIRECT_MODE is {MAX_QUEUE_SIZE}')
+print(f'The value of MAX_QUEUE_SIZE is {MAX_QUEUE_SIZE}')
 
 MAX_FILE_SIZE = get_or_create_env_var('MAX_FILE_SIZE', '100mb')
 print(f'The value of MAX_FILE_SIZE is {MAX_FILE_SIZE}')
