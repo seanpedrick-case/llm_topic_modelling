@@ -2,7 +2,6 @@ from typing import TypeVar
 import torch.cuda
 import os
 import time
-import spaces
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 from tools.helper_functions import RUN_LOCAL_MODEL
@@ -111,9 +110,23 @@ class LlamaCPPGenerationConfig:
 ###
 # Load local model
 ###
+def get_model_path():
+    repo_id = os.environ.get("REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
+    filename = os.environ.get("MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
+    model_dir = "model/gemma" #"model/phi"  # Assuming this is your intended directory
 
-@spaces.GPU
-def load_model(local_model_type:str, gpu_layers:int, max_context_length:int, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device):
+    # Construct the expected local path
+    local_path = os.path.join(model_dir, filename)
+
+    if os.path.exists(local_path):
+        print(f"Model already exists at: {local_path}")
+        return local_path
+    else:
+        print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
+        return hf_hub_download(repo_id=repo_id, filename=filename)
+
+
+def load_model(local_model_type:str=local_model_type, gpu_layers:int=gpu_layers, max_context_length:int=context_length, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
     '''
@@ -136,26 +149,11 @@ def load_model(local_model_type:str, gpu_layers:int, max_context_length:int, gpu
 
         #print(vars(gpu_config))
         #print(vars(cpu_config))
-
-        def get_model_path():
-            repo_id = os.environ.get("REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
-            filename = os.environ.get("MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
-            model_dir = "model/gemma" #"model/phi"  # Assuming this is your intended directory
-
-            # Construct the expected local path
-            local_path = os.path.join(model_dir, filename)
-
-            if os.path.exists(local_path):
-                print(f"Model already exists at: {local_path}")
-                return local_path
-            else:
-                print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
-                return hf_hub_download(repo_id=repo_id, filename=filename)
             
         model_path = get_model_path()        
 
         try:
-            print(vars(gpu_config))
+            print("GPU load variables:" , vars(gpu_config))
             llama_model = Llama(model_path=model_path, **vars(gpu_config)) #  type_k=8, type_v = 8, flash_attn=True, 
         
         except Exception as e:
@@ -172,15 +170,15 @@ def load_model(local_model_type:str, gpu_layers:int, max_context_length:int, gpu
     load_confirmation = "Finished loading model: " + local_model_type
 
     print(load_confirmation)
-    return local_model_type, load_confirmation, local_model_type, model, tokenizer
+    return model, tokenizer
 
 ###
 # Load local model
 ###
-if RUN_LOCAL_MODEL == "1":
-    print("Loading model")
-    local_model_type, load_confirmation, local_model_type, model, tokenizer = load_model(local_model_type, gpu_layers, context_length, gpu_config, cpu_config, torch_device)
-    print("model loaded:", model)
+# if RUN_LOCAL_MODEL == "1":
+#     print("Loading model")
+#     local_model_type, load_confirmation, local_model_type, model, tokenizer = load_model(local_model_type, gpu_layers, context_length, gpu_config, cpu_config, torch_device)
+    # print("model loaded:", model)
 
 
 def llama_cpp_streaming(history, full_prompt, temperature=temperature):
@@ -216,7 +214,6 @@ def llama_cpp_streaming(history, full_prompt, temperature=temperature):
     print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
     print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
 
-@spaces.GPU
 def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
     """
     Calls your generation model with parameters from the LlamaCPPGenerationConfig object.

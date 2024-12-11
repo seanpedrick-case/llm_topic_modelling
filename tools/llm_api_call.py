@@ -9,6 +9,7 @@ import boto3
 import json
 import string
 import re
+import spaces
 from rapidfuzz import process, fuzz
 from tqdm import tqdm
 from gradio import Progress
@@ -19,7 +20,7 @@ GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
 from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map, put_columns_in_df
-from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model
+from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model, load_model, RUN_LOCAL_MODEL
 
 # ResponseObject class for AWS Bedrock calls
 class ResponseObject:
@@ -331,7 +332,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     return response
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], model: object, config: dict, model_choice: str, system_prompt: str, temperature: float, progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], model: object, config: dict, model_choice: str, system_prompt: str, temperature: float, local_model=[], progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -412,7 +413,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
                 gen_config = LlamaCPPGenerationConfig()
                 gen_config.update_temp(temperature)
 
-                response = call_llama_cpp_model(prompt, gen_config)
+                response = call_llama_cpp_model(prompt, gen_config, model=local_model)
 
                 #progress_bar.close()
                 #tqdm._instances.clear()
@@ -449,7 +450,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     
     return response, conversation_history
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], model: object, config: dict, model_choice: str, temperature: float, batch_no:int = 1, master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], model: object, config: dict, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -464,6 +465,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
         model_choice (str): The choice of model to use.        
         temperature (float): The temperature parameter for the model.
         batch_no (int): Batch number of the large language model request.
+        local_model: Local gguf model (if loaded)
         master (bool): Is this request for the master table.
 
     Returns:
@@ -478,7 +480,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         #print("prompt to LLM:", prompt)
 
-        response, conversation_history = send_request(prompt, conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature)
+        response, conversation_history = send_request(prompt, conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model)
 
         if isinstance(response, ResponseObject):
             responses.append(response)
@@ -872,7 +874,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
 
 
-
+@spaces.GPU
 def extract_topics(in_data_file,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
@@ -991,6 +993,11 @@ def extract_topics(in_data_file,
             out_file_paths = []
             print("model_choice_clean:", model_choice_clean)
 
+            if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
+                progress(0.1, "Loading in Gemma 2b model")
+                local_model, tokenizer = load_model()
+                print("Local model loaded:", local_model)
+
     #print("latest_batch_completed:", str(latest_batch_completed))
 
     # If we have already redacted the last file, return the input out_message and file list to the relevant components
@@ -1095,6 +1102,8 @@ def extract_topics(in_data_file,
         
     topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
     topics_loop = tqdm(range(latest_batch_completed, num_batches), desc = topics_loop_description, unit="batches remaining")
+
+    
 
     for i in topics_loop:       
         
@@ -1207,7 +1216,7 @@ def extract_topics(in_data_file,
                 summary_whole_conversation = []
 
                 # Process requests to large language model
-                master_summary_response, summary_conversation_history, whole_summary_conversation, whole_conversation_metadata = process_requests(summary_prompt_list, add_existing_topics_system_prompt, summary_conversation_history, summary_whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, master = True)
+                master_summary_response, summary_conversation_history, whole_summary_conversation, whole_conversation_metadata = process_requests(summary_prompt_list, add_existing_topics_system_prompt, summary_conversation_history, summary_whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, master = True)
 
                 # print("master_summary_response:", master_summary_response[-1].text)
                 # print("Whole conversation metadata:", whole_conversation_metadata)
@@ -1299,7 +1308,7 @@ def extract_topics(in_data_file,
                 whole_conversation = [system_prompt] 
 
                 # Process requests to large language model
-                responses, conversation_history, whole_conversation, whole_conversation_metadata = process_requests(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no)
+                responses, conversation_history, whole_conversation, whole_conversation_metadata = process_requests(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model)
                 
                 # print("Whole conversation metadata before:", whole_conversation_metadata)
 
@@ -1533,7 +1542,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     return summarised_references, summarised_references_markdown, reference_df, unique_topics_df
 
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str):
+def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, local_model=[]):
     conversation_history = []
     whole_conversation_metadata = []
 
@@ -1549,7 +1558,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation = [summarise_topic_descriptions_system_prompt] 
 
     # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature)
+    responses, conversation_history, whole_conversation, whole_conversation_metadata = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, local_model=local_model)
 
     print("Finished summary query")
 
@@ -1569,6 +1578,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
     return latest_response_text, conversation_history, whole_conversation_metadata
 
+@spaces.GPU
 def summarise_output_topics(summarised_references:pd.DataFrame,
                             unique_table_df:pd.DataFrame,
                             reference_table_df:pd.DataFrame,
@@ -1646,11 +1656,16 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     tic = time.perf_counter()
     
-    print("Starting with:", latest_summary_completed)
-    print("Last summary number:", length_all_summaries)
+    #print("Starting with:", latest_summary_completed)
+    #print("Last summary number:", length_all_summaries)
+
+    if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
+                progress(0.1, "Loading in Gemma 2b model")
+                local_model, tokenizer = load_model()
+                print("Local model loaded:", local_model)
 
     summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
-    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")
+    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
 
     for summary_no in summary_loop:
 
@@ -1661,7 +1676,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text)]
 
         try:
-            response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt)
+            response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
             summarised_output = response
             summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
             summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
