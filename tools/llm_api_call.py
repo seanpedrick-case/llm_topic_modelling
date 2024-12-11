@@ -436,7 +436,10 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
 # output_str = output['choices'][0]['text']
 
     # Check if is a LLama.cpp model response
-    if 'choices' in response:
+        # Check if the response is a ResponseObject
+    if isinstance(response, ResponseObject):
+        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
+    elif 'choices' in response:
         conversation_history.append({'role': 'assistant', 'parts': [response['choices'][0]['text']]})
     else:
         conversation_history.append({'role': 'assistant', 'parts': [response.text]})
@@ -477,19 +480,17 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         response, conversation_history = send_request(prompt, conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature)
 
-        if 'choices' in response:            
-            responses.append(response)      
-
+        if isinstance(response, ResponseObject):
+            responses.append(response)
+            whole_conversation.append(prompt)
+            whole_conversation.append(response.text)
+        elif 'choices' in response:
+            responses.append(response)
             # Create conversation txt object
             whole_conversation.append(prompt)
             whole_conversation.append(response['choices'][0]['text'])
-
         else:
             responses.append(response)
-            #print("response.usage_metadata:", response.usage_metadata)
-            #print("Response.text:", response.text)
-            #print("responses:", responses)
-            # Create conversation txt object
             whole_conversation.append(prompt)
             whole_conversation.append(response.text)
 
@@ -714,14 +715,22 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
             return input_string[last_index:]  # Return everything from the last match onward
         return input_string  # Return the original string if the term is not found
 
-    if "choices" in responses[-1]:
-        print("Text response:", responses[-1]["choices"][0]['text'])
+        # Check if the last response is a ResponseObject
+    if isinstance(responses[-1], ResponseObject):
+        #print("Text response:", responses[-1].text)
+        start_of_table_response = remove_before_last_term(responses[-1].text)
+        cleaned_response = clean_markdown_table(start_of_table_response)
+        print("cleaned_response:", cleaned_response)
+    elif "choices" in responses[-1]:
+        #print("Text response:", responses[-1]["choices"][0]['text'])
         start_of_table_response = remove_before_last_term(responses[-1]["choices"][0]['text'])
         cleaned_response = clean_markdown_table(start_of_table_response)
         print("cleaned_response:", cleaned_response)
     else:
+        #print("Text response:", responses[-1].text)
         start_of_table_response = remove_before_last_term(responses[-1].text)
         cleaned_response = clean_markdown_table(start_of_table_response)
+        print("cleaned_response:", cleaned_response)
     
     markdown_table = markdown.markdown(cleaned_response, extensions=['tables'])
 
@@ -1328,15 +1337,20 @@ def extract_topics(in_data_file,
                 try:
                     final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
-                    if "choices" in responses[-1]:
+                    if isinstance(responses[-1], ResponseObject):
+                        with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            f.write(responses[-1].text)
+                        display_table = responses[-1].text
+                    elif "choices" in responses[-1]:
                         with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
                             f.write(responses[-1]["choices"][0]['text'])
                         display_table =responses[-1]["choices"][0]['text']
-
                     else:
                         with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
                             f.write(responses[-1].text)
                         display_table = responses[-1].text
+                    
+
 
                     log_files_output_paths.append(final_table_output_path)
 
@@ -1539,11 +1553,14 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
     print("Finished summary query")
 
-    # Extract text from the `responses` list
-    if "choices" in responses[-1]:
+    if isinstance(responses[-1], ResponseObject):
+        response_texts = [resp.text for resp in responses]
+    elif "choices" in responses[-1]:
         response_texts = [resp["choices"][0]['text'] for resp in responses]
     else:
         response_texts = [resp.text for resp in responses]
+
+
 
     latest_response_text = response_texts[-1]
 

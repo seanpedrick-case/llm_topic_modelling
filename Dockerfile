@@ -14,14 +14,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /src
 
-COPY requirements_cpu.txt .
+COPY requirements_aws.txt .
 
 RUN pip uninstall -y typing_extensions \
 && pip install --no-cache-dir --target=/install typing_extensions==4.12.2 \
 && pip install torch==2.5.1+cpu --target=/install --index-url https://download.pytorch.org/whl/cpu \
-&& pip install --no-cache-dir --target=/install -r requirements_cpu.txt
+&& pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
-RUN rm requirements_cpu.txt
+RUN rm requirements_aws.txt
 
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm

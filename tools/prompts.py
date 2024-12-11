@@ -3,7 +3,7 @@ system_prompt = """You are a researcher analysing responses from an open text da
 initial_table_prompt = """The open text data is shown in the following table that contains two columns, Reference and Response. Response table: 
 {response_table}
 
-Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Summary', and 'Response references'.
+Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
 In the first column identify general topics relevant to responses. Create as many general topics as you can.
 In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned.
 In the third column write the sentiment of the subtopic: Negative, Neutral, or Positive.
@@ -28,7 +28,7 @@ Topics known to be relevant to this dataset are shown in the following Topics ta
 {topics}
 
 Your task is to create one new markdown table, assigning responses from the Response table to existing topics, or to create new topics if no existing topics are relevant.  
-Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Summary', and 'Response references'.
+Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
 In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above if they are very relevant to the text of the Response. Fill in the General Topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible.
 In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.

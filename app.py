@@ -1,7 +1,7 @@
 import os
 import socket
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, RUN_LOCAL_MODEL
-from tools.aws_functions import upload_file_to_s3
+from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
 from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
@@ -107,6 +107,14 @@ local_model_type = "Gemma 2b"
 if RUN_LOCAL_MODEL == "1":
     load_model(local_model_type, chatf.gpu_layers, chatf.context_length, chatf.gpu_config, chatf.cpu_config, chatf.torch_device)
 
+    default_model_choice = "gemma_2b_it_local"
+
+elif RUN_AWS_FUNCTIONS == "1":
+    default_model_choice = "anthropic.claude-3-haiku-20240307-v1:0"
+
+else:
+    default_model_choice = "gemini-1.5-flash-002"
+
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
 
@@ -167,7 +175,7 @@ with app:
         """
         )
         with gr.Row():
-            model_choice = gr.Dropdown(value = "gemini-1.5-flash-002", choices = model_full_names, label="LLM model to use", multiselect=False)
+            model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
             in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Upload xlsx or csv files with consultation responses", open = True):
