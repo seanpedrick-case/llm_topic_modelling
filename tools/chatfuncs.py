@@ -2,7 +2,6 @@ from typing import TypeVar
 import torch.cuda
 import os
 import time
-import spaces
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 from tools.helper_functions import RUN_LOCAL_MODEL
@@ -126,7 +125,6 @@ def get_model_path():
         print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
         return hf_hub_download(repo_id=repo_id, filename=filename)
 
-@spaces.GPU
 def load_model(local_model_type:str=local_model_type, gpu_layers:int=gpu_layers, max_context_length:int=context_length, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
@@ -173,7 +171,7 @@ def load_model(local_model_type:str=local_model_type, gpu_layers:int=gpu_layers,
     print(load_confirmation)
     return model, tokenizer
 
-@spaces.GPU
+
 def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
     """
     Calls your generation model with parameters from the LlamaCPPGenerationConfig object.

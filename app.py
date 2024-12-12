@@ -171,12 +171,12 @@ with app:
 
         with gr.Accordion("Prompt settings", open = True):
             number_of_prompts = gr.Number(value=1, label="Number of prompts to send to LLM in sequence", minimum=1, maximum=3)
-            system_prompt_textbox = gr.Textbox(label="System prompt", lines = 4, value = system_prompt)
-            initial_table_prompt_textbox = gr.Textbox(label = "Prompt 1", lines = 8, value = initial_table_prompt)
+            system_prompt_textbox = gr.Textbox(label="Initial system prompt", lines = 4, value = system_prompt)
+            initial_table_prompt_textbox = gr.Textbox(label = "Initial topics prompt", lines = 8, value = initial_table_prompt)
             prompt_2_textbox = gr.Textbox(label = "Prompt 2", lines = 8, value = prompt2, visible=False)
             prompt_3_textbox = gr.Textbox(label = "Prompt 3", lines = 8, value = prompt3, visible=False)
-            add_to_existing_topics_system_prompt_textbox = gr.Textbox(label="Summary system prompt", lines = 4, value = add_existing_topics_system_prompt)
-            add_to_existing_topics_prompt_textbox = gr.Textbox(label = "Summary prompt", lines = 8, value = add_existing_topics_prompt)
+            add_to_existing_topics_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = add_existing_topics_system_prompt)
+            add_to_existing_topics_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = add_existing_topics_prompt)
             
         log_files_output = gr.File(label="Log file output", interactive=False)
         conversation_metadata_textbox = gr.Textbox(label="Query metadata - usage counts and other parameters", interactive=False, lines=8)

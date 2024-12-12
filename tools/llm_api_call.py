@@ -10,6 +10,7 @@ import json
 import math
 import string
 import re
+import spaces
 from rapidfuzz import process, fuzz
 from tqdm import tqdm
 from gradio import Progress
@@ -878,7 +879,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
 
-
+@spaces.GPU
 def extract_topics(in_data_file,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
@@ -1614,7 +1615,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
     return latest_response_text, conversation_history, whole_conversation_metadata
 
-
+@spaces.GPU
 def summarise_output_topics(summarised_references:pd.DataFrame,
                             unique_table_df:pd.DataFrame,
                             reference_table_df:pd.DataFrame,
