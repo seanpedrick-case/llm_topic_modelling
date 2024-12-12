@@ -159,7 +159,7 @@ def load_data_from_aws(in_aws_keyword_file, aws_password="", bucket_name=bucket_
 
     return files, out_message
 
-def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=bucket_name):
+def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=bucket_name, RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS):
     """
     Uploads a file from local machine to Amazon S3.
 
@@ -171,31 +171,36 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
     Returns:
     - Message as variable/printed to console
     """
-    final_out_message = []
+    if RUN_AWS_FUNCTIONS == "1":
 
-    s3_client = boto3.client('s3')
+        final_out_message = []
 
-    if isinstance(local_file_paths, str):
-        local_file_paths = [local_file_paths]
+        s3_client = boto3.client('s3')
 
-    for file in local_file_paths:
-        try:
-            # Get file name off file path
-            file_name = os.path.basename(file)
+        if isinstance(local_file_paths, str):
+            local_file_paths = [local_file_paths]
 
-            s3_key_full = s3_key + file_name
-            print("S3 key: ", s3_key_full)
+        for file in local_file_paths:
+            try:
+                # Get file name off file path
+                file_name = os.path.basename(file)
 
-            s3_client.upload_file(file, s3_bucket, s3_key_full)
-            out_message = "File " + file_name + " uploaded successfully!"
-            print(out_message)
-        
-        except Exception as e:
-            out_message = f"Error uploading file(s): {e}"
-            print(out_message)
+                s3_key_full = s3_key + file_name
+                print("S3 key: ", s3_key_full)
 
-        final_out_message.append(out_message)
-        final_out_message_str = '\n'.join(final_out_message)
+                s3_client.upload_file(file, s3_bucket, s3_key_full)
+                out_message = "File " + file_name + " uploaded successfully!"
+                print(out_message)
+            
+            except Exception as e:
+                out_message = f"Error uploading file(s): {e}"
+                print(out_message)
+
+            final_out_message.append(out_message)
+            final_out_message_str = '\n'.join(final_out_message)
+
+    else:
+        final_out_message_str("Not connected to AWS, no files uploaded.")
 
     return final_out_message_str
         

@@ -1,4 +1,4 @@
-system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset that is full of open text responses called {column_name}. The context of this analysis is: {consultation_context}. """
+system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset that is full of open text responses called '{column_name}'. The context of this analysis is '{consultation_context}'."""
 
 initial_table_prompt = """The open text data is shown in the following table that contains two columns, Reference and Response. Response table: 
 {response_table}
@@ -48,6 +48,16 @@ summarise_topic_descriptions_prompt = """Below is a table with number of paragra
 Your task is to make a consolidated summary of the above text. Return a summary up to two paragraphs long that includes as much detail as possible from the original text. Return only the summary and no other text.
 
 Summary:"""
+
+
+create_general_topics_system_prompt = system_prompt
+
+create_general_topics_prompt = """Subtopics known to be relevant to this dataset are shown in the following Topics table: 
+{topics}
+
+Your task is to create a General Topic name for each Subtopic. The new Topics table should have the columns 'General Topic' and 'Subtopic' only. Write a 'General Topic' text label relevant to the Subtopic next to it in the new table. The text label should describe the general theme of the Subtopic. Do not add any other text, thoughts, or notes to your response.
+
+New Topics table:"""
 
 
 # example_instruction_prompt_llama3 = """<|start_header_id|>system<|end_header_id|>\n

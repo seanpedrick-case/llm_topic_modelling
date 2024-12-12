@@ -6,7 +6,6 @@ from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
 from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
-from tools.chatfuncs import load_model
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
 import pandas as pd
@@ -92,23 +91,23 @@ with app:
     with gr.Tab(label="Extract topics"):
         gr.Markdown(
         """
-        ### Choose a tabular data file (xlsx or csv) of consultation responses to summarise.
+        ### Choose a tabular data file (xlsx or csv) of open text to extract topics from.
         """
         )
         with gr.Row():
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
             in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
-        with gr.Accordion("Upload xlsx or csv files with consultation responses", open = True):
+        with gr.Accordion("Upload xlsx or csv file", open = True):
             in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
         
-        in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet with responses"], multiselect = False, label="Select the Excel sheet that has the responses.", visible=False, allow_custom_value=True)
-        in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = False, label="Select column that contains the responses (showing columns present across all files).", allow_custom_value=True, interactive=True)
+        in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet"], multiselect = False, label="Select the Excel sheet.", visible=False, allow_custom_value=True)
+        in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = False, label="Select the open text column of interest.", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
             candidate_topics = gr.File(label="Input topics from file (csv). File should have a single column with a header, and all topic keywords below.")
 
-        context_textbox = gr.Textbox(label="Write a short description (up to one sentence) giving context to the large language model about the your consultation and any relevant context")
+        context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
 
         extract_topics_btn = gr.Button("Extract topics from open text", variant="primary")
         
@@ -119,7 +118,7 @@ with app:
         latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
 
         data_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
-        data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the redaction. A reminder that the app is only expected to identify about 60% of personally identifiable information in a given (typed) document.",
+        data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the topic extraction.",
                 choices=["The results were good", "The results were not good"], visible=False)
         data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
         data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
@@ -130,7 +129,7 @@ with app:
     with gr.Tab(label="Summarise topic outputs"):
         gr.Markdown(
         """
-        ### Load in data files from a consultation summarisation to summarise the outputs.
+        ### Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to summarise the outputs.
         """)
         with gr.Accordion("Upload reference data file and unique data files", open = True):
             summarisation_in_previous_data_files = gr.File(label="Choose output csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
@@ -141,7 +140,7 @@ with app:
     with gr.Tab(label="Continue previous topic extraction"):
         gr.Markdown(
         """
-        ### Load in data files from a previous attempt at summarising a consultation to continue it.
+        ### Load in data files from a previous attempt at extracting topics to continue it.
         """)
 
         with gr.Accordion("Upload reference data file and unique data files", open = True):
@@ -207,7 +206,7 @@ with app:
     ###
 
      # Tabular data upload
-    in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets, data_file_names_textbox]) 
+    in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets, data_file_names_textbox])
 
     extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number]).\
     then(load_in_data_file,                           
@@ -215,7 +214,7 @@ with app:
         fn=extract_topics,                           
         inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],        
         outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files], api_name="extract_topics")
-
+    
     # If the output file count text box changes, keep going with redacting each data file until done. Then reveal the feedback buttons.
     latest_batch_completed.change(fn=extract_topics,                                  
         inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, second_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],
