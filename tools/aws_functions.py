@@ -200,7 +200,7 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
             final_out_message_str = '\n'.join(final_out_message)
 
     else:
-        final_out_message_str("Not connected to AWS, no files uploaded.")
+        final_out_message_str = "Not connected to AWS, no files uploaded."
 
     return final_out_message_str
         
