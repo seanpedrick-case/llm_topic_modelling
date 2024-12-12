@@ -2,6 +2,7 @@ from typing import TypeVar
 import torch.cuda
 import os
 import time
+import spaces
 from llama_cpp import Llama
 from huggingface_hub import hf_hub_download
 from tools.helper_functions import RUN_LOCAL_MODEL
@@ -125,7 +126,7 @@ def get_model_path():
         print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
         return hf_hub_download(repo_id=repo_id, filename=filename)
 
-
+@spaces.GPU
 def load_model(local_model_type:str=local_model_type, gpu_layers:int=gpu_layers, max_context_length:int=context_length, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
@@ -172,15 +173,41 @@ def load_model(local_model_type:str=local_model_type, gpu_layers:int=gpu_layers,
     print(load_confirmation)
     return model, tokenizer
 
-###
-# Load local model
-###
-# if RUN_LOCAL_MODEL == "1":
-#     print("Loading model")
-#     local_model_type, load_confirmation, local_model_type, model, tokenizer = load_model(local_model_type, gpu_layers, context_length, gpu_config, cpu_config, torch_device)
-    # print("model loaded:", model)
+@spaces.GPU
+def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
+    """
+    Calls your generation model with parameters from the LlamaCPPGenerationConfig object.
+
+    Args:
+        formatted_string (str): The formatted input text for the model.
+        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
+    """
+    # Extracting parameters from the gen_config object
+    temperature = gen_config.temperature
+    top_k = gen_config.top_k
+    top_p = gen_config.top_p
+    repeat_penalty = gen_config.repeat_penalty
+    seed = gen_config.seed
+    max_tokens = gen_config.max_tokens
+    stream = gen_config.stream
+
+    # Now you can call your model directly, passing the parameters:
+    output = model(
+        formatted_string, 
+        temperature=temperature, 
+        top_k=top_k, 
+        top_p=top_p, 
+        repeat_penalty=repeat_penalty, 
+        seed=seed,
+        max_tokens=max_tokens,
+        stream=stream#,
+        #stop=["<|eot_id|>", "\n\n"]
+    )
+
+    return output
 
 
+# This function is not used in this app
 def llama_cpp_streaming(history, full_prompt, temperature=temperature):
 
     gen_config = LlamaCPPGenerationConfig()
@@ -213,35 +240,3 @@ def llama_cpp_streaming(history, full_prompt, temperature=temperature):
     print(f'Time for complete generation: {time_generate}s')
     print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
     print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
-
-def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
-    """
-    Calls your generation model with parameters from the LlamaCPPGenerationConfig object.
-
-    Args:
-        formatted_string (str): The formatted input text for the model.
-        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
-    """
-    # Extracting parameters from the gen_config object
-    temperature = gen_config.temperature
-    top_k = gen_config.top_k
-    top_p = gen_config.top_p
-    repeat_penalty = gen_config.repeat_penalty
-    seed = gen_config.seed
-    max_tokens = gen_config.max_tokens
-    stream = gen_config.stream
-
-    # Now you can call your model directly, passing the parameters:
-    output = model(
-        formatted_string, 
-        temperature=temperature, 
-        top_k=top_k, 
-        top_p=top_p, 
-        repeat_penalty=repeat_penalty, 
-        seed=seed,
-        max_tokens=max_tokens,
-        stream=stream#,
-        #stop=["<|eot_id|>", "\n\n"]
-    )
-
-    return output
