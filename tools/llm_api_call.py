@@ -20,7 +20,7 @@ from io import StringIO
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, create_general_topics_system_prompt, create_general_topics_prompt
-from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map, put_columns_in_df
+from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text
 from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model, load_model, RUN_LOCAL_MODEL
 
 # ResponseObject class for AWS Bedrock calls
@@ -1636,6 +1636,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     '''
     out_metadata = []
     local_model = []
+    summarised_output_markdown = ""
     
     print("In summarise_output_topics function.")
 
@@ -1646,6 +1647,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     #print("latest_summary_completed:", latest_summary_completed)
     #print("length_all_summaries:", length_all_summaries)
 
+    # If all summaries completed, make final outputs
     if latest_summary_completed >= length_all_summaries:
         print("All summaries completed. Creating outputs.")
 
@@ -1691,7 +1693,11 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
         output_files.extend([reference_table_df_revised_path, unique_table_df_revised_path])
 
-        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str 
+        unique_table_df_revised_display = unique_table_df_revised.apply(lambda col: col.map(wrap_text))
+
+        summarised_output_markdown = unique_table_df_revised_display.to_markdown(index=False)
+
+        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown
 
     tic = time.perf_counter()
     
@@ -1742,6 +1748,6 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     # If all summaries completeed
     if latest_summary_completed >= length_all_summaries:
-        print("At last summary.")        
+        print("At last summary.")
 
-    return summarised_references, unique_table_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str
+    return summarised_references, unique_table_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown

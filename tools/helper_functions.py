@@ -116,35 +116,92 @@ def read_file(filename):
         return pd.read_excel(filename)
     elif file_type == 'parquet':
         return pd.read_parquet(filename)
+    
+# Wrap text in each column to the specified max width, including whole words
+def wrap_text(text, max_width=60):
+    if not isinstance(text, str):
+        return text
+        
+    words = text.split()
+    if not words:
+        return text
+        
+    # First pass: initial word wrapping
+    wrapped_lines = []
+    current_line = []
+    current_length = 0
+    
+    def add_line():
+        if current_line:
+            wrapped_lines.append(' '.join(current_line))
+            current_line.clear()
+    
+    for i, word in enumerate(words):
+        word_length = len(word)
+        
+        # Handle words longer than max_width
+        if word_length > max_width:
+            add_line()
+            wrapped_lines.append(word)
+            current_length = 0
+            continue
+            
+        # Calculate space needed for this word
+        space_needed = word_length if not current_line else word_length + 1
+        
+        # Check if adding this word would exceed max_width
+        if current_length + space_needed > max_width:
+            add_line()
+            current_line.append(word)
+            current_length = word_length
+        else:
+            current_line.append(word)
+            current_length += space_needed
+    
+    add_line()  # Add any remaining text
+    
+    # Second pass: redistribute words from lines following single-word lines
+    def can_fit_in_previous_line(prev_line, word):
+        return len(prev_line) + 1 + len(word) <= max_width
+    
+    i = 0
+    while i < len(wrapped_lines) - 1:
+        words_in_line = wrapped_lines[i].split()
+        next_line_words = wrapped_lines[i + 1].split()
+        
+        # If current line has only one word and isn't too long
+        if len(words_in_line) == 1 and len(words_in_line[0]) < max_width * 0.8:
+            # Try to bring words back from the next line
+            words_to_bring_back = []
+            remaining_words = []
+            current_length = len(words_in_line[0])
+            
+            for word in next_line_words:
+                if current_length + len(word) + 1 <= max_width:
+                    words_to_bring_back.append(word)
+                    current_length += len(word) + 1
+                else:
+                    remaining_words.append(word)
+            
+            if words_to_bring_back:
+                # Update current line with additional words
+                wrapped_lines[i] = ' '.join(words_in_line + words_to_bring_back)
+                
+                # Update next line with remaining words
+                if remaining_words:
+                    wrapped_lines[i + 1] = ' '.join(remaining_words)
+                else:
+                    wrapped_lines.pop(i + 1)
+                    continue  # Don't increment i if we removed a line
+        i += 1
+    
+    return '<br>'.join(wrapped_lines)
 
-def view_table(file_path: str, max_width: int = 60):  # Added max_width parameter
+
+def view_table(file_path: str):  # Added max_width parameter
     df = pd.read_csv(file_path)
 
-    df_cleaned = df.replace('\n', ' ', regex=True)
-
-    # Wrap text in each column to the specified max width, including whole words
-    def wrap_text(text):
-        if isinstance(text, str):
-            words = text.split(' ')
-            wrapped_lines = []
-            current_line = ""
-
-            for word in words:
-                # Check if adding the next word exceeds the max width
-                if len(current_line) + len(word) + 1 > max_width:  # +1 for the space
-                    wrapped_lines.append(current_line)
-                    current_line = word  # Start a new line with the current word
-                else:
-                    if current_line:  # If current_line is not empty, add a space
-                        current_line += ' '
-                    current_line += word
-
-            # Add any remaining text in current_line to wrapped_lines
-            if current_line:
-                wrapped_lines.append(current_line)
-
-            return '<br>'.join(wrapped_lines)  # Join lines with <br>
-        return text
+    df_cleaned = df.replace('\n', ' ', regex=True)    
 
     # Use apply with axis=1 to apply wrap_text to each element
     df_cleaned = df_cleaned.apply(lambda col: col.map(wrap_text))
