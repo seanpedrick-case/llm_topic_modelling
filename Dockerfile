@@ -26,7 +26,7 @@ RUN rm requirements_aws.txt
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
 
-# Install system dependencies. Need to specify -y for poppler to get it to install
+# Install system dependencies.
 RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

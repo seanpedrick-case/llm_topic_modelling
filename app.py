@@ -3,7 +3,7 @@ import socket
 import spaces
 from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, RUN_LOCAL_MODEL
 from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
-from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default
+from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default, deduplicate_topics
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt
 #from tools.aws_functions import load_data_from_aws
@@ -21,6 +21,7 @@ print("host_name is:", host_name)
 access_logs_data_folder = 'logs/' + today_rev + '/' + host_name + '/'
 feedback_data_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 usage_data_folder = 'usage/' + today_rev + '/' + host_name + '/'
+file_input_height = 150
 
 print("RUN_LOCAL_MODEL is:", RUN_LOCAL_MODEL)
 
@@ -47,10 +48,10 @@ with app:
     first_loop_state = gr.State(True)
     second_loop_state = gr.State(False)
 
-    file_data_state = gr.State(pd.DataFrame())
-    master_topic_df_state = gr.State(pd.DataFrame())
-    master_reference_df_state = gr.State(pd.DataFrame())
-    master_unique_topics_df_state = gr.State(pd.DataFrame())
+    file_data_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="file_data_state", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    master_topic_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_topic_df_state", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    master_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_reference_df_state", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    master_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_unique_topics_df_state", visible=False, type="pandas") #gr.State(pd.DataFrame())
  
     session_hash_state = gr.State()
     s3_output_folder_state = gr.State()
@@ -66,12 +67,14 @@ with app:
     feedback_s3_logs_loc_state = gr.State(feedback_data_folder)
 
     # Summary state objects
-    summary_reference_table_sample_state = gr.State(pd.DataFrame())
-    master_reference_df_revised_summaries_state = gr.State(pd.DataFrame())
-    master_unique_topics_df_revised_summaries_state = gr.State(pd.DataFrame())
+    summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="summary_reference_table_sample_state", visible=False, type="pandas") # gr.State(pd.DataFrame())
+    master_reference_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_reference_df_revised_summaries_state", visible=False, type="pandas") #gr.State(pd.DataFrame())
+    master_unique_topics_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_unique_topics_df_revised_summaries_state", visible=False, type="pandas") #gr.State(pd.DataFrame())
     summarised_references_markdown = gr.Markdown("", visible=False)
     summarised_outputs_list = gr.Dropdown(value=[], choices=[], visible=False, label="List of summarised outputs", allow_custom_value=True)
     latest_summary_completed_num = gr.Number(0, visible=False)
+
+    unique_topics_table_file_textbox = gr.Textbox(label="unique_topics_table_file_textbox", visible=False)
 
     ###
     # UI LAYOUT
@@ -99,20 +102,20 @@ with app:
             in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
-            in_data_files = gr.File(label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            in_data_files = gr.File(height=file_input_height, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
         
         in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet"], multiselect = False, label="Select the Excel sheet.", visible=False, allow_custom_value=True)
         in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = False, label="Select the open text column of interest.", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
-            candidate_topics = gr.File(label="Input topics from file (csv). File should have a single column with a header, and all topic keywords below.")
+            candidate_topics = gr.File(height=file_input_height, label="Input topics from file (csv). File should have a single column with a header, and all topic keywords below.")
 
         context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
 
         extract_topics_btn = gr.Button("Extract topics from open text", variant="primary")
         
         text_output_summary = gr.Markdown(value="### Language model response will appear here")
-        text_output_file = gr.File(label="Output files")
+        text_output_file = gr.File(height=file_input_height, label="Output files")
         latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
         # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
         latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
@@ -126,16 +129,26 @@ with app:
         with gr.Row():
             s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
-    with gr.Tab(label="Summarise topic outputs"):
+    with gr.Tab(label="Deduplicate and summarise topics"):
         gr.Markdown(
         """
         ### Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to summarise the outputs.
         """)
         with gr.Accordion("Upload reference data file and unique data files", open = True):
-            summarisation_in_previous_data_files = gr.File(label="Choose output csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            summarisation_in_previous_data_files = gr.File(height=file_input_height, label="Upload files to deduplicate topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
             summarisation_in_previous_data_files_status = gr.Textbox(value = "", label="Previous file input", visible=False)
+
+            with gr.Row():
+                merge_sentiment_drop = gr.Dropdown(label="Merge sentiment values together for duplicate subtopics.", value="No", choices=["Yes", "No"])
+                merge_general_topics_drop = gr.Dropdown(label="Merge general topic values together for duplicate subtopics.", value="No", choices=["Yes", "No"])
+                deduplicate_score_threshold = gr.Number(label="Similarity threshold with which to determine duplicates.", value = 90, minimum=5, maximum=100, precision=0)
+
+            deduplicate_previous_data_btn = gr.Button("Deduplicate topics", variant="primary")
+            
+            duplicate_output_files = gr.File(height=file_input_height, label="Upload files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            
             summarise_previous_data_btn = gr.Button("Summarise existing topics", variant="primary")
-            summary_output_files = gr.File(label="Summarised output files", interactive=False)
+            summary_output_files = gr.File(height=file_input_height, label="Summarised output files", interactive=False)
             summarised_output_markdown = gr.Markdown(value="### Summarised table will appear here")
 
     with gr.Tab(label="Continue previous topic extraction"):
@@ -145,28 +158,28 @@ with app:
         """)
 
         with gr.Accordion("Upload reference data file and unique data files", open = True):
-            in_previous_data_files = gr.File(label="Choose output csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            in_previous_data_files = gr.File(height=file_input_height, label="Choose output csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
             in_previous_data_files_status = gr.Textbox(value = "", label="Previous file input")
             continue_previous_data_files_btn = gr.Button(value="Continue previous topic extraction", variant="primary")
 
     
-    with gr.Tab(label="View output topics table"):
+    with gr.Tab(label="Topic table viewer"):
         gr.Markdown(
         """
         ### View a 'unique_topic_table' csv file in markdown format.
         """)
     
-        in_view_table = gr.File(label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet', '.csv.gz'])
+        in_view_table = gr.File(height=file_input_height, label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet', '.csv.gz'])
         view_table_markdown = gr.Markdown(value = "", label="View table")
 
-    with gr.Tab(label="LLM settings"):
+    with gr.Tab(label="Topic extraction settings"):
         gr.Markdown(
         """
         Define settings that affect large language model output.
         """)
         with gr.Accordion("Settings for LLM generation", open = True):
             temperature_slide = gr.Slider(minimum=0.1, maximum=1.0, value=0.1, label="Choose LLM temperature setting")
-            batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query", value = batch_size_default, precision=0)
+            batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query", value = batch_size_default, precision=0, minimum=1, maximum=100)
             random_seed = gr.Number(value=42, label="Random seed for LLM generation", visible=False)            
 
         with gr.Accordion("Prompt settings", open = True):
@@ -178,7 +191,7 @@ with app:
             add_to_existing_topics_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = add_existing_topics_system_prompt)
             add_to_existing_topics_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = add_existing_topics_prompt)
             
-        log_files_output = gr.File(label="Log file output", interactive=False)
+        log_files_output = gr.File(height=file_input_height, label="Log file output", interactive=False)
         conversation_metadata_textbox = gr.Textbox(label="Query metadata - usage counts and other parameters", interactive=False, lines=8)
 
         # Invisible text box to hold the session hash/username just for logging purposes
@@ -214,18 +227,22 @@ with app:
         inputs = [in_data_files, in_colnames, batch_size_number], outputs = [file_data_state, data_file_names_textbox, total_number_of_batches], api_name="load_data").then(\
         fn=extract_topics,                           
         inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],        
-        outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files], api_name="extract_topics")
+        outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files, duplicate_output_files], api_name="extract_topics")
     
     # If the output file count text box changes, keep going with redacting each data file until done. Then reveal the feedback buttons.
     latest_batch_completed.change(fn=extract_topics,                                  
         inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, text_output_summary, data_file_names_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, text_output_summary, text_output_file_list_state, log_files_output_list_state, second_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number],
-        outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files]).\
+        outputs=[text_output_summary, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, summarisation_in_previous_data_files, duplicate_output_files]).\
         then(fn = reveal_feedback_buttons,
         outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title], scroll_to_output=True)
     
+    # When button pressed, deduplicate data
+    deduplicate_previous_data_btn.click(load_in_previous_data_files, inputs=[summarisation_in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, summarisation_in_previous_data_files_status, data_file_names_textbox, unique_topics_table_file_textbox]).\
+    then(deduplicate_topics, inputs=[master_reference_df_state, master_unique_topics_df_state, data_file_names_textbox, unique_topics_table_file_textbox, merge_sentiment_drop, merge_general_topics_drop, deduplicate_score_threshold], outputs=[master_reference_df_state, master_unique_topics_df_state, duplicate_output_files])
+    
     # When button pressed, summarise previous data
     summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox]).\
-    then(load_in_previous_data_files, inputs=[summarisation_in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, summarisation_in_previous_data_files_status, data_file_names_textbox]).\
+    then(load_in_previous_data_files, inputs=[duplicate_output_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, summarisation_in_previous_data_files_status, data_file_names_textbox, unique_topics_table_file_textbox]).\
     then(sample_reference_table_summaries, inputs=[master_reference_df_state, master_unique_topics_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown, master_reference_df_state, master_unique_topics_df_state]).\
     then(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, summarised_references_markdown, temperature_slide, data_file_names_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown])
 

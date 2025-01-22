@@ -50,7 +50,7 @@ reset: bool = True
 stream: bool = False
 threads: int = threads
 batch_size:int = 256
-context_length:int = 12288
+context_length:int = 16384
 sample = True
 
 

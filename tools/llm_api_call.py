@@ -34,6 +34,12 @@ timeout_wait = 30 # AWS now seems to have a 60 second minimum wait between API c
 number_of_api_retry_attempts = 5
 max_time_for_loop = 99999
 batch_size_default = 5
+deduplication_threshold = 90
+
+MAX_COMMENT_CHARS = get_or_create_env_var('MAX_COMMENT_CHARS', '14000')
+print(f'The value of MAX_COMMENT_CHARS is {MAX_COMMENT_CHARS}')
+
+max_comment_character_length = int(MAX_COMMENT_CHARS)
 
 AWS_DEFAULT_REGION = get_or_create_env_var('AWS_DEFAULT_REGION', 'eu-west-2')
 print(f'The value of AWS_DEFAULT_REGION is {AWS_DEFAULT_REGION}')
@@ -104,7 +110,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str]):
         if 'reference_table' in file.name:
             try:
                 reference_file_data, reference_file_name = load_in_file(file)
-                print("reference_file_data:", reference_file_data.head(2))
+                #print("reference_file_data:", reference_file_data.head(2))
                 out_message = out_message + " Reference file load successful"
             except Exception as e:
                 out_message = "Could not load reference file data:" + str(e)
@@ -113,7 +119,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str]):
         if 'unique_topics' in file.name:
             try:
                 unique_file_data, unique_file_name = load_in_file(file)
-                print("unique_topics_file:", unique_file_data.head(2))
+                #print("unique_topics_file:", unique_file_data.head(2))
                 out_message = out_message + " Unique table file load successful"
             except Exception as e:
                 out_message = "Could not load unique table file data:" + str(e)
@@ -132,7 +138,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str]):
 
     print(out_message)
             
-    return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name
+    return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name, unique_file_name
 
 def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], output_folder: str, batch_number: int, batch_size: int) -> Tuple[str, str, str]:
     """
@@ -188,7 +194,7 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     simple_file["Response"] = simple_file["Response"].str.strip()  # Remove leading and trailing whitespace
     simple_file["Response"] = simple_file["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
     simple_file["Response"] = simple_file["Response"].str.replace(r'\n{2,}', '\n', regex=True)  # Replace multiple line breaks with a single line break
-    simple_file["Response"] = simple_file["Response"].str.slice(0, 2500) # Maximum 1,500 character responses
+    simple_file["Response"] = simple_file["Response"].str.slice(0, max_comment_character_length) # Maximum 1,500 character responses
 
     # Remove blank and extremely short responses
     simple_file = simple_file.loc[~(simple_file["Response"].isnull()) &\
@@ -988,7 +994,7 @@ def extract_topics(in_data_file,
             # Check if files and text exist
             out_message = "Please enter a data file to summarise."
             print(out_message)
-            return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, out_message
+            return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths#, out_message
 
 
     #model_choice_clean = replace_punctuation_with_underscore(model_choice)
@@ -1087,7 +1093,7 @@ def extract_topics(in_data_file,
         print("summary_out_file_paths:", summary_out_file_paths)
 
         #final_out_message = '\n'.join(out_message)
-        return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, summary_out_file_paths, summary_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, summary_out_file_paths
+        return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, summary_out_file_paths, summary_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths
        
     
     if num_batches > 0:
@@ -1108,7 +1114,7 @@ def extract_topics(in_data_file,
     if model_choice == "anthropic.claude-3-sonnet-20240229-v1:0" and file_data.shape[1] > 300:
         out_message = "Your data has more than 300 rows, using the Sonnet model will be too expensive. Please choose the Haiku model instead."
         print(out_message)
-        return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, out_message
+        return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths#, out_message
         
     topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
     topics_loop = tqdm(range(latest_batch_completed, num_batches), desc = topics_loop_description, unit="batches remaining")
@@ -1440,74 +1446,125 @@ def extract_topics(in_data_file,
 
     print(final_message_out) 
 
-    return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths
+    return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths
 
 # SUMMARISATION FUNCTIONS
 
-def deduplicate_categories(category_series: pd.Series, join_series:pd.Series, threshold: float = 80) -> pd.DataFrame:
+def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, merge_sentiment:str="Yes", threshold: float = deduplication_threshold) -> pd.DataFrame:
     """
-    Deduplicates similar category names in a pandas Series based on a fuzzy matching threshold.
-    
+    Deduplicates similar category names in a pandas Series based on a fuzzy matching threshold,
+    merging smaller topics into larger topics.
+
     Parameters:
         category_series (pd.Series): Series containing category names to deduplicate.
-        join_series (pd.Series): Additional series used for joining back to original results
+        join_series (pd.Series): Additional series used for joining back to original results.
+        reference_df (pd.DataFrame): DataFrame containing the reference data to count occurrences.
         threshold (float): Similarity threshold for considering two strings as duplicates.
-        
+
     Returns:
         pd.DataFrame: DataFrame with columns ['old_category', 'deduplicated_category'].
     """
+    # Count occurrences of each category in the reference_df
+    category_counts = reference_df['Subtopic'].value_counts().to_dict()
+
     # Initialize the result dictionary
     deduplication_map = {}
-    
-    # Iterate through each category in the series
+
+    # First pass: Handle exact matches
+    for category in category_series.unique():
+        if category in deduplication_map:
+            continue
+            
+        # Find all exact matches
+        exact_matches = category_series[category_series.str.lower() == category.lower()].index.tolist()
+        if len(exact_matches) > 1:
+            # Find the variant with the highest count
+            match_counts = {match: category_counts.get(category_series[match], 0) for match in exact_matches}
+            most_common = max(match_counts.items(), key=lambda x: x[1])[0]
+            most_common_category = category_series[most_common]
+            
+            # Map all exact matches to the most common variant
+            for match in exact_matches:
+                deduplication_map[category_series[match]] = most_common_category
+
+    # Second pass: Handle fuzzy matches for remaining categories
     for category in category_series.unique():
         # Skip if the category is already processed
         if category in deduplication_map:
             continue
 
         # Find close matches to the current category, excluding the current category itself
-        matches = process.extract(category, [cat for cat in category_series.unique() if cat != category], scorer=fuzz.token_set_ratio, score_cutoff=threshold)
-        
-        # Select the match with the highest score
+        matches = process.extract(category, 
+                                [cat for cat in category_series.unique() if cat != category], 
+                                scorer=fuzz.token_set_ratio, 
+                                score_cutoff=threshold)
+
         if matches:  # Check if there are any matches
             best_match = max(matches, key=lambda x: x[1])  # Get the match with the highest score
             match, score, _ = best_match  # Unpack the best match
-            #print("Best match:", match, "score:", score)
-            deduplication_map[match] = category  # Map the best match to the current category
-    
+
+            # Compare counts to ensure smaller topics merge into larger ones
+            if category_counts.get(category, 0) < category_counts.get(match, 0):
+                deduplication_map[category] = match  # Map the smaller category to the larger one
+            else:
+                deduplication_map[match] = category  # Map the larger category to the smaller one
+        else:
+            deduplication_map[category] = category  # No match found, keep the category as is
+
     # Create the result DataFrame
-    result_df = pd.DataFrame({
-        'old_category': category_series + " | " + join_series,
-        'deduplicated_category': category_series.map(deduplication_map)
-    })
-    
+    if merge_sentiment == "Yes":
+        result_df = pd.DataFrame({
+            'old_category': category_series + " | " + join_series,
+            'deduplicated_category': category_series.map(lambda x: deduplication_map.get(x, x))
+        })
+    else:
+        result_df = pd.DataFrame({
+            'old_category': category_series + " | " + join_series,
+            'deduplicated_category': category_series.map(lambda x: deduplication_map.get(x, x))
+        })
+
     return result_df
 
-def sample_reference_table_summaries(reference_df:pd.DataFrame,
-                                     unique_topics_df:pd.DataFrame,
-                                     random_seed:int,
-                                     deduplicate_topics:str="Yes",
-                                     no_of_sampled_summaries:int=150):
-    
-    all_summaries = pd.DataFrame()
+def deduplicate_topics(reference_df,
+                       unique_topics_df,
+                       reference_table_file_name:str,
+                       unique_topics_table_file_name:str,
+                       merge_sentiment:str= "No",
+                       merge_general_topics:str="No",
+                       score_threshold:int=deduplication_threshold,
+                       deduplicate_topics:str="Yes"):
+    '''
+    Deduplicate topics based on a reference and unique topics table
+    '''
+    output_files = []
 
-    # Remove duplicate topics
+    reference_table_file_name_no_ext = get_file_path_end(reference_table_file_name)
+    unique_topics_table_file_name_no_ext = get_file_path_end(unique_topics_table_file_name)
+
+    # Run through this x times to try to get all duplicate topics
     if deduplicate_topics == "Yes":
-
-        # Run through this three times to try to get all duplicate topics
-        for i in range(0, 3):
-            print("Run:", i)
-            # First, combine duplicate topics in reference_df
-            reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
-
-            reference_df_unique = reference_df.drop_duplicates("old_category")
+        for i in range(0, 5):
+            #print("Deduplication run:", i)
+            
 
             #reference_df_unique[["old_category"]].to_csv(output_folder + "reference_df_unique_old_categories_" + str(i) + ".csv", index=None)
 
-            # Deduplicate categories within each sentiment group
-            deduplicated_topic_map_df = reference_df_unique.groupby("Sentiment").apply(
-                lambda group: deduplicate_categories(group["Subtopic"], group["Sentiment"], threshold=80)
-            ).reset_index(drop=True)  # Reset index after groupby
+            if merge_sentiment == "No":
+                # First, combine duplicate topics in reference_df
+                reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
+                reference_df_unique = reference_df.drop_duplicates("old_category")
+
+                # Deduplicate categories within each sentiment group
+                deduplicated_topic_map_df = reference_df_unique.groupby("Sentiment").apply(
+                    lambda group: deduplicate_categories(group["Subtopic"], group["Sentiment"], reference_df, threshold=score_threshold)
+                ).reset_index(drop=True)  # Reset index after groupby
+            else:
+                # Deduplicate categories by subtopic name only
+                # First, combine duplicate topics in reference_df
+                reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
+                reference_df_unique = reference_df.drop_duplicates("old_category")
+
+                deduplicated_topic_map_df = deduplicate_categories(reference_df_unique["Subtopic"], reference_df_unique["Sentiment"], reference_df, merge_sentiment=merge_sentiment, threshold=score_threshold).reset_index(drop=True)
            
             if deduplicated_topic_map_df['deduplicated_category'].isnull().all():
             # Check if 'deduplicated_category' contains any values
@@ -1515,10 +1572,11 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
             else:
                 # Join deduplicated columns back to original df
+                deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
                 # Remove rows where 'deduplicated_category' is blank or NaN
-                deduplicated_topic_map_df = deduplicated_topic_map_df.loc[(deduplicated_topic_map_df['deduplicated_category'].str.strip() != '') & ~(deduplicated_topic_map_df['deduplicated_category'].isnull()), :]
+                deduplicated_topic_map_df = deduplicated_topic_map_df.loc[(deduplicated_topic_map_df['deduplicated_category'].str.strip() != '') & ~(deduplicated_topic_map_df['deduplicated_category'].isnull()), ['old_category','deduplicated_category']]
 
-                #deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
+                deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
 
                 reference_df = reference_df.merge(deduplicated_topic_map_df, on="old_category", how="left")
 
@@ -1541,9 +1599,65 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
             reference_df["Subtopic"] = reference_df["Subtopic"].str.lower().str.capitalize() 
             reference_df["Sentiment"] = reference_df["Sentiment"].str.lower().str.capitalize() 
 
+            if merge_general_topics == "Yes":
+                # Replace General topic names for each Subtopic with that for the Subtopic with the most responses
+                # Step 1: Count the number of occurrences for each General Topic and Subtopic combination
+                count_df = reference_df.groupby(['Subtopic', 'General Topic']).size().reset_index(name='Count')
+
+                # Step 2: Find the General Topic with the maximum count for each Subtopic
+                max_general_topic = count_df.loc[count_df.groupby('Subtopic')['Count'].idxmax()]
+
+                # Step 3: Map the General Topic back to the original DataFrame
+                reference_df = reference_df.merge(max_general_topic[['Subtopic', 'General Topic']], on='Subtopic', suffixes=('', '_max'), how='left')
+
+                reference_df['General Topic'] = reference_df["General Topic_max"].combine_first(reference_df["General Topic"])        
+
+            if merge_sentiment == "Yes":
+                # Step 1: Count the number of occurrences for each General Topic and Subtopic combination
+                count_df = reference_df.groupby(['Subtopic', 'Sentiment']).size().reset_index(name='Count')
+
+                # Step 2: Determine the number of unique Sentiment values for each Subtopic
+                unique_sentiments = count_df.groupby('Subtopic')['Sentiment'].nunique().reset_index(name='UniqueCount')
+
+                # Step 3: Update Sentiment to 'Mixed' where there is more than one unique sentiment
+                reference_df = reference_df.merge(unique_sentiments, on='Subtopic', how='left')
+                reference_df['Sentiment'] = reference_df.apply(
+                    lambda row: 'Mixed' if row['UniqueCount'] > 1 else row['Sentiment'],
+                    axis=1
+                )
+
+                # Clean up the DataFrame by dropping the UniqueCount column
+                reference_df.drop(columns=['UniqueCount'], inplace=True)
+
+            reference_df = reference_df[["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group"]]
+
         # Remake unique_topics_df based on new reference_df
         unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
 
+        reference_table_file_name_no_ext = get_file_path_end(reference_table_file_name)
+        unique_topics_table_file_name_no_ext = get_file_path_end(unique_topics_table_file_name)
+
+        reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
+        unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
+        reference_df.to_csv(reference_file_path, index = None)
+        unique_topics_df.to_csv(unique_topics_file_path, index=None)
+
+        output_files.append(reference_file_path)
+        output_files.append(unique_topics_file_path)
+
+    return reference_df, unique_topics_df, output_files
+
+def sample_reference_table_summaries(reference_df:pd.DataFrame,
+                                     unique_topics_df:pd.DataFrame,
+                                     random_seed:int,
+                                     no_of_sampled_summaries:int=150):
+    
+    '''
+    Sample x number of summaries from which to produce summaries, so that the input token length is not too long.
+    '''
+    
+    all_summaries = pd.DataFrame()
+    output_files = []
 
     reference_df_grouped = reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
 
@@ -1629,6 +1743,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             out_metadata_str:str = "",
                             output_files:list = [],
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
+                            do_summaries="Yes",
                             progress=gr.Progress(track_tqdm=True)):
     '''
     Create better summaries of the raw batch-level summaries created in the first run of the model.
@@ -1711,39 +1826,40 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
     summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
 
-    for summary_no in summary_loop:
+    if do_summaries == "Yes":
+        for summary_no in summary_loop:
 
-        print("Current summary number is:", summary_no)
+            print("Current summary number is:", summary_no)
 
-        summary_text = all_summaries[summary_no]
-        #print("summary_text:", summary_text)
-        formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text)]
+            summary_text = all_summaries[summary_no]
+            #print("summary_text:", summary_text)
+            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text)]
 
-        try:
-            response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
-            summarised_output = response
-            summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
-            summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
-            summarised_output = summarised_output.strip()
-        except Exception as e:
-            print(e)
-            summarised_output = ""
+            try:
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
+                summarised_output = response
+                summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
+                summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
+                summarised_output = summarised_output.strip()
+            except Exception as e:
+                print(e)
+                summarised_output = ""
 
-        summarised_outputs.append(summarised_output)
-        out_metadata.extend(metadata)
-        out_metadata_str = '. '.join(out_metadata)
+            summarised_outputs.append(summarised_output)
+            out_metadata.extend(metadata)
+            out_metadata_str = '. '.join(out_metadata)
 
-        latest_summary_completed += 1
+            latest_summary_completed += 1
 
-        # Check if beyond max time allowed for processing and break if necessary
-        toc = time.perf_counter()
-        time_taken = tic - toc
+            # Check if beyond max time allowed for processing and break if necessary
+            toc = time.perf_counter()
+            time_taken = tic - toc
 
-        if time_taken > max_time_for_loop:
-            print("Time taken for loop is greater than maximum time allowed. Exiting and restarting loop")
-            summary_loop.close()
-            tqdm._instances.clear()
-            break
+            if time_taken > max_time_for_loop:
+                print("Time taken for loop is greater than maximum time allowed. Exiting and restarting loop")
+                summary_loop.close()
+                tqdm._instances.clear()
+                break
 
     # If all summaries completeed
     if latest_summary_completed >= length_all_summaries:
