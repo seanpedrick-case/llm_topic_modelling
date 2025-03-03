@@ -46,14 +46,14 @@ def get_or_create_env_var(var_name, default_value):
 RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
-RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "0")
+RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
 print(f'The value of RUN_LOCAL_MODEL is {RUN_LOCAL_MODEL}')
 
 if RUN_AWS_FUNCTIONS == "1":
-    model_full_names = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "gemini-1.5-flash-002", "gemini-1.5-pro-002", "gemma_2b_it_local"]
+    model_full_names = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "gemini-2.0-flash", "gemini-1.5-pro-002", "gemma_2b_it_local"]
     model_short_names = ["haiku", "sonnet", "gemini_flash", "gemini_pro", "gemma_local"]
 else:
-    model_full_names = ["gemini-1.5-flash-002", "gemini-1.5-pro-002", "gemma_2b_it_local"]
+    model_full_names = ["gemini-2.0-flash", "gemini-1.5-pro-002", "gemma_2b_it_local"]
     model_short_names = ["gemini_flash", "gemini_pro", "gemma_local"]
 
 if RUN_LOCAL_MODEL == "0":
@@ -76,7 +76,7 @@ def get_file_path_with_extension(file_path):
     # Return the basename with its extension
     return basename
 
-def get_file_path_end(file_path):
+def get_file_name_no_ext(file_path):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
     basename = os.path.basename(file_path)
     
@@ -246,10 +246,6 @@ def put_columns_in_df(in_file):
                 # Read each sheet into a DataFrame
                 df = pd.read_excel(file_name, sheet_name=sheet_name)
 
-                # Process the DataFrame (e.g., print its contents)
-                print(f"Sheet Name: {sheet_name}")
-                print(df.head())  # Print the first few rows
-
                 new_choices.extend(list(df.columns))
 
             all_sheet_names.extend(new_sheet_names)
@@ -261,10 +257,10 @@ def put_columns_in_df(in_file):
         concat_choices.extend(new_choices)
         
     # Drop duplicate columns
-    concat_choices = list(set(concat_choices))
+    concat_choices = sorted(set(concat_choices))
 
     if number_of_excel_files > 0:      
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True), file_end
+        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), file_end
     else:
         return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(visible=False), file_end
 

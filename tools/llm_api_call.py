@@ -20,7 +20,7 @@ from io import StringIO
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, create_general_topics_system_prompt, create_general_topics_prompt
-from tools.helper_functions import output_folder, detect_file_type, get_file_path_end, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text
+from tools.helper_functions import output_folder, detect_file_type, get_file_name_no_ext, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text
 from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model, load_model, RUN_LOCAL_MODEL
 
 # ResponseObject class for AWS Bedrock calls
@@ -65,9 +65,9 @@ def load_in_file(file_path: str, colname:str=""):
     - file_path (str): The path to the file to be processed.
     """
     file_type = detect_file_type(file_path)
-    print("File type is:", file_type)
+    #print("File type is:", file_type)
 
-    file_name = get_file_path_end(file_path)
+    file_name = get_file_name_no_ext(file_path)
     file_data = read_file(file_path)
 
     if colname:
@@ -140,6 +140,14 @@ def load_in_previous_data_files(file_paths_partial_output:List[str]):
             
     return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name, unique_file_name
 
+def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str]) -> pd.DataFrame:
+    basic_response_data = file_data[[chosen_cols]].reset_index(names="Reference")
+    basic_response_data["Reference"] = basic_response_data["Reference"].astype(int) + 1
+    basic_response_data = basic_response_data.rename(columns={chosen_cols: "Response"})
+    basic_response_data["Response"] = basic_response_data["Response"].str.strip()
+
+    return basic_response_data
+
 def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], output_folder: str, batch_number: int, batch_size: int) -> Tuple[str, str, str]:
     """
     Processes a file by simplifying its content based on chosen columns and saves the result to a specified output folder.
@@ -163,11 +171,9 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     simplified_csv_table_path = ""
 
     # Simplify table to just responses column and the Response reference number
-    simple_file = file_data[[chosen_cols]].reset_index(names="Reference")
-    simple_file["Reference"] = simple_file["Reference"].astype(int) + 1
-    simple_file = simple_file.rename(columns={chosen_cols: "Response"})
-    simple_file["Response"] = simple_file["Response"].str.strip()
-    file_len = len(simple_file["Reference"])
+    basic_response_data = get_basic_response_data(file_data, chosen_cols)
+    
+    file_len = len(basic_response_data["Reference"])
    
 
      # Subset the data for the current batch
@@ -181,35 +187,35 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     else:
         end_row = file_len + 1
 
-    simple_file = simple_file[start_row:end_row]  # Select the current batch
+    batch_basic_response_data = basic_response_data[start_row:end_row]  # Select the current batch
 
     # Now replace the reference numbers with numbers starting from 1
-    simple_file["Reference"] = simple_file["Reference"] - start_row
+    batch_basic_response_data["Reference"] = batch_basic_response_data["Reference"] - start_row
 
-    #print("simple_file:", simple_file)
+    #print("batch_basic_response_data:", batch_basic_response_data)
 
     # Remove problematic characters including ASCII and various quote marks
         # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
-    simple_file["Response"] = simple_file["Response"].str.replace(r'[\x00-\x1F\x7F]|[""<>]|\\', '', regex=True)  # Remove control and special characters
-    simple_file["Response"] = simple_file["Response"].str.strip()  # Remove leading and trailing whitespace
-    simple_file["Response"] = simple_file["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
-    simple_file["Response"] = simple_file["Response"].str.replace(r'\n{2,}', '\n', regex=True)  # Replace multiple line breaks with a single line break
-    simple_file["Response"] = simple_file["Response"].str.slice(0, max_comment_character_length) # Maximum 1,500 character responses
+    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.replace(r'[\x00-\x1F\x7F]|[""<>]|\\', '', regex=True)  # Remove control and special characters
+    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.strip()  # Remove leading and trailing whitespace
+    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
+    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.replace(r'\n{2,}', '\n', regex=True)  # Replace multiple line breaks with a single line break
+    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.slice(0, max_comment_character_length) # Maximum 1,500 character responses
 
     # Remove blank and extremely short responses
-    simple_file = simple_file.loc[~(simple_file["Response"].isnull()) &\
-                                  ~(simple_file["Response"] == "None") &\
-                                  ~(simple_file["Response"] == " ") &\
-                                  ~(simple_file["Response"] == ""),:]#~(simple_file["Response"].str.len() < 5), :]
+    batch_basic_response_data = batch_basic_response_data.loc[~(batch_basic_response_data["Response"].isnull()) &\
+                                  ~(batch_basic_response_data["Response"] == "None") &\
+                                  ~(batch_basic_response_data["Response"] == " ") &\
+                                  ~(batch_basic_response_data["Response"] == ""),:]#~(batch_basic_response_data["Response"].str.len() < 5), :]
 
     #simplified_csv_table_path = output_folder + 'simple_markdown_table_' + file_name + '_row_' + str(start_row) + '_to_' + str(end_row) + '.csv'
-    #simple_file.to_csv(simplified_csv_table_path, index=None)
+    #batch_basic_response_data.to_csv(simplified_csv_table_path, index=None)
 
-    simple_markdown_table = simple_file.to_markdown(index=None)
+    simple_markdown_table = batch_basic_response_data.to_markdown(index=None)
 
     normalised_simple_markdown_table = normalise_string(simple_markdown_table)
 
-    return simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, simple_file
+    return simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_data
 
 def replace_punctuation_with_underscore(input_string):
     # Create a translation table where each punctuation character maps to '_'
@@ -368,7 +374,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     progress_bar = range(0,number_of_api_retry_attempts)
 
     # Generate the model's response
-    if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+    if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
 
         for i in progress_bar:
             try:
@@ -841,7 +847,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     # Create a new DataFrame from the reference data
     new_reference_df = pd.DataFrame(reference_data)
 
-    print("new_reference_df:", new_reference_df)
+    #print("new_reference_df:", new_reference_df)
     
     # Append on old reference data
     out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(how='all')
@@ -1040,10 +1046,15 @@ def extract_topics(in_data_file,
         # Save outputs for each batch. If master file created, label file as master
         file_path_details = f"{file_name}_col_{in_column_cleaned}"
 
+        # Create a pivoted reference table
+        existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)
+
         # Save the new DataFrame to CSV
         #topic_table_out_path = output_folder + batch_file_path_details + "_topic_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_pivot_path = output_folder + file_path_details + "_final_reference_table_pivot_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
         reference_table_out_path = output_folder + file_path_details + "_final_reference_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv" 
-        unique_topics_df_out_path = output_folder +file_path_details + "_final_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+        unique_topics_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+        basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
 
         # Write outputs to csv
         ## Topics with references
@@ -1058,19 +1069,32 @@ def extract_topics(in_data_file,
         existing_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
         out_file_paths.append(unique_topics_df_out_path)
 
+        # Ensure that we are only returning the final results to outputs
+        out_file_paths = [x for x in out_file_paths if '_final_' in x]
+
+        ## Reference table mapping response numbers to topics
+        existing_reference_df_pivot.to_csv(reference_table_out_pivot_path, index = None)
+        log_files_output_paths.append(reference_table_out_pivot_path)
+
         ## Create a dataframe for missing response references:
         # Assuming existing_reference_df and file_data are already defined
 
         # Simplify table to just responses column and the Response reference number
-        simple_file = file_data[[chosen_cols]].reset_index(names="Reference")
-        simple_file["Reference"] = simple_file["Reference"].astype(int) + 1
-        simple_file = simple_file.rename(columns={chosen_cols: "Response"})
-        simple_file["Response"] = simple_file["Response"].str.strip()
+        
+
+        basic_response_data = get_basic_response_data(file_data, chosen_cols)
+
+        #print("basic_response_data:", basic_response_data)
+
+        # Save simplified file data to log outputs
+        pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None)
+        log_files_output_paths.append(basic_response_data_out_path)
+
 
         # Step 1: Identify missing references
-        #print("simple_file:", simple_file)
+        #print("basic_response_data:", basic_response_data)
 
-        missing_references = simple_file[~simple_file['Reference'].astype(str).isin(existing_reference_df['Response References'].astype(str).unique())]
+        missing_references = basic_response_data[~basic_response_data['Reference'].astype(str).isin(existing_reference_df['Response References'].astype(str).unique())]
 
         # Step 2: Create a new DataFrame with the same columns as existing_reference_df
         missing_df = pd.DataFrame(columns=existing_reference_df.columns)
@@ -1126,21 +1150,21 @@ def extract_topics(in_data_file,
         print("Running query batch", str(reported_batch_no))
 
         # Call the function to prepare the input table
-        simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, simple_table_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, output_folder, latest_batch_completed, batch_size)
-        log_files_output_paths.append(simplified_csv_table_path)
+        simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, output_folder, latest_batch_completed, batch_size)
+        #log_files_output_paths.append(simplified_csv_table_path)
 
 
         # Conversation history
         conversation_history = []
 
-        print("normalised_simple_markdown_table:", normalised_simple_markdown_table)
+        #print("normalised_simple_markdown_table:", normalised_simple_markdown_table)
 
         # If the latest batch of responses contains at least one instance of text
-        if not simple_table_df.empty:
+        if not batch_basic_response_df.empty:
 
             print("latest_batch_completed:", latest_batch_completed)
 
-            print("candidate_topics:", candidate_topics)
+            #print("candidate_topics:", candidate_topics)
 
             # If this is the second batch, the master table will refer back to the current master table when assigning topics to the new table. Also runs if there is an existing list of topics supplied by the user
             if latest_batch_completed >= 1 or candidate_topics is not None:
@@ -1148,7 +1172,7 @@ def extract_topics(in_data_file,
                 #print("normalised_simple_markdown_table:", normalised_simple_markdown_table)
 
                 # Prepare Gemini models before query       
-                if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+                if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
                     print("Using Gemini model:", model_choice)
                     model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=add_existing_topics_system_prompt, max_tokens=max_tokens)
                 elif model_choice in ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"]:
@@ -1323,14 +1347,14 @@ def extract_topics(in_data_file,
                 out_file_paths = [col for col in out_file_paths if str(reported_batch_no) in col]
                 log_files_output_paths = [col for col in out_file_paths if str(reported_batch_no) in col]
 
-                print("out_file_paths at end of loop:", out_file_paths)
+                #print("out_file_paths at end of loop:", out_file_paths)
 
             # If this is the first batch, run this
             else:
                 #system_prompt = system_prompt + normalised_simple_markdown_table
 
                 # Prepare Gemini models before query       
-                if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+                if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
                     print("Using Gemini model:", model_choice)
                     model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
                 else:
@@ -1418,8 +1442,8 @@ def extract_topics(in_data_file,
         else:
             print("Current batch of responses contains no text, moving onto next. Batch number:", str(latest_batch_completed + 1), ". Start row:", start_row, ". End row:", end_row)
 
-        # Increase latest file completed count unless we are at the last file
-        if latest_batch_completed != num_batches:
+        # Increase latest file completed count unless we are over the last batch number
+        if latest_batch_completed <= num_batches:
             print("Completed batch number:", str(reported_batch_no))
             latest_batch_completed += 1 
 
@@ -1444,9 +1468,43 @@ def extract_topics(in_data_file,
     final_message_out = '\n'.join(out_message)
     final_message_out = final_message_out + " " + out_time  
 
-    print(final_message_out) 
+    print(final_message_out)
+
+    #print("out_file_paths:", out_file_paths)
+    #print("log_files_output_paths:", log_files_output_paths)
 
     return display_table, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths
+
+def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:pd.DataFrame=pd.DataFrame()):
+
+    df_in = df[['Response References', 'General Topic', 'Subtopic', 'Sentiment']].copy()
+
+    df_in['Response References'] = df_in['Response References'].astype(int)
+
+    # Create a combined category column
+    df_in['Category'] = df_in['General Topic'] + ' - ' + df_in['Subtopic'] + ' - ' + df_in['Sentiment']
+    
+    # Create pivot table counting occurrences of each unique combination
+    pivot_table = pd.crosstab(
+        index=df_in['Response References'],
+        columns=[df_in['General Topic'], df_in['Subtopic'], df_in['Sentiment']],
+        margins=True
+    )
+    
+    # Flatten column names to make them more readable
+    pivot_table.columns = [' - '.join(col) for col in pivot_table.columns]
+
+    pivot_table.reset_index(inplace=True)
+
+    if not basic_response_data.empty:
+        pivot_table = basic_response_data.merge(pivot_table, right_on="Response References", left_on="Reference", how="left")
+
+        pivot_table.drop("Response References", axis=1, inplace=True)
+
+    # print("pivot_table:", pivot_table)
+
+    return pivot_table
+
 
 # SUMMARISATION FUNCTIONS
 
@@ -1525,21 +1583,28 @@ def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, r
 
     return result_df
 
-def deduplicate_topics(reference_df,
-                       unique_topics_df,
+def deduplicate_topics(reference_df:pd.DataFrame,
+                       unique_topics_df:pd.DataFrame,
                        reference_table_file_name:str,
                        unique_topics_table_file_name:str,
                        merge_sentiment:str= "No",
                        merge_general_topics:str="No",
                        score_threshold:int=deduplication_threshold,
-                       deduplicate_topics:str="Yes"):
+                       in_data_files=[],
+                       chosen_cols:List[str]="",
+                       deduplicate_topics:str="Yes"
+                       ):
     '''
     Deduplicate topics based on a reference and unique topics table
     '''
     output_files = []
+    log_output_files = []
 
-    reference_table_file_name_no_ext = get_file_path_end(reference_table_file_name)
-    unique_topics_table_file_name_no_ext = get_file_path_end(unique_topics_table_file_name)
+    reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+    unique_topics_table_file_name_no_ext = get_file_name_no_ext(unique_topics_table_file_name)
+
+    if in_data_files and chosen_cols:
+        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(in_data_files, chosen_cols, 1)
 
     # Run through this x times to try to get all duplicate topics
     if deduplicate_topics == "Yes":
@@ -1572,7 +1637,7 @@ def deduplicate_topics(reference_df,
 
             else:
                 # Join deduplicated columns back to original df
-                deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
+                #deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
                 # Remove rows where 'deduplicated_category' is blank or NaN
                 deduplicated_topic_map_df = deduplicated_topic_map_df.loc[(deduplicated_topic_map_df['deduplicated_category'].str.strip() != '') & ~(deduplicated_topic_map_df['deduplicated_category'].isnull()), ['old_category','deduplicated_category']]
 
@@ -1634,8 +1699,12 @@ def deduplicate_topics(reference_df,
         # Remake unique_topics_df based on new reference_df
         unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
 
-        reference_table_file_name_no_ext = get_file_path_end(reference_table_file_name)
-        unique_topics_table_file_name_no_ext = get_file_path_end(unique_topics_table_file_name)
+        basic_response_data = get_basic_response_data(file_data, chosen_cols)
+
+        reference_df_pivot = convert_reference_table_to_pivot_table(reference_df, basic_response_data)
+
+        reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+        unique_topics_table_file_name_no_ext = get_file_name_no_ext(unique_topics_table_file_name)
 
         reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
         unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
@@ -1645,7 +1714,12 @@ def deduplicate_topics(reference_df,
         output_files.append(reference_file_path)
         output_files.append(unique_topics_file_path)
 
-    return reference_df, unique_topics_df, output_files
+        reference_pivot_file_path = output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
+        reference_df_pivot.to_csv(reference_pivot_file_path, index=None)
+
+        log_output_files.append(reference_pivot_file_path)
+
+    return reference_df, unique_topics_df, output_files, log_output_files
 
 def sample_reference_table_summaries(reference_df:pd.DataFrame,
                                      unique_topics_df:pd.DataFrame,
@@ -1700,7 +1774,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation_metadata = []
 
     # Prepare Gemini models before query       
-    if model_choice in ["gemini-1.5-flash-002", "gemini-1.5-pro-002"]:
+    if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
         print("Using Gemini model:", model_choice)
         model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
     else:
@@ -1741,6 +1815,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             summarised_outputs:list = [],  
                             latest_summary_completed:int = 0,
                             out_metadata_str:str = "",
+                            in_data_files:List[str]=[],
+                            chosen_cols:List[str]=[],
                             output_files:list = [],
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries="Yes",
@@ -1750,6 +1826,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     '''
     out_metadata = []
     local_model = []
+    log_output_files = []
     summarised_output_markdown = ""
     
     print("In summarise_output_topics function.")
@@ -1757,6 +1834,10 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     all_summaries = summarised_references["Summary"].tolist()
 
     length_all_summaries = len(all_summaries)
+
+    # Load in data file and chosen columns if exists to create pivot table later
+    if in_data_files and chosen_cols:
+        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(in_data_files, chosen_cols, 1)
 
     #print("latest_summary_completed:", latest_summary_completed)
     #print("length_all_summaries:", length_all_summaries)
@@ -1798,7 +1879,12 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         # Remove topics that are tagged as 'Not Mentioned'
         unique_table_df_revised = unique_table_df_revised.loc[unique_table_df_revised["Sentiment"] != "Not Mentioned", :]
         reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]
+        
+        basic_response_data = get_basic_response_data(file_data, chosen_cols)        
 
+        reference_table_df_revised_pivot = convert_reference_table_to_pivot_table(reference_table_df_revised, basic_response_data)
+
+        # Save to file
         unique_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
         unique_table_df_revised.to_csv(unique_table_df_revised_path, index = None)
 
@@ -1807,11 +1893,18 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
         output_files.extend([reference_table_df_revised_path, unique_table_df_revised_path])
 
+        ### Save pivot file to log area
+        reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
+        reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None)
+
+        log_output_files.append(reference_table_df_revised_pivot_path)
+
+        ###
         unique_table_df_revised_display = unique_table_df_revised.apply(lambda col: col.map(wrap_text))
 
         summarised_output_markdown = unique_table_df_revised_display.to_markdown(index=False)
 
-        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown
+        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
 
     tic = time.perf_counter()
     
@@ -1865,4 +1958,4 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     if latest_summary_completed >= length_all_summaries:
         print("At last summary.")
 
-    return summarised_references, unique_table_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown
+    return summarised_references, unique_table_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
