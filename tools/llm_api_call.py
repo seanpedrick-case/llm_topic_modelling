@@ -196,11 +196,11 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
 
     # Remove problematic characters including ASCII and various quote marks
         # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
-    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.replace(r'[\x00-\x1F\x7F]|[""<>]|\\', '', regex=True)  # Remove control and special characters
-    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.strip()  # Remove leading and trailing whitespace
-    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
-    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.replace(r'\n{2,}', '\n', regex=True)  # Replace multiple line breaks with a single line break
-    batch_basic_response_data["Response"] = batch_basic_response_data["Response"].str.slice(0, max_comment_character_length) # Maximum 1,500 character responses
+    batch_basic_response_data.loc[:, "Response"]= batch_basic_response_data["Response"].str.replace(r'[\x00-\x1F\x7F]|[""<>]|\\', '', regex=True)  # Remove control and special characters
+    batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data["Response"].str.strip()  # Remove leading and trailing whitespace
+    batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
+    batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data["Response"].str.replace(r'\n{2,}', '\n', regex=True)  # Replace multiple line breaks with a single line break
+    batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data["Response"].str.slice(0, max_comment_character_length) # Maximum 1,500 character responses
 
     # Remove blank and extremely short responses
     batch_basic_response_data = batch_basic_response_data.loc[~(batch_basic_response_data["Response"].isnull()) &\
@@ -854,6 +854,12 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     # Remove duplicate Response references for the same topic
     out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+
+    # Try converting response references column to int, keep as string if fails
+    try:
+        out_reference_df["Response References"] = out_reference_df["Response References"].astype(int)
+    except Exception as e:
+        print("Could not convert Response References column to integer due to", e)
 
     out_reference_df.sort_values(["Start row of group", "Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True) 
 
@@ -1817,7 +1823,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             out_metadata_str:str = "",
                             in_data_files:List[str]=[],
                             chosen_cols:List[str]=[],
-                            output_files:list = [],
+                            log_output_files:list[str]=[],
+                            output_files:list[str] = [],                            
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries="Yes",
                             progress=gr.Progress(track_tqdm=True)):
@@ -1826,7 +1833,6 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     '''
     out_metadata = []
     local_model = []
-    log_output_files = []
     summarised_output_markdown = ""
     
     print("In summarise_output_topics function.")
@@ -1835,12 +1841,23 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     length_all_summaries = len(all_summaries)
 
+    # Check for data for summarisations
+    if not unique_table_df.empty and not reference_table_df.empty:
+        print("Unique table and reference table data found.")
+    else:
+        out_message = "Please upload a unique topic table and reference table file to continue with summarisation."
+        print(out_message)
+        raise(out_message)
+        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
+
     # Load in data file and chosen columns if exists to create pivot table later
     if in_data_files and chosen_cols:
         file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(in_data_files, chosen_cols, 1)
-
-    #print("latest_summary_completed:", latest_summary_completed)
-    #print("length_all_summaries:", length_all_summaries)
+    else:
+        out_message = "No file data found, please load a data file on the first tab and select a column."
+        print(out_message)
+        raise(out_message)
+        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
 
     # If all summaries completed, make final outputs
     if latest_summary_completed >= length_all_summaries:
@@ -1866,6 +1883,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         summarised_references_j = summarised_references[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
 
         unique_table_df_revised = unique_table_df.merge(summarised_references_j, on = join_cols, how = "left")
+
         # If no new summary is available, keep the original
         unique_table_df_revised["Revised summary"] = unique_table_df_revised["Revised summary"].combine_first(unique_table_df_revised["Summary"])
 
@@ -1903,6 +1921,10 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         unique_table_df_revised_display = unique_table_df_revised.apply(lambda col: col.map(wrap_text))
 
         summarised_output_markdown = unique_table_df_revised_display.to_markdown(index=False)
+
+        # Ensure same file name not returned twice
+        output_files = list(set(output_files))
+        log_output_files = list(set(log_output_files))
 
         return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
 
