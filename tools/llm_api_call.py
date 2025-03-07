@@ -194,8 +194,7 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
 
     #print("batch_basic_response_data:", batch_basic_response_data)
 
-    # Remove problematic characters including ASCII and various quote marks
-        # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
+    # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
     batch_basic_response_data.loc[:, "Response"]= batch_basic_response_data["Response"].str.replace(r'[\x00-\x1F\x7F]|[""<>]|\\', '', regex=True)  # Remove control and special characters
     batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data["Response"].str.strip()  # Remove leading and trailing whitespace
     batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data["Response"].str.replace(r'\s+', ' ', regex=True)  # Replace multiple spaces with a single space
@@ -927,6 +926,7 @@ def extract_topics(in_data_file,
               batch_size:int=50,
               context_textbox:str="",
               time_taken:float = 0,
+              sentiment_checkbox:str = "Negative, Neutral, or Positive",
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,              
@@ -1146,8 +1146,16 @@ def extract_topics(in_data_file,
         print(out_message)
         return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths#, out_message
         
+    
+    if sentiment_checkbox == "Negative, Neutral, or Positive": sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+    elif sentiment_checkbox == "Negative or Positive": sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative or Positive"
+    elif sentiment_checkbox == "Do not assess sentiment": sentiment_prompt = "Create a third column containing only the text 'Not assessed'"
+    else: sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+    
     topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
     topics_loop = tqdm(range(latest_batch_completed, num_batches), desc = topics_loop_description, unit="batches remaining")
+
+
 
     
     for i in topics_loop:       
@@ -1158,6 +1166,7 @@ def extract_topics(in_data_file,
         # Call the function to prepare the input table
         simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, output_folder, latest_batch_completed, batch_size)
         #log_files_output_paths.append(simplified_csv_table_path)
+
 
 
         # Conversation history
@@ -1279,7 +1288,7 @@ def extract_topics(in_data_file,
 
                 # Format the summary prompt with the response table and topics
                 formatted_system_prompt = add_existing_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
-                formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown)
+                formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown, sentiment_choices=sentiment_prompt)
                 
 
                 if model_choice == "gemma_2b_it_local":
@@ -1366,14 +1375,14 @@ def extract_topics(in_data_file,
                 else:
                     print("Using AWS Bedrock model:", model_choice)
 
-                formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table)
-
                 formatted_initial_table_system_prompt = system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
 
-                if prompt2: formatted_prompt2 = prompt2.format(response_table=normalised_simple_markdown_table)
+                formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
+
+                if prompt2: formatted_prompt2 = prompt2.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
                 else: formatted_prompt2 = prompt2
                 
-                if prompt3: formatted_prompt3 = prompt3.format(response_table=normalised_simple_markdown_table)
+                if prompt3: formatted_prompt3 = prompt3.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
                 else: formatted_prompt3 = prompt3
 
                 if model_choice == "gemma_2b_it_local":
@@ -1824,6 +1833,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             in_data_files:List[str]=[],
                             chosen_cols:List[str]=[],
                             log_output_files:list[str]=[],
+                            summarise_format_radio:str="Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
                             output_files:list[str] = [],                            
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries="Yes",
@@ -1948,7 +1958,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
             summary_text = all_summaries[summary_no]
             #print("summary_text:", summary_text)
-            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text)]
+            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
 
             try:
                 response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)

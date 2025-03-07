@@ -6,7 +6,7 @@ initial_table_prompt = """The open text data is shown in the following table tha
 Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
 In the first column identify general topics relevant to responses. Create as many general topics as you can.
 In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned.
-In the third column write the sentiment of the subtopic: Negative, Neutral, or Positive.
+In the third column write the sentiment of the subtopic: {sentiment_choices}.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
 In the fifth and final column, write a short summary of the subtopic based on relevant responses. Highlight specific issues that appear in relevant responses.
 Do not add any other columns. Do not repeat Subtopics with the same Sentiment. Return only one table in markdown format containing all relevant topics. Do not add any other text, thoughts, or notes to your response.
@@ -30,7 +30,7 @@ Topics known to be relevant to this dataset are shown in the following Topics ta
 Your task is to create one new markdown table, assigning responses from the Response table to existing topics, or to create new topics if no existing topics are relevant.  
 Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
 In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above if they are very relevant to the text of the Response. Fill in the General Topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible.
-In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive.
+In the third column, write the sentiment of the Subtopic: {sentiment_choices}.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
 In the fifth and final column, write a short summary of the Subtopic based on relevant responses. Highlight specific issues that appear in relevant responses.
 Do not add any other columns. Remove topics from the table that are not assigned to any response. Do not repeat Subtopics with the same Sentiment.
@@ -45,7 +45,7 @@ summarise_topic_descriptions_prompt = """Below is a table with number of paragra
 
 '{summaries}'
 
-Your task is to make a consolidated summary of the above text. Return a summary up to two paragraphs long that includes as much detail as possible from the original text. Return only the summary and no other text.
+Your task is to make a consolidated summary of the above text. {summary_format}. Return only the summary and no other text.
 
 Summary:"""
 
