@@ -106,22 +106,31 @@ def detect_file_type(filename):
     else:
         raise ValueError("Unsupported file type.")
 
-def read_file(filename):
+def read_file(filename:str, sheet:str=""):
     """Read the file based on its detected type."""
     file_type = detect_file_type(filename)
     
     if file_type == 'csv':
         return pd.read_csv(filename, low_memory=False)
     elif file_type == 'xlsx':
-        return pd.read_excel(filename)
+        if sheet:
+            return pd.read_excel(filename, sheet_name=sheet)
+        else:
+            return pd.read_excel(filename)
     elif file_type == 'parquet':
         return pd.read_parquet(filename)
     
 # Wrap text in each column to the specified max width, including whole words
-def wrap_text(text, max_width=60):
+def wrap_text(text:str, max_width=60, max_text_length=None):
     if not isinstance(text, str):
         return text
         
+    # If max_text_length is set, truncate the text and add ellipsis
+    if max_text_length and len(text) > max_text_length:
+        return text[:max_text_length] + '...'
+    
+    text = text.replace('\r\n', '<br>').replace('\n', '<br>')
+    
     words = text.split()
     if not words:
         return text
