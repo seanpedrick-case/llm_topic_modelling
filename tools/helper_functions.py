@@ -15,8 +15,11 @@ def empty_output_vars_extract_topics():
     log_files_output_list_state = []
     conversation_metadata_textbox = ""
     estimated_time_taken_number = 0
+    file_data_state = pd.DataFrame()
+    reference_data_file_name_textbox = ""
+    display_topic_table_markdown = ""
 
-    return master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number
+    return master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown
 
 def empty_output_vars_summarise():
     # Empty output objects before summarising files
@@ -127,7 +130,7 @@ def wrap_text(text:str, max_width=60, max_text_length=None):
         
     # If max_text_length is set, truncate the text and add ellipsis
     if max_text_length and len(text) > max_text_length:
-        return text[:max_text_length] + '...'
+        text = text[:max_text_length] + '...'
     
     text = text.replace('\r\n', '<br>').replace('\n', '<br>')
     
