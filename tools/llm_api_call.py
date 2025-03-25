@@ -1,5 +1,4 @@
 import os
-import os
 import google.generativeai as ai
 import pandas as pd
 import numpy as np
@@ -60,33 +59,51 @@ def normalise_string(text):
     
     return text
 
-def load_in_file(file_path: str, colname:str="", excel_sheet:str=""):
+def load_in_file(file_path: str, colnames:List[str]="", excel_sheet:str=""):
     """
     Loads in a tabular data file and returns data and file name.
 
     Parameters:
     - file_path (str): The path to the file to be processed.
+    - colnames (List[str], optional): list of colnames to load in
     """
+
     file_type = detect_file_type(file_path)
     #print("File type is:", file_type)
 
     file_name = get_file_name_no_ext(file_path)
     file_data = read_file(file_path, excel_sheet)
 
-    if colname:
-        file_data[colname] = file_data[colname].fillna("")
+    print("colnames:", colnames)
 
-        file_data[colname] = file_data[colname].astype(str).str.replace("\bnan\b", "", regex=True)  
+    if colnames and isinstance(colnames, list):
+        col_list = colnames
+    else:
+        col_list = list(file_data.columns)
+
+    if not isinstance(col_list, List):
+        col_list = [col_list]
+
+    col_list = [item for item in col_list if item not in ["", "NA"]]
+
+    for col in col_list:
+        file_data[col] = file_data[col].fillna("")
+        file_data[col] = file_data[col].astype(str).str.replace("\bnan\b", "", regex=True)  
         
-        #print(file_data[colname])
+        #print(file_data[colnames])
 
     return file_data, file_name
 
 def load_in_data_file(file_paths:List[str], in_colnames:List[str], batch_size:int=50, in_excel_sheets:str=""):
     '''Load in data table, work out how many batches needed.'''
 
+    if not isinstance(in_colnames, list):
+        in_colnames = [in_colnames]
+
+    print("in_colnames:", in_colnames)
+
     try:
-        file_data, file_name = load_in_file(file_paths[0], colname=in_colnames, excel_sheet=in_excel_sheets)
+        file_data, file_name = load_in_file(file_paths[0], colnames=in_colnames, excel_sheet=in_excel_sheets)
         num_batches = math.ceil(len(file_data) / batch_size)
         print("Total number of batches:", num_batches)
 
@@ -169,15 +186,27 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
         return gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas"), reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names
 
-def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str]) -> pd.DataFrame:
-    basic_response_data = file_data[[chosen_cols]].reset_index(names="Reference")
+def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verify_titles:bool=False) -> pd.DataFrame:
+
+    if not isinstance(chosen_cols, list):
+        chosen_cols = [chosen_cols]
+    else:
+        chosen_cols = chosen_cols
+
+    basic_response_data = file_data[chosen_cols].reset_index(names="Reference")
     basic_response_data["Reference"] = basic_response_data["Reference"].astype(int) + 1
-    basic_response_data = basic_response_data.rename(columns={chosen_cols: "Response"})
+
+    if verify_titles == True:
+        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response", chosen_cols[1]: "Title"})
+        basic_response_data["Title"] = basic_response_data["Title"].str.strip()
+    else:
+        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
+
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
 
     return basic_response_data
 
-def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], output_folder: str, batch_number: int, batch_size: int) -> Tuple[str, str, str]:
+def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], output_folder: str, batch_number: int, batch_size: int, verify_titles:bool=False) -> Tuple[str, str, str]:
     """
     Processes a file by simplifying its content based on chosen columns and saves the result to a specified output folder.
 
@@ -200,7 +229,7 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     simplified_csv_table_path = ""
 
     # Simplify table to just responses column and the Response reference number
-    basic_response_data = get_basic_response_data(file_data, chosen_cols)
+    basic_response_data = get_basic_response_data(file_data, chosen_cols, verify_titles=verify_titles)
     
     file_len = len(basic_response_data["Reference"])
    
@@ -216,7 +245,12 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     else:
         end_row = file_len + 1
 
+    print("start_row:", start_row)
+    print("end_row:", end_row)
+
     batch_basic_response_data = basic_response_data[start_row:end_row]  # Select the current batch
+
+    print("batch_basic_response_data:", batch_basic_response_data)
 
     # Now replace the reference numbers with numbers starting from 1
     batch_basic_response_data.loc[:, "Reference"] = batch_basic_response_data["Reference"] - start_row
@@ -235,9 +269,6 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
                                   ~(batch_basic_response_data["Response"] == "None") &\
                                   ~(batch_basic_response_data["Response"] == " ") &\
                                   ~(batch_basic_response_data["Response"] == ""),:]#~(batch_basic_response_data["Response"].str.len() < 5), :]
-
-    #simplified_csv_table_path = output_folder + 'simple_markdown_table_' + file_name + '_row_' + str(start_row) + '_to_' + str(end_row) + '.csv'
-    #batch_basic_response_data.to_csv(simplified_csv_table_path, index=None)
 
     simple_markdown_table = batch_basic_response_data.to_markdown(index=None)
 
@@ -558,68 +589,141 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 ### INITIAL TOPIC MODEL DEVELOPMENT FUNCTIONS
 
 def clean_markdown_table(text: str):
+    # Split text into lines
     lines = text.splitlines()
-
-    # Remove any empty rows or rows with only pipes
-    cleaned_lines = [line for line in lines if not re.match(r'^\s*\|?\s*\|?\s*$', line)]
-
-    # Merge lines that belong to the same row (i.e., don't start with |)
-    merged_lines = []
-    buffer = ""
     
-    for line in cleaned_lines:
-        if line.lstrip().startswith('|'):  # If line starts with |, it's a new row
-            if buffer:
-                merged_lines.append(buffer)  # Append the buffered content
-            buffer = line  # Start a new buffer with this row
-        else:
-            # Continuation of the previous row
-            buffer += ' ' + line.strip()  # Add content to the current buffer
-
-    # Don't forget to append the last buffer
-    if buffer:
-        merged_lines.append(buffer)
-
-    # Fix the header separator row if necessary
-    if len(merged_lines) > 1:
-        header_pipes = merged_lines[0].count('|')  # Count pipes in the header row
-        header_separator = '|---|' * (header_pipes - 1) + '|---|'  # Generate proper separator
+    # Step 1: Identify table structure and process line continuations
+    table_rows = []
+    current_row = None
+    
+    for line in lines:
+        stripped = line.strip()
         
-        # Replace or insert the separator row
-        if not re.match(r'^\|[-:|]+$', merged_lines[1]):  # Check if the second row is a valid separator
-            merged_lines.insert(1, header_separator)
-        else:
-            # Adjust the separator to match the header pipes
-            merged_lines[1] = '|---|' * (header_pipes - 1) + '|'
-
-    # Ensure consistent number of pipes in each row
-    result = []
-    header_pipes = merged_lines[0].count('|')  # Use the header row to count the number of pipes
-
-    for line in merged_lines:
-        # Strip excessive whitespace around pipes
-        line = re.sub(r'\s*\|\s*', '|', line.strip())
-
-        # Fix inconsistent number of pipes by adjusting them to match the header
-        pipe_count = line.count('|')
-        if pipe_count < header_pipes:
-            line += '|' * (header_pipes - pipe_count)  # Add missing pipes
-        elif pipe_count > header_pipes:
-            # If too many pipes, split line and keep the first `header_pipes` columns
-            columns = line.split('|')[:header_pipes + 1]  # +1 to keep last pipe at the end
-            line = '|'.join(columns)
+        # Skip empty lines
+        if not stripped:
+            continue
+            
+        # Check if this is a table row or alignment row
+        is_table_row = '|' in stripped or stripped.startswith(':-') or ':-:' in stripped
         
-        line = re.sub(r'(\d),(?=\d)', r'\1, ', line)
+        if is_table_row:
+            # If we have a current row being built, add it to our list
+            if current_row is not None:
+                table_rows.append(current_row)
+                
+            # Start a new row
+            current_row = stripped
+        elif current_row is not None:
+            # This must be a continuation of the previous row
+            current_row += " " + stripped
+        else:
+            # Not part of the table
+            current_row = stripped
+    
+    # Don't forget the last row
+    if current_row is not None:
+        table_rows.append(current_row)
+    
+    # Step 2: Properly format the table
+    # First, determine the maximum number of columns
+    max_columns = 0
+    for row in table_rows:
+        cells = row.split('|')
+        # Account for rows that may not start/end with a pipe
+        if row.startswith('|'):
+            cells = cells[1:]
+        if row.endswith('|'):
+            cells = cells[:-1]
+        max_columns = max(max_columns, len(cells))
+    
+    # Now format each row
+    formatted_rows = []
+    for row in table_rows:
+        # Ensure the row starts and ends with pipes
+        if not row.startswith('|'):
+            row = '|' + row
+        if not row.endswith('|'):
+            row = row + '|'
+            
+        # Split into cells
+        cells = row.split('|')[1:-1]  # Remove empty entries from split
+        
+        # Ensure we have the right number of cells
+        while len(cells) < max_columns:
+            cells.append('')
+            
+        # Rebuild the row
+        formatted_row = '|' + '|'.join(cells) + '|'
+        formatted_rows.append(formatted_row)
+    
+    # Join everything back together
+    result = '\n'.join(formatted_rows)
+    
+    return result
 
-        result.append(line)
+# def clean_markdown_table(text: str):
+#     lines = text.splitlines()
 
-    # Join lines back into the cleaned markdown text
-    cleaned_text = '\n'.join(result)
+#     # Remove any empty rows or rows with only pipes
+#     cleaned_lines = [line for line in lines if not re.match(r'^\s*\|?\s*\|?\s*$', line)]
 
-    # Replace numbers next to commas and other numbers with a space
+#     # Merge lines that belong to the same row (i.e., don't start with |)
+#     merged_lines = []
+#     buffer = ""
+    
+#     for line in cleaned_lines:
+#         if line.lstrip().startswith('|'):  # If line starts with |, it's a new row
+#             if buffer:
+#                 merged_lines.append(buffer)  # Append the buffered content
+#             buffer = line  # Start a new buffer with this row
+#         else:
+#             # Continuation of the previous row
+#             buffer += ' ' + line.strip()  # Add content to the current buffer
+
+#     # Don't forget to append the last buffer
+#     if buffer:
+#         merged_lines.append(buffer)
+
+#     # Fix the header separator row if necessary
+#     if len(merged_lines) > 1:
+#         header_pipes = merged_lines[0].count('|')  # Count pipes in the header row
+#         header_separator = '|---|' * (header_pipes - 1) + '|---|'  # Generate proper separator
+        
+#         # Replace or insert the separator row
+#         if not re.match(r'^\|[-:|]+$', merged_lines[1]):  # Check if the second row is a valid separator
+#             merged_lines.insert(1, header_separator)
+#         else:
+#             # Adjust the separator to match the header pipes
+#             merged_lines[1] = '|---|' * (header_pipes - 1) + '|'
+
+#     # Ensure consistent number of pipes in each row
+#     result = []
+#     header_pipes = merged_lines[0].count('|')  # Use the header row to count the number of pipes
+
+#     for line in merged_lines:
+#         # Strip excessive whitespace around pipes
+#         line = re.sub(r'\s*\|\s*', '|', line.strip())
+
+#         # Fix inconsistent number of pipes by adjusting them to match the header
+#         pipe_count = line.count('|')
+#         if pipe_count < header_pipes:
+#             line += '|' * (header_pipes - pipe_count)  # Add missing pipes
+#         elif pipe_count > header_pipes:
+#             # If too many pipes, split line and keep the first `header_pipes` columns
+#             columns = line.split('|')[:header_pipes + 1]  # +1 to keep last pipe at the end
+#             line = '|'.join(columns)
+        
+#         line = re.sub(r'(\d),(?=\d)', r'\1, ', line)
+
+#         result.append(line)
+
+#     # Join lines back into the cleaned markdown text
+#     cleaned_text = '\n'.join(result)
+
+#     # Replace numbers next to commas and other numbers with a space
     
 
-    return cleaned_text
+#     return cleaned_text
 
 def clean_column_name(column_name, max_length=20):
     # Convert to string
@@ -684,20 +788,31 @@ def remove_before_last_term(input_string: str) -> str:
         return input_string[last_index:]  # Return everything from the last match onward
     return input_string  # Return the original string if the term is not found
 
-def convert_response_text_to_markdown_table(response_text:str, table_type:str = "Main table"):
-    is_error = False
-    start_of_table_response = remove_before_last_term(response_text)
-    cleaned_response = clean_markdown_table(start_of_table_response)
+def convert_to_html_table(input_string: str, table_type: str = "Main table"):
+    # Remove HTML tags from input string
+    input_string = input_string.replace("<p>", "").replace("</p>", "")
     
-    markdown_table = markdown.markdown(cleaned_response, extensions=['tables'])
-
-    # Remove <p> tags and make sure it has a valid HTML structure
-    html_table = re.sub(r'<p>(.*?)</p>', r'\1', markdown_table)
-    html_table = html_table.replace('<p>', '').replace('</p>', '').strip()
-
-    # Now ensure that the HTML structure is correct
+    if "<table" in input_string:
+        # Input is already in HTML format
+        html_table = input_string
+    else:
+        # Input is in Markdown format
+        print("input_string:", input_string)
+        lines = input_string.strip().split("\n")
+        clean_md_text = "\n".join([lines[0]] + lines[2:])  # Keep header, skip separator, keep data
+        
+        # Read Markdown table into a DataFrame
+        df = pd.read_csv(pd.io.common.StringIO(clean_md_text), sep="|", skipinitialspace=True)
+        
+        # Ensure unique column names
+        df.columns = [f"{col}_{i}" if df.columns.tolist().count(col) > 1 else col for i, col in enumerate(df.columns)]
+        
+        # Convert DataFrame to HTML
+        html_table = df.to_html(index=False, border=1)
+    
+    # Ensure that the HTML structure is correct
     if table_type == "Main table":
-        if "<table>" not in html_table:
+        if "<table" not in html_table:
             html_table = f"""
             <table>
                 <tr>
@@ -711,7 +826,7 @@ def convert_response_text_to_markdown_table(response_text:str, table_type:str = 
             </table>
             """
     elif table_type == "Revised topics table":
-        if "<table>" not in html_table:
+        if "<table" not in html_table:
             html_table = f"""
             <table>
                 <tr>
@@ -721,18 +836,54 @@ def convert_response_text_to_markdown_table(response_text:str, table_type:str = 
                 {html_table}
             </table>
             """
+    elif table_type == "Verify titles table":        
+        if "<table" not in html_table:
+            html_table = f"""
+            <table>
+                <tr>
+                    <th>Response References</th>
+                    <th>Is this a suitable title</th>
+                    <th>Explanation</th>
+                    <th>Alternative title</th>
+                </tr>
+                {html_table}
+            </table>
+            """            
+    
+    return html_table
 
-    html_buffer = StringIO(html_table)    
+def convert_response_text_to_markdown_table(response_text:str, table_type:str = "Main table"):
+    is_error = False
+    start_of_table_response = remove_before_last_term(response_text)
+
+    cleaned_response = clean_markdown_table(start_of_table_response)
 
     try:
-        out_df = pd.read_html(html_buffer)[0]  # Assuming the first table in the HTML is the one you want
+        string_html_table = markdown.markdown(cleaned_response, extensions=['markdown.extensions.tables'])
+    except Exception as e:
+        print("Unable to convert response to string_html_table due to", e)
+        string_html_table = ""
+
+    html_table = convert_to_html_table(string_html_table)
+          
+    html_buffer = StringIO(html_table)
+
+    try:
+        tables = pd.read_html(html_buffer)
+        if tables:
+            out_df = tables[0]  # Use the first table if available
+        else:
+            raise ValueError("No tables found in the provided HTML.")
+            is_error = True
+            out_df = pd.DataFrame()
     except Exception as e:
         print("Error when trying to parse table:", e)
         is_error = True
-        raise ValueError()
-        return pd.DataFrame(), is_error
-    
+        out_df = pd.DataFrame()
+
     return out_df, is_error
+    
+    #print("out_df in convert function:", out_df)
 
 def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         system_prompt: str,
@@ -892,7 +1043,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     #print("topic_with_response_df:", topic_with_response_df)
 
-    # For instances where you end up with float values in Response references
+    # For instances where you end up with float values in Response References
     topic_with_response_df["Response References"] = topic_with_response_df["Response References"].astype(str).str.replace(".0", "", regex=False)
 
     # Strip and lower case topic names to remove issues where model is randomly capitalising topics/sentiment
@@ -948,7 +1099,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     # Append on old reference data
     out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(how='all')
 
-    # Remove duplicate Response references for the same topic
+    # Remove duplicate Response References for the same topic
     out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
 
     # Try converting response references column to int, keep as string if fails
@@ -957,8 +1108,6 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     except Exception as e:
         print("Could not convert Response References column to integer due to", e)
         print("out_reference_df['Response References']:", out_reference_df["Response References"].head())
-
-    out_reference_df.to_csv(output_folder + "test_output_reference_df.csv")
 
     out_reference_df.sort_values(["Start row of group", "Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
 
@@ -1029,6 +1178,7 @@ def extract_topics(in_data_file,
               time_taken:float = 0,
               sentiment_checkbox:str = "Negative, Neutral, or Positive",
               force_zero_shot_radio:str = "No",
+              in_excel_sheets:List[str] = [],
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,              
@@ -1069,6 +1219,7 @@ def extract_topics(in_data_file,
     - time_taken (float, optional): The amount of time taken to process the responses up until this point.
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
+    - in_excel_sheets (List[str], optional): List of excel sheets to load from input file
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
@@ -1101,7 +1252,7 @@ def extract_topics(in_data_file,
             #print("in_data_file:", in_data_file)
             in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_file)
             #print("in_colnames:", in_colnames_drop)
-            file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default)
+            file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default, in_excel_sheets)
             #print("file_data loaded in:", file_data)
         except:
             # Check if files and text exist
@@ -1128,9 +1279,6 @@ def extract_topics(in_data_file,
                 local_model, tokenizer = load_model()
                 print("Local model loaded:", local_model)
 
-    
-       
-    
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)
         progress(progress_measure, desc="Querying large language model")
@@ -1264,6 +1412,8 @@ def extract_topics(in_data_file,
 
                                 formatted_general_topics_prompt_list = [formatted_general_topics_prompt]
 
+
+
                                 whole_conversation = []
 
                                 general_topic_response, general_topic_conversation_history, general_topic_conversation, general_topic_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
@@ -1274,7 +1424,7 @@ def extract_topics(in_data_file,
                                     print("Output revised zero shot topics table is:", zero_shot_topics_df)
 
                                     zero_shot_revised_path = output_folder + "zero_shot_topics_with_general_topics.csv"
-                                    zero_shot_topics_df.to_csv(zero_shot_revised_path, index = None)
+                                    #zero_shot_topics_df.to_csv(zero_shot_revised_path, index = None)
                                     out_file_paths.append(zero_shot_revised_path)
 
                                 except Exception as e:
@@ -1344,17 +1494,20 @@ def extract_topics(in_data_file,
                     except Exception as e:
                         print(f"Error writing prompt to file {formatted_prompt_output_path}: {e}")
 
-                    summary_prompt_list = [formatted_summary_prompt]
+                    if model_choice == "gemma_2b_it_local":
+                        summary_prompt_list = [full_prompt] # Includes system prompt
+                    else:
+                        summary_prompt_list = [formatted_summary_prompt]
 
                     # print("master_summary_prompt_list:", summary_prompt_list[0])
 
-                    summary_conversation_history = []
-                    summary_whole_conversation = []
+                    conversation_history = []
+                    whole_conversation = []
 
                     # Process requests to large language model
                     # responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(summary_prompt_list, add_existing_topics_system_prompt, summary_conversation_history, summary_whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, master = True)
 
-                    responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
                     # print("responses:", responses[-1].text)
                     # print("Whole conversation metadata:", whole_conversation_metadata)
@@ -1448,9 +1601,6 @@ def extract_topics(in_data_file,
                     
                     whole_conversation = [formatted_initial_table_system_prompt] 
 
-                    
-
-                    
 
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
 
@@ -1583,14 +1733,14 @@ def extract_topics(in_data_file,
         final_out_unique_topics_df = create_unique_table_df_from_reference_table(existing_reference_df)
 
         ## Unique topic list
-        final_out_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
+        final_out_unique_topics_df.to_csv(unique_topics_df_out_path, index=None, encoding='utf-8')
         out_file_paths.append(unique_topics_df_out_path)
 
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if '_final_' in x]
 
         ## Reference table mapping response numbers to topics
-        existing_reference_df_pivot.to_csv(reference_table_out_pivot_path, index = None)
+        existing_reference_df_pivot.to_csv(reference_table_out_pivot_path, index = None, encoding='utf-8')
         log_files_output_paths.append(reference_table_out_pivot_path)
 
         ## Create a dataframe for missing response references:
@@ -1601,7 +1751,7 @@ def extract_topics(in_data_file,
 
 
         # Save simplified file data to log outputs
-        pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None)
+        pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None, encoding='utf-8')
         log_files_output_paths.append(basic_response_data_out_path)
 
 
@@ -1619,7 +1769,7 @@ def extract_topics(in_data_file,
         #print("missing_df:", missing_df)
 
         missing_df_out_path = output_folder + file_path_details + "_missing_references_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
-        missing_df.to_csv(missing_df_out_path, index=None)
+        missing_df.to_csv(missing_df_out_path, index=None, encoding='utf-8')
         log_files_output_paths.append(missing_df_out_path)
 
         out_file_paths = list(set(out_file_paths))
@@ -1636,6 +1786,9 @@ def extract_topics(in_data_file,
 
 
     return unique_table_df_display_table_markdown, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths
+
+
+
 
 def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:pd.DataFrame=pd.DataFrame()):
 
@@ -1661,7 +1814,9 @@ def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:
     if not basic_response_data.empty:
         pivot_table = basic_response_data.merge(pivot_table, right_on="Response References", left_on="Reference", how="left")
 
-        pivot_table.drop("Response References", axis=1, inplace=True)
+        pivot_table.drop("Response References", axis=1, inplace=True)    
+
+    pivot_table.columns = pivot_table.columns.str.replace("Not assessed - ", "").str.replace("- Not assessed", "")
 
     # print("pivot_table:", pivot_table)
 
@@ -1680,22 +1835,12 @@ def join_modified_topic_names_to_ref_table(modified_unique_topics_df:pd.DataFram
     # First, join the modified topics to the original topics dataframe based on index to have the modified names alongside the original names
     original_unique_topics_df_m = original_unique_topics_df.merge(modified_unique_topics_df[["General Topic", "Subtopic", "Sentiment", "Topic_number"]], on="Topic_number", how="left", suffixes=("", "_mod"))
 
-    original_unique_topics_df_m.to_csv(output_folder + "original_unique_topics_df_m.csv")
-
     original_unique_topics_df_m.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
-
-    reference_df.to_csv(output_folder + "before_join_reference_df.csv")
 
 
     # Then, join these new topic names onto the reference_df, merge based on the original names
     modified_reference_df = reference_df.merge(original_unique_topics_df_m[["Topic_number", "General Topic_mod", "Subtopic_mod", "Sentiment_mod"]], on=["Topic_number"], how="left")
 
-    modified_reference_df.to_csv(output_folder + "modified_reference_df.csv")
-
-    # Replace old topic names with new topic names in reference_df
-    # modified_reference_df.rename(columns={"General Topic":"General Topic_old",
-    #                                                              "Subtopic":"Subtopic_old",
-    #                                                              "Sentiment":"Sentiment_old"}, inplace=True)
     
     modified_reference_df.drop(["General Topic", "Subtopic", "Sentiment"], axis=1, inplace=True, errors="ignore")
     
@@ -1709,8 +1854,6 @@ def join_modified_topic_names_to_ref_table(modified_unique_topics_df:pd.DataFram
     #modified_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
 
     modified_reference_df.sort_values(["Start row of group", "Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
-
-    modified_reference_df.to_csv(output_folder + "test_out_ref_df.csv")
 
     modified_reference_df = modified_reference_df.loc[:, ["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Topic_number"]]
 
@@ -1749,7 +1892,7 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
         ## Reference table mapping response numbers to topics
         reference_table_file_name = reference_file_path.replace(".csv", "_mod") 
         new_reference_df_file_path = output_folder + reference_table_file_name  + ".csv"
-        reference_df.to_csv(new_reference_df_file_path, index=None)
+        reference_df.to_csv(new_reference_df_file_path, index=None, encoding='utf-8')
         output_file_list.append(new_reference_df_file_path)
 
         # Drop rows where Response References is NA or null
@@ -1768,7 +1911,7 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
 
         unique_table_file_name = unique_table_file_path.replace(".csv", "_mod")
         modified_unique_table_file_path = output_folder + unique_table_file_name + ".csv"
-        modifiable_unique_topics_df.to_csv(modified_unique_table_file_path, index=None)
+        modifiable_unique_topics_df.to_csv(modified_unique_table_file_path, index=None, encoding='utf-8')
         output_file_list.append(modified_unique_table_file_path)
     
     else:
@@ -1992,13 +2135,10 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                 print("No deduplicated categories found, skipping the following code.")
 
             else:
-                # Join deduplicated columns back to original df
-                #deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
-
                 # Remove rows where 'deduplicated_category' is blank or NaN
                 deduplicated_topic_map_df = deduplicated_topic_map_df.loc[(deduplicated_topic_map_df['deduplicated_category'].str.strip() != '') & ~(deduplicated_topic_map_df['deduplicated_category'].isnull()), ['old_category','deduplicated_category', 'match_score']]
 
-                deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
+                #deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
 
                 reference_df = reference_df.merge(deduplicated_topic_map_df, on="old_category", how="left")
 
@@ -2011,7 +2151,6 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                 reference_df["Subtopic"] = reference_df["deduplicated_category"].combine_first(reference_df["Subtopic_old"])
                 reference_df["Sentiment"] = reference_df["Sentiment"].combine_first(reference_df["Sentiment_old"])
 
-            #reference_df.to_csv(output_folder + "reference_table_after_dedup.csv", index=None)
 
             reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")
 
@@ -2083,8 +2222,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
             reference_df_pivot = convert_reference_table_to_pivot_table(reference_df, basic_response_data)
 
             reference_pivot_file_path = output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
-            reference_df_pivot.to_csv(reference_pivot_file_path, index=None)
-
+            reference_df_pivot.to_csv(reference_pivot_file_path, index=None, encoding='utf-8')
             log_output_files.append(reference_pivot_file_path)
 
         #reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
@@ -2092,8 +2230,8 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
         reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
         unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
-        reference_df.to_csv(reference_file_path, index = None)
-        unique_topics_df.to_csv(unique_topics_file_path, index=None)
+        reference_df.to_csv(reference_file_path, index = None, encoding='utf-8')
+        unique_topics_df.to_csv(unique_topics_file_path, index=None, encoding='utf-8')
 
         output_files.append(reference_file_path)
         output_files.append(unique_topics_file_path)        
@@ -2142,8 +2280,6 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
             #print(filtered_reference_df_unique_sampled)
 
             all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
-
-    #all_summaries.to_csv(output_folder + "all_summaries.csv", index=None)
     
     summarised_references = all_summaries.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
     'Response References': 'size',  # Count the number of references
@@ -2151,8 +2287,6 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
     }).reset_index()
 
     summarised_references = summarised_references.loc[(summarised_references["Sentiment"] != "Not Mentioned") & (summarised_references["Response References"] > 1)]
-
-    #summarised_references.to_csv(output_folder + "summarised_references.csv", index=None)
 
     summarised_references_markdown = summarised_references.to_markdown(index=False)
 
@@ -2294,16 +2428,15 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
             ### Save pivot file to log area
             reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
-            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None)
-
+            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8')
             log_output_files.append(reference_table_df_revised_pivot_path)
 
         # Save to file
         unique_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
-        unique_table_df_revised.to_csv(unique_table_df_revised_path, index = None)
+        unique_table_df_revised.to_csv(unique_table_df_revised_path, index = None, encoding='utf-8')
 
         reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
-        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None)
+        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8')
 
         output_files.extend([reference_table_df_revised_path, unique_table_df_revised_path])       
 

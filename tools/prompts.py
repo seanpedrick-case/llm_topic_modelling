@@ -3,7 +3,7 @@ system_prompt = """You are a researcher analysing responses from an open text da
 initial_table_prompt = """The open text data is shown in the following table that contains two columns, Reference and Response. Response table: 
 {response_table}
 
-Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
+Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first column identify general topics relevant to responses. Create as many general topics as you can.
 In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be blank or empty.
 {sentiment_choices}.
@@ -23,10 +23,10 @@ prompt3 = ""
 
 add_existing_topics_system_prompt = system_prompt
 
-force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response references', and 'Summary'.
+force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response References', and 'Summary'.
 In the first column, write 'Not assessed'. In the second column, assign Subtopics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
 
-allow_new_topics_prompt = """Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
+allow_new_topics_prompt = """Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General Topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
 
 add_existing_topics_prompt = """Responses are shown in the following Response table: 
@@ -70,7 +70,23 @@ Your task is to create a General Topic name for each Subtopic. The new Topics ta
 New Topics table:"""
 
 
+### Verify exisiting categories prompt
+verify_titles_system_prompt = system_prompt
 
+
+verify_titles_prompt = """Response numbers alongside the Response text and assigned titles are shown in the table below: 
+{response_table}
+
+The criteria for a suitable Title for these responses is that they should be readable, concise, and fully encapsulate the main subject of the response.
+
+Create a markdown table with four columns.
+The first column is 'Response References', and should contain just the response number under consideration.
+The second column is 'Is this a suitable title', answer the question with 'Yes' or 'No', with no other text.
+The third column is 'Explanation', give a short explanation for your response in the second column.
+The fourth column is 'Alternative title', suggest an alternative title for the response that meet the criteria stated above.
+Do not add any other text to your response.
+
+Output markdown table:"""
 
 
 
