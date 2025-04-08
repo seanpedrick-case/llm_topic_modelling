@@ -933,7 +933,12 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
             call_temperature, reported_batch_no, local_model, master=master
         )
 
-        stripped_response = responses[-1].text.strip()
+        print("Responses:", responses)
+
+        if (model_choice != "gemma_local") & (model_choice != "gemma_2b_it_local"):
+            stripped_response = responses[-1].text.strip()
+        else:
+            stripped_response = responses[-1]['choices'][0]['text'].strip()
 
         # Check if response meets our criteria (length and contains table)
         if len(stripped_response) > 120 and '|' in stripped_response:

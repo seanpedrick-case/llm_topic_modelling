@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm AS builder
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -18,13 +18,13 @@ COPY requirements_aws.txt .
 
 RUN pip uninstall -y typing_extensions \
 && pip install --no-cache-dir --target=/install typing_extensions==4.12.2 \
-&& pip install --no-cache-dir --target=/install torch==2.5.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
+&& pip install --no-cache-dir --target=/install torch==2.6.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
 RUN rm requirements_aws.txt
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.9-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.11.11-slim-bookworm
 
 # Install system dependencies.
 RUN apt-get update \
