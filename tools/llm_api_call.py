@@ -19,8 +19,8 @@ from io import StringIO
 
 GradioFileData = gr.FileData
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, create_general_topics_system_prompt, create_general_topics_prompt, force_existing_topics_prompt, allow_new_topics_prompt
-from tools.helper_functions import output_folder, detect_file_type, get_file_name_no_ext, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text
+from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, create_general_topics_system_prompt, create_general_topics_prompt, force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt
+from tools.helper_functions import output_folder, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file
 from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model, load_model, RUN_LOCAL_MODEL
 
 # ResponseObject class for AWS Bedrock calls
@@ -58,62 +58,6 @@ def normalise_string(text):
     text = re.sub(r'\s{2,}', ' ', text)
     
     return text
-
-def load_in_file(file_path: str, colnames:List[str]="", excel_sheet:str=""):
-    """
-    Loads in a tabular data file and returns data and file name.
-
-    Parameters:
-    - file_path (str): The path to the file to be processed.
-    - colnames (List[str], optional): list of colnames to load in
-    """
-
-    file_type = detect_file_type(file_path)
-    #print("File type is:", file_type)
-
-    file_name = get_file_name_no_ext(file_path)
-    file_data = read_file(file_path, excel_sheet)
-
-    print("colnames:", colnames)
-
-    if colnames and isinstance(colnames, list):
-        col_list = colnames
-    else:
-        col_list = list(file_data.columns)
-
-    if not isinstance(col_list, List):
-        col_list = [col_list]
-
-    col_list = [item for item in col_list if item not in ["", "NA"]]
-
-    for col in col_list:
-        file_data[col] = file_data[col].fillna("")
-        file_data[col] = file_data[col].astype(str).str.replace("\bnan\b", "", regex=True)  
-        
-        #print(file_data[colnames])
-
-    return file_data, file_name
-
-def load_in_data_file(file_paths:List[str], in_colnames:List[str], batch_size:int=50, in_excel_sheets:str=""):
-    '''Load in data table, work out how many batches needed.'''
-
-    if not isinstance(in_colnames, list):
-        in_colnames = [in_colnames]
-
-    print("in_colnames:", in_colnames)
-
-    try:
-        file_data, file_name = load_in_file(file_paths[0], colnames=in_colnames, excel_sheet=in_excel_sheets)
-        num_batches = math.ceil(len(file_data) / batch_size)
-        print("Total number of batches:", num_batches)
-
-    except Exception as e:
-        print(e)
-        file_data = pd.DataFrame()
-        file_name = ""
-        num_batches = 1  
-    
-    return file_data, file_name, num_batches
 
 def load_in_previous_data_files(file_paths_partial_output:List[str], for_modified_table:bool=False):
     '''Load in data table from a partially completed consultation summary to continue it.'''
@@ -186,6 +130,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
         return gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas"), reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names
 
+
 def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verify_titles:bool=False) -> pd.DataFrame:
 
     if not isinstance(chosen_cols, list):
@@ -199,10 +144,12 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
     if verify_titles == True:
         basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response", chosen_cols[1]: "Title"})
         basic_response_data["Title"] = basic_response_data["Title"].str.strip()
+        basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
         basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
 
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
+    basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)
 
     return basic_response_data
 
@@ -245,12 +192,12 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     else:
         end_row = file_len + 1
 
-    print("start_row:", start_row)
-    print("end_row:", end_row)
+    #print("start_row:", start_row)
+    #print("end_row:", end_row)
 
     batch_basic_response_data = basic_response_data[start_row:end_row]  # Select the current batch
 
-    print("batch_basic_response_data:", batch_basic_response_data)
+    #print("batch_basic_response_data:", batch_basic_response_data)
 
     # Now replace the reference numbers with numbers starting from 1
     batch_basic_response_data.loc[:, "Reference"] = batch_basic_response_data["Reference"] - start_row
@@ -398,7 +345,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
 
     # Now you can access both the text and metadata
     #print("Text:", response.text)
-    print("Metadata:", response.usage_metadata)
+    #print("Metadata:", response.usage_metadata)
     #print("Text:", response.text)
     
     return response
@@ -428,7 +375,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     progress_bar = range(0,number_of_api_retry_attempts)
 
     # Generate the model's response
-    if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
+    if "gemini" in model_choice:
 
         for i in progress_bar:
             try:
@@ -451,7 +398,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
             
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-    elif model_choice in ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"]:
+    elif "anthropic.claude" in model_choice:
         for i in progress_bar:
             try:
                 print("Calling AWS Claude model, attempt", i + 1)
@@ -661,70 +608,6 @@ def clean_markdown_table(text: str):
     
     return result
 
-# def clean_markdown_table(text: str):
-#     lines = text.splitlines()
-
-#     # Remove any empty rows or rows with only pipes
-#     cleaned_lines = [line for line in lines if not re.match(r'^\s*\|?\s*\|?\s*$', line)]
-
-#     # Merge lines that belong to the same row (i.e., don't start with |)
-#     merged_lines = []
-#     buffer = ""
-    
-#     for line in cleaned_lines:
-#         if line.lstrip().startswith('|'):  # If line starts with |, it's a new row
-#             if buffer:
-#                 merged_lines.append(buffer)  # Append the buffered content
-#             buffer = line  # Start a new buffer with this row
-#         else:
-#             # Continuation of the previous row
-#             buffer += ' ' + line.strip()  # Add content to the current buffer
-
-#     # Don't forget to append the last buffer
-#     if buffer:
-#         merged_lines.append(buffer)
-
-#     # Fix the header separator row if necessary
-#     if len(merged_lines) > 1:
-#         header_pipes = merged_lines[0].count('|')  # Count pipes in the header row
-#         header_separator = '|---|' * (header_pipes - 1) + '|---|'  # Generate proper separator
-        
-#         # Replace or insert the separator row
-#         if not re.match(r'^\|[-:|]+$', merged_lines[1]):  # Check if the second row is a valid separator
-#             merged_lines.insert(1, header_separator)
-#         else:
-#             # Adjust the separator to match the header pipes
-#             merged_lines[1] = '|---|' * (header_pipes - 1) + '|'
-
-#     # Ensure consistent number of pipes in each row
-#     result = []
-#     header_pipes = merged_lines[0].count('|')  # Use the header row to count the number of pipes
-
-#     for line in merged_lines:
-#         # Strip excessive whitespace around pipes
-#         line = re.sub(r'\s*\|\s*', '|', line.strip())
-
-#         # Fix inconsistent number of pipes by adjusting them to match the header
-#         pipe_count = line.count('|')
-#         if pipe_count < header_pipes:
-#             line += '|' * (header_pipes - pipe_count)  # Add missing pipes
-#         elif pipe_count > header_pipes:
-#             # If too many pipes, split line and keep the first `header_pipes` columns
-#             columns = line.split('|')[:header_pipes + 1]  # +1 to keep last pipe at the end
-#             line = '|'.join(columns)
-        
-#         line = re.sub(r'(\d),(?=\d)', r'\1, ', line)
-
-#         result.append(line)
-
-#     # Join lines back into the cleaned markdown text
-#     cleaned_text = '\n'.join(result)
-
-#     # Replace numbers next to commas and other numbers with a space
-    
-
-#     return cleaned_text
-
 def clean_column_name(column_name, max_length=20):
     # Convert to string
     column_name = str(column_name)  
@@ -750,31 +633,6 @@ def create_unique_table_df_from_reference_table(reference_df:pd.DataFrame):
             .sort_values('Response References', ascending=False)  # Sort by size, biggest first
             .assign(Topic_number=lambda df: np.arange(1, len(df) + 1))  # Add numbering 1 to x
         )
-
-    # new_unique_topics_df = reference_df[["General Topic", "Subtopic", "Sentiment"]]
-
-    # new_unique_topics_df = new_unique_topics_df.rename(columns={new_unique_topics_df.columns[0]: "General Topic", new_unique_topics_df.columns[1]: "Subtopic", new_unique_topics_df.columns[2]: "Sentiment"})
-    
-    # # Join existing and new unique topics
-    # out_unique_topics_df = new_unique_topics_df
-
-    # out_unique_topics_df = out_unique_topics_df.rename(columns={out_unique_topics_df.columns[0]: "General Topic", out_unique_topics_df.columns[1]: "Subtopic", out_unique_topics_df.columns[2]: "Sentiment"})
-
-    # #print("out_unique_topics_df:", out_unique_topics_df)
-
-    # out_unique_topics_df = out_unique_topics_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment"]).\
-    #         drop(["Response References", "Summary"], axis = 1, errors="ignore") 
-
-    # # Get count of rows that refer to particular topics
-    # reference_counts = reference_df.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
-    # 'Response References': 'size',  # Count the number of references
-    # 'Summary': lambda x: '<br>'.join(
-    #     sorted(set(x), key=lambda summary: reference_df.loc[reference_df['Summary'] == summary, 'Start row of group'].min())
-    # )
-    # }).reset_index()
-
-    # # Join the counts to existing_unique_topics_df
-    # out_unique_topics_df = out_unique_topics_df.merge(reference_counts, how='left', on=["General Topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
 
     return out_unique_topics_df
 
@@ -933,8 +791,6 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
             call_temperature, reported_batch_no, local_model, master=master
         )
 
-        print("Responses:", responses)
-
         if (model_choice != "gemma_local") & (model_choice != "gemma_2b_it_local"):
             stripped_response = responses[-1].text.strip()
         else:
@@ -1041,7 +897,16 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
 
     # Rename columns to ensure consistent use of data frames later in code
-    topic_with_response_df.columns = ["General Topic", "Subtopic", "Sentiment", "Response References", "Summary"]
+    new_column_names = {
+    topic_with_response_df.columns[0]: "General Topic",
+    topic_with_response_df.columns[1]: "Subtopic",
+    topic_with_response_df.columns[2]: "Sentiment",
+    topic_with_response_df.columns[3]: "Response References",
+    topic_with_response_df.columns[4]: "Summary"
+    }
+
+    topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
+
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
@@ -1073,8 +938,8 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
         summary = row.iloc[4] if pd.notna(row.iloc[4]) else ""
         # If the reference response column is very long, and there's nothing in the summary column, assume that the summary was put in the reference column
-        if not summary and len(row.iloc[3] > 30):
-            summary = row.iloc[3]
+        if not summary and len(str(row.iloc[3]) > 30):
+            summary = row.iloc[3]        
 
         summary = row_number_string_start + summary
 
@@ -1151,6 +1016,128 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
 
+def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
+                                 force_zero_shot_radio:str="No",
+                                 create_revised_general_topics:bool=False,
+                                 max_topic_no:int=120):
+
+    # Max 120 topics allowed
+    if zero_shot_topics.shape[0] > max_topic_no:
+        print("Maximum", max_topic_no, "topics allowed to fit within large language model context limits.")
+        zero_shot_topics = zero_shot_topics.iloc[:max_topic_no, :]
+
+    # Forward slashes in the topic names seems to confuse the model
+    if zero_shot_topics.shape[1] >= 1:  # Check if there is at least one column                       
+        for x in zero_shot_topics.columns:
+            if not zero_shot_topics[x].isnull().all():
+                zero_shot_topics[x] = zero_shot_topics[x].apply(initial_clean)
+
+                zero_shot_topics.loc[:, x] = (
+                zero_shot_topics.loc[:, x]
+                .str.strip()
+                .str.replace('\n', ' ')
+                .str.replace('\r', ' ')
+                .str.replace('/', ' or ')
+                .str.lower()
+                .str.capitalize())            
+
+        #print("zero_shot_topics:", zero_shot_topics)
+
+        # If number of columns is 1, keep only subtopics
+        if zero_shot_topics.shape[1] == 1 and "General topic" not in zero_shot_topics.columns: 
+            zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
+            zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])                    
+        # Allow for possibility that the user only wants to set general topics and not subtopics
+        elif zero_shot_topics.shape[1] == 1 and "General topic" in zero_shot_topics.columns: 
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General Topic"])
+            zero_shot_topics_subtopics_list = [""] * zero_shot_topics.shape[0]
+        # If general topic and subtopic are specified
+        elif set(["General topic", "Subtopic"]).issubset(zero_shot_topics.columns):
+            print("Found General topic and Subtopic in zero shot topics")
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
+            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
+
+        # If number of columns is at least 2, keep general topics and subtopics
+        elif zero_shot_topics.shape[1] >= 2 and "Description" not in zero_shot_topics.columns: 
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics.iloc[:, 0])
+            zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 1])
+        else:
+            # If there are more columns, just assume that the first column was meant to be a subtopic
+            zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
+            zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])
+
+        # Add a description if column is present
+        # print("zero_shot_topics.shape[1]:", zero_shot_topics.shape[1])                         
+        if "Description" in zero_shot_topics.columns:
+            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
+            #print("Description found in topic title. List is:", zero_shot_topics_description_list)        
+        elif zero_shot_topics.shape[1] >= 3:
+            zero_shot_topics_description_list = list(zero_shot_topics.iloc[:, 2]) # Assume the third column is description
+        else:
+            zero_shot_topics_description_list = [""] * zero_shot_topics.shape[0]
+
+        # If the responses are being forced into zero shot topics, allow an option for nothing relevant
+        if force_zero_shot_radio == "Yes":
+            zero_shot_topics_gen_topics_list.append("")
+            zero_shot_topics_subtopics_list.append("No relevant topic")
+            zero_shot_topics_description_list.append("")                     
+
+        if create_revised_general_topics == True:
+            pass
+
+            # The following currently doesn't really work. Excluded for now.
+
+            # unique_topics_df = pd.DataFrame(data={
+            #     "General Topic":zero_shot_topics_gen_topics_list,
+            #     "Subtopic":zero_shot_topics_subtopics_list,
+            #     "Description": zero_shot_topics_description_list
+            #     })
+            # unique_topics_markdown = unique_topics_df.to_markdown()
+
+            # #print("unique_topics_markdown:", unique_topics_markdown)
+            
+            # formatted_general_topics_system_prompt = create_general_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
+
+            # # Format the general_topics prompt with the topics
+            # formatted_general_topics_prompt = create_general_topics_prompt.format(topics=unique_topics_markdown)
+
+            # if "gemma" in model_choice:
+            #     formatted_general_topics_prompt = llama_cpp_prefix + formatted_general_topics_system_prompt + "\n" + formatted_general_topics_prompt + llama_cpp_suffix
+
+            # formatted_general_topics_prompt_list = [formatted_general_topics_prompt]
+
+            # whole_conversation = []
+
+            # general_topic_response, general_topic_conversation_history, general_topic_conversation, general_topic_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
+
+            # # Convert response text to a markdown table
+            # try:
+            #     zero_shot_topics_df, is_error = convert_response_text_to_markdown_table(response_text, table_type = "Revised topics table")
+            #     print("Output revised zero shot topics table is:", zero_shot_topics_df)
+
+            #     zero_shot_revised_path = output_folder + "zero_shot_topics_with_general_topics.csv"
+            #     out_file_paths.append(zero_shot_revised_path)
+
+            # except Exception as e:
+            #     print("Error in parsing markdown table from response text:", e, "Not adding revised General Topics to table")
+
+            # if zero_shot_topics_df.empty:
+            #     print("Creation of revised general topics df failed, reverting to original list")
+        else:
+            pass
+        
+        # Add description or not
+        zero_shot_topics_df = pd.DataFrame(data={
+                "General Topic":zero_shot_topics_gen_topics_list,
+                "Subtopic":zero_shot_topics_subtopics_list,
+                "Description": zero_shot_topics_description_list
+                })
+        
+        #if not zero_shot_topics_df["Description"].isnull().all():
+        #    zero_shot_topics_df["Description"] = zero_shot_topics_df["Description"].apply(initial_clean)
+        
+        return zero_shot_topics_df
+
 @spaces.GPU
 def extract_topics(in_data_file,
               file_data:pd.DataFrame,
@@ -1184,6 +1171,8 @@ def extract_topics(in_data_file,
               sentiment_checkbox:str = "Negative, Neutral, or Positive",
               force_zero_shot_radio:str = "No",
               in_excel_sheets:List[str] = [],
+              force_single_topic_radio:str = "No",
+              force_single_topic_prompt:str=force_single_topic_prompt,
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,              
@@ -1224,7 +1213,9 @@ def extract_topics(in_data_file,
     - time_taken (float, optional): The amount of time taken to process the responses up until this point.
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
-    - in_excel_sheets (List[str], optional): List of excel sheets to load from input file
+    - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
+    - force_single_topic_radio (str, optional): Should the model be forced to assign only one single topic to each response (effectively a classifier).
+    - force_single_topic_prompt (str, optional): The prompt for forcing the model to assign only one single topic to each response.
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
@@ -1254,17 +1245,13 @@ def extract_topics(in_data_file,
     if file_data.empty:
         print("No data table found, loading from file")
         try:
-            #print("in_data_file:", in_data_file)
             in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_file)
-            #print("in_colnames:", in_colnames_drop)
             file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default, in_excel_sheets)
-            #print("file_data loaded in:", file_data)
         except:
             # Check if files and text exist
             out_message = "Please enter a data file to summarise."
             print(out_message)
             raise Exception(out_message)
-            #return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths#, out_message
 
 
     #model_choice_clean = replace_punctuation_with_underscore(model_choice)
@@ -1277,12 +1264,10 @@ def extract_topics(in_data_file,
             latest_batch_completed = 0
             out_message = []
             out_file_paths = []
-            #print("model_choice_clean:", model_choice_clean)
 
             if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
                 progress(0.1, "Loading in Gemma 2b model")
                 local_model, tokenizer = load_model()
-                print("Local model loaded:", local_model)
 
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)
@@ -1301,12 +1286,10 @@ def extract_topics(in_data_file,
             out_file_paths = []
     
         
-        if model_choice == "anthropic.claude-3-sonnet-20240229-v1:0" and file_data.shape[1] > 300:
+        if "anthropic.claude-3-sonnet" in model_choice and file_data.shape[1] > 300:
             out_message = "Your data has more than 300 rows, using the Sonnet model will be too expensive. Please choose the Haiku model instead."
             print(out_message)
-            raise Exception(out_message)
-            #return out_message, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths#, out_message
-            
+            raise Exception(out_message)    
         
         if sentiment_checkbox == "Negative, Neutral, or Positive": sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive"
         elif sentiment_checkbox == "Negative or Positive": sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative or Positive"
@@ -1337,10 +1320,10 @@ def extract_topics(in_data_file,
                 if latest_batch_completed >= 1 or candidate_topics is not None:
 
                     # Prepare Gemini models before query       
-                    if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
+                    if "gemini" in model_choice:
                         print("Using Gemini model:", model_choice)
                         model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=add_existing_topics_system_prompt, max_tokens=max_tokens)
-                    elif model_choice in ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"]:
+                    elif "anthropic.claude" in model_choice:
                         print("Using AWS Bedrock model:", model_choice)
                     else:
                         print("Using local model:", model_choice)
@@ -1351,109 +1334,17 @@ def extract_topics(in_data_file,
 
                         # 'Zero shot topics' are those supplied by the user
                         max_topic_no = 120
-                        zero_shot_topics = read_file(candidate_topics.name)
+                        zero_shot_topics = read_file(candidate_topics.name)                       
+                            
+                        zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics, max_topic_no)
 
-                        # Max 120 topics allowed
-                        if zero_shot_topics.shape[0] > max_topic_no:
-                            print("Maximum", max_topic_no, "topics allowed to fit within large language model context limits.")
-                            zero_shot_topics = zero_shot_topics.iloc[:max_topic_no, :]
+                        #print("zero_shot_topics_df:", zero_shot_topics_df)
 
-                        # Forward slashes in the topic names seems to confuse the model
-                        if zero_shot_topics.shape[1] >= 1:  # Check if there is at least one column                       
-                            for x in zero_shot_topics.columns:
-                                zero_shot_topics.loc[:, x] = (
-                                zero_shot_topics.loc[:, x]
-                                .str.strip()
-                                .str.replace('\n', ' ')
-                                .str.replace('\r', ' ')
-                                .str.replace('/', ' or ')
-                                .str.lower()
-                                .str.capitalize())
-                    
-                            # If number of columns is 1, keep only subtopics
-                            if zero_shot_topics.shape[1] == 1 and "General Topic" not in zero_shot_topics.columns: 
-                                zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
-                                zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])                        
-                            # Allow for possibility that the user only wants to set general topics and not subtopics
-                            elif zero_shot_topics.shape[1] == 1 and "General Topic" in zero_shot_topics.columns: 
-                                zero_shot_topics_gen_topics_list = list(zero_shot_topics["General Topic"])
-                                zero_shot_topics_subtopics_list = [""] * zero_shot_topics.shape[0]
-                            # If general topic and subtopic are specified
-                            elif set(["General Topic", "Subtopic"]).issubset(zero_shot_topics.columns):
-                                zero_shot_topics_gen_topics_list = list(zero_shot_topics["General Topic"])
-                                zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
-                            # If number of columns is 2, keep general topics and subtopics
-                            elif zero_shot_topics.shape[1] == 2: 
-                                zero_shot_topics_gen_topics_list = list(zero_shot_topics.iloc[:, 0])
-                                zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 1])
-                            else:
-                                # If there are more columns, just assume that the first column was meant to be a subtopic
-                                zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
-                                zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])
-
-                            # If the responses are being forced into zero shot topics, allow an option for nothing relevant
-                            if force_zero_shot_radio == "Yes":
-                                zero_shot_topics_gen_topics_list.append("")
-                                zero_shot_topics_subtopics_list.append("No topics are relevant to the response")                        
-
-                            if create_revised_general_topics == True:
-                                # Create the most up to date list of topics and subtopics.
-                                # If there are candidate topics, but the existing_unique_topics_df hasn't yet been constructed, then create.
-                                unique_topics_df = pd.DataFrame(data={
-                                    "General Topic":zero_shot_topics_gen_topics_list,
-                                    "Subtopic":zero_shot_topics_subtopics_list
-                                    })
-                                unique_topics_markdown = unique_topics_df.to_markdown()
-
-                                print("unique_topics_markdown:", unique_topics_markdown)
-                                
-                                formatted_general_topics_system_prompt = create_general_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
-
-                                # Format the general_topics prompt with the topics
-                                formatted_general_topics_prompt = create_general_topics_prompt.format(topics=unique_topics_markdown)
-
-                                if model_choice == "gemma_2b_it_local":
-                                    formatted_general_topics_prompt = llama_cpp_prefix + formatted_general_topics_system_prompt + "\n" + formatted_general_topics_prompt + llama_cpp_suffix
-
-                                formatted_general_topics_prompt_list = [formatted_general_topics_prompt]
-
-
-
-                                whole_conversation = []
-
-                                general_topic_response, general_topic_conversation_history, general_topic_conversation, general_topic_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
-
-                                # Convert response text to a markdown table
-                                try:
-                                    zero_shot_topics_df, is_error = convert_response_text_to_markdown_table(response_text, table_type = "Revised topics table")
-                                    print("Output revised zero shot topics table is:", zero_shot_topics_df)
-
-                                    zero_shot_revised_path = output_folder + "zero_shot_topics_with_general_topics.csv"
-                                    #zero_shot_topics_df.to_csv(zero_shot_revised_path, index = None)
-                                    out_file_paths.append(zero_shot_revised_path)
-
-                                except Exception as e:
-                                    print("Error in parsing markdown table from response text:", e, "Not adding revised General Topics to table")
-                                    zero_shot_topics_df = pd.DataFrame(data={
-                                        "General Topic":zero_shot_topics_gen_topics_list,
-                                        "Subtopic":zero_shot_topics_subtopics_list})
-
-                                if zero_shot_topics_df.empty:
-                                    print("Creation of revised general topics df failed, reverting to original list")
-                                    zero_shot_topics_df = pd.DataFrame(data={
-                                        "General Topic":zero_shot_topics_gen_topics_list,
-                                        "Subtopic":zero_shot_topics_subtopics_list})
-                            else:
-                                zero_shot_topics_df = pd.DataFrame(data={
-                                    "General Topic":zero_shot_topics_gen_topics_list,
-                                    "Subtopic":zero_shot_topics_subtopics_list})
-                                
-
-                            # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
-                            if not existing_unique_topics_df.empty:
-                                existing_unique_topics_df = pd.concat([existing_unique_topics_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
-                            else:
-                                existing_unique_topics_df = zero_shot_topics_df
+                        # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
+                        if not existing_unique_topics_df.empty and force_zero_shot_radio != "Yes":
+                            existing_unique_topics_df = pd.concat([existing_unique_topics_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
+                        else:
+                            existing_unique_topics_df = zero_shot_topics_df
 
                     if candidate_topics and not zero_shot_topics_df.empty:
                         # If you have already created revised zero shot topics, concat to the current
@@ -1464,24 +1355,40 @@ def extract_topics(in_data_file,
                     existing_unique_topics_df.fillna("", inplace=True)
                     existing_unique_topics_df["General Topic"] = existing_unique_topics_df["General Topic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_unique_topics_df["Subtopic"] = existing_unique_topics_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
+                    existing_unique_topics_df = existing_unique_topics_df.drop_duplicates()
+                    if "Description" in existing_unique_topics_df:
+                        if existing_unique_topics_df['Description'].isnull().all():
+                            existing_unique_topics_df.drop("Description", axis = 1, inplace = True)
 
                     # print("existing_unique_topics_df:", existing_unique_topics_df)
 
                     # If user has chosen to try to force zero shot topics, then the prompt is changed to ask the model not to deviate at all from submitted topic list.
-                    if force_zero_shot_radio == "Yes":
-                        unique_topics_markdown = existing_unique_topics_df[["Subtopic"]].drop_duplicates(["Subtopic"]).to_markdown(index=False)
+                    keep_cols = [
+                        col for col in ["General Topic", "Subtopic", "Description"]
+                        if col in existing_unique_topics_df.columns
+                        and not existing_unique_topics_df[col].replace(r'^\s*$', pd.NA, regex=True).isna().all()
+                        ]
+                    
+                    if force_zero_shot_radio == "Yes":                        
+                        topics_df_for_markdown = existing_unique_topics_df[keep_cols].drop_duplicates(keep_cols)
+                        unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
                         topic_assignment_prompt = force_existing_topics_prompt
                     else:
-                        unique_topics_markdown = existing_unique_topics_df[["General Topic", "Subtopic"]].drop_duplicates(["General Topic", "Subtopic"]).to_markdown(index=False)
-                        topic_assignment_prompt = allow_new_topics_prompt        
-                
+                        topics_df_for_markdown = existing_unique_topics_df[keep_cols].drop_duplicates(keep_cols)
+                        unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
+                        topic_assignment_prompt = allow_new_topics_prompt  
+
+                    # Should the outputs force only one single topic assignment per response?
+                    if force_single_topic_radio != "Yes": force_single_topic_prompt = ""
+                    else:
+                        topic_assignment_prompt = topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")         
 
                     # Format the summary prompt with the response table and topics
                     formatted_system_prompt = add_existing_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
-                    formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown, topic_assignment=topic_assignment_prompt, sentiment_choices=sentiment_prompt)
+                    formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown, topic_assignment=topic_assignment_prompt, force_single_topic=force_single_topic_prompt, sentiment_choices=sentiment_prompt)
                     
 
-                    if model_choice == "gemma_2b_it_local":
+                    if "gemma" in model_choice:
                         formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
                         full_prompt = formatted_summary_prompt
                     else:
@@ -1499,7 +1406,7 @@ def extract_topics(in_data_file,
                     except Exception as e:
                         print(f"Error writing prompt to file {formatted_prompt_output_path}: {e}")
 
-                    if model_choice == "gemma_2b_it_local":
+                    if "gemma" in model_choice:
                         summary_prompt_list = [full_prompt] # Includes system prompt
                     else:
                         summary_prompt_list = [formatted_summary_prompt]
@@ -1510,13 +1417,9 @@ def extract_topics(in_data_file,
                     whole_conversation = []
 
                     # Process requests to large language model
-                    # responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(summary_prompt_list, add_existing_topics_system_prompt, summary_conversation_history, summary_whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, master = True)
-
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
-                    # print("responses:", responses[-1].text)
-                    # print("Whole conversation metadata:", whole_conversation_metadata)
-
+                    # Return output tables
                     topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=False)
 
                     # Write final output to text file for logging purposes
@@ -1541,7 +1444,6 @@ def extract_topics(in_data_file,
                     if is_error == True:
                         final_message_out = "Could not complete summary, error in LLM output."
                         raise Exception(final_message_out)
-                        #return unique_table_df_display_table_markdown, new_topic_df, new_unique_topics_df, new_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, final_message_out
 
                     # Write outputs to csv
                     ## Topics with references
@@ -1560,7 +1462,7 @@ def extract_topics(in_data_file,
                     
                     # Outputs for markdown table output
                     unique_table_df_display_table = new_unique_topics_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-                    unique_table_df_display_table_markdown = unique_table_df_display_table.to_markdown(index=False)
+                    unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Response References", "Summary"]].to_markdown(index=False)
 
                     #whole_conversation_metadata.append(whole_conversation_metadata_str)
                     whole_conversation_metadata_str = ' '.join(whole_conversation_metadata)
@@ -1579,11 +1481,11 @@ def extract_topics(in_data_file,
                     #system_prompt = system_prompt + normalised_simple_markdown_table
 
                     # Prepare Gemini models before query       
-                    if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
+                    if "gemini" in model_choice:
                         print("Using Gemini model:", model_choice)
                         model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
-                    elif model_choice in ["gemma_2b_it_local"]:
-                        print("Using local Gemma 2b model")
+                    elif "gemma" in model_choice:
+                        print("Using local Gemma model:", model_choice)
                     else:
                         print("Using AWS Bedrock model:", model_choice)
 
@@ -1597,7 +1499,7 @@ def extract_topics(in_data_file,
                     if prompt3: formatted_prompt3 = prompt3.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
                     else: formatted_prompt3 = prompt3
 
-                    if model_choice == "gemma_2b_it_local":
+                    if "gemma" in model_choice:
                         formatted_initial_table_prompt = llama_cpp_prefix + formatted_initial_table_system_prompt + "\n" + formatted_initial_table_prompt + llama_cpp_suffix
                         formatted_prompt2 = llama_cpp_prefix + formatted_initial_table_system_prompt + "\n" + formatted_prompt2 + llama_cpp_suffix
                         formatted_prompt3 = llama_cpp_prefix + formatted_initial_table_system_prompt + "\n" + formatted_prompt3 + llama_cpp_suffix
@@ -1703,6 +1605,8 @@ def extract_topics(in_data_file,
         # Set to a very high number so as not to mess with subsequent file processing by the user
         #latest_batch_completed = 999
 
+        join_file_paths = []
+
         toc = time.perf_counter()
         final_time = (toc - tic) + time_taken
         out_time = f"Everything finished in {round(final_time,1)} seconds."
@@ -1733,6 +1637,7 @@ def extract_topics(in_data_file,
         ## Reference table mapping response numbers to topics
         existing_reference_df.to_csv(reference_table_out_path, index=None)
         out_file_paths.append(reference_table_out_path)
+        join_file_paths.append(reference_table_out_path)
 
         # Create final unique topics table from reference table to ensure consistent numbers
         final_out_unique_topics_df = create_unique_table_df_from_reference_table(existing_reference_df)
@@ -1787,13 +1692,10 @@ def extract_topics(in_data_file,
 
         print("latest_batch_completed at end of batch iterations to return is", latest_batch_completed)
 
-        return unique_table_df_display_table_markdown, existing_topics_table, final_out_unique_topics_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), final_out_file_paths
+        return unique_table_df_display_table_markdown, existing_topics_table, final_out_unique_topics_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), final_out_file_paths, join_file_paths
 
 
-    return unique_table_df_display_table_markdown, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths
-
-
-
+    return unique_table_df_display_table_markdown, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths, join_file_paths
 
 def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:pd.DataFrame=pd.DataFrame()):
 
@@ -2302,7 +2204,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation_metadata = []
 
     # Prepare Gemini models before query       
-    if model_choice in ["gemini-2.0-flash", "gemini-1.5-pro-002"]:
+    if "gemini" in model_choice:
         print("Using Gemini model:", model_choice)
         model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
     else:
@@ -2464,7 +2366,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
                 progress(0.1, "Loading in Gemma 2b model")
                 local_model, tokenizer = load_model()
-                print("Local model loaded:", local_model)
+                #print("Local model loaded:", local_model)
 
     summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
     summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   

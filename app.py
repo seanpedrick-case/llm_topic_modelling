@@ -1,11 +1,11 @@
 import os
 import socket
 import spaces
-from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, RUN_LOCAL_MODEL
+from tools.helper_functions import ensure_output_folder_exists, add_folder_to_path, put_columns_in_df, get_connection_params, output_folder, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, model_full_names, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, RUN_LOCAL_MODEL, load_in_previous_reference_file, join_cols_onto_reference_df, GEMINI_API_KEY
 from tools.aws_functions import upload_file_to_s3, RUN_AWS_FUNCTIONS
 from tools.llm_api_call import extract_topics, load_in_data_file, load_in_previous_data_files, sample_reference_table_summaries, summarise_output_topics, batch_size_default, deduplicate_topics, modify_existing_output_tables
 from tools.auth import authenticate_user
-from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, verify_titles_prompt, verify_titles_system_prompt
+from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, verify_titles_prompt, verify_titles_system_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
 from tools.verify_titles import verify_titles
 #from tools.aws_functions import load_data_from_aws
 import gradio as gr
@@ -22,18 +22,14 @@ host_name = socket.gethostname()
 access_logs_data_folder = 'logs/' + today_rev + '/' + host_name + '/'
 feedback_data_folder = 'feedback/' + today_rev + '/' + host_name + '/'
 usage_data_folder = 'usage/' + today_rev + '/' + host_name + '/'
-file_input_height = 150
-
-print("RUN_LOCAL_MODEL is:", RUN_LOCAL_MODEL)
+file_input_height = 200
 
 if RUN_LOCAL_MODEL == "1":
     default_model_choice = "gemma_2b_it_local"
-
 elif RUN_AWS_FUNCTIONS == "1":
     default_model_choice = "anthropic.claude-3-haiku-20240307-v1:0"
-
 else:
-    default_model_choice = "gemini-2.0-flash"
+    default_model_choice = "gemini-2.0-flash-001"
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Base())
@@ -95,7 +91,7 @@ with app:
     
     Instructions on use can be found in the README.md file. Try it out with this [dummy development consultation dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation), which you can also try with [zero-shot topics](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/blob/main/example_zero_shot.csv), or this [dummy case notes dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_case_notes).
 
-    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). Due to the strict API limits for the best model (Pro 1.5), the use of Gemini requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information). 
+    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). The use of Gemini models requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information). 
 
     NOTE: that **API calls to Gemini are not considered secure**, so please only submit redacted, non-sensitive tabular files to this source. Also, large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
     
@@ -107,7 +103,7 @@ with app:
         )
         with gr.Row():
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
-            in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
+            in_api_key = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
             in_data_files = gr.File(height=file_input_height, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
@@ -116,12 +112,14 @@ with app:
         in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
-            candidate_topics = gr.File(height=file_input_height, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General Topic' and/or 'Subtopic' will allow for these columns to be suggested to the model.")
-            force_zero_shot_radio = gr.Radio(label="Force responses into zero shot topics", value="No", choices=["Yes", "No"])
+            candidate_topics = gr.File(height=file_input_height, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General Topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.")
+            with gr.Row(equal_height=True):
+                force_zero_shot_radio = gr.Radio(label="Force responses into zero shot topics", value="No", choices=["Yes", "No"])
+                force_single_topic_radio = gr.Radio(label="Ask the model to assign responses to only a single topic", value="No", choices=["Yes", "No"])
 
         context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
 
-        sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative, Neutral, or Positive", choices=["Negative, Neutral, or Positive", "Negative or Positive", "Do not assess sentiment"])
+        sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
 
         extract_topics_btn = gr.Button("Extract topics", variant="primary")
         
@@ -153,10 +151,7 @@ with app:
 
             save_modified_files_button = gr.Button(value="Save modified topic names")
 
-
-        with gr.Accordion("Upload reference data file and unique data files", open = True):
-
-            
+        with gr.Accordion("Upload reference data file and unique data files", open = True):            
             ### DEDUPLICATION
             deduplication_input_files = gr.File(height=file_input_height, label="Upload files to deduplicate topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
             deduplication_input_files_status = gr.Textbox(value = "", label="Previous file input", visible=False)
@@ -168,11 +163,10 @@ with app:
 
             deduplicate_previous_data_btn = gr.Button("Deduplicate topics", variant="primary")
 
-
-            ### SUMMARISATION            
+            ### SUMMARISATION
             summarisation_input_files = gr.File(height=file_input_height, label="Upload files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
 
-            summarise_format_radio = gr.Radio(label="Choose summary type", value="Return a summary up to two paragraphs long that includes as much detail as possible from the original text", choices=["Return a summary up to two paragraphs long that includes as much detail as possible from the original text", "Return a concise summary up to one paragraph long that summarises only the most important themes from the original text"])
+            summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt])
             
             summarise_previous_data_btn = gr.Button("Summarise topics", variant="primary")
             summary_output_files = gr.File(height=file_input_height, label="Summarised output files", interactive=False)
@@ -198,10 +192,10 @@ with app:
         in_view_table = gr.File(height=file_input_height, label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet', '.csv.gz'])
         view_table_markdown = gr.Markdown(value = "", label="View table", show_copy_button=True)
 
-    with gr.Tab(label="Verify titles"):
+    with gr.Tab(label="Verify descriptions"):
         gr.Markdown(
         """
-        ### Choose a tabular data file (xlsx or csv) with titles and original text to verify titles/descriptions for.
+        ### Choose a tabular data file (xlsx or csv) with titles and original text to verify descriptions for.
         """
         )
         with gr.Row():
@@ -212,11 +206,11 @@ with app:
             verify_in_data_files = gr.File(height=file_input_height, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
         
         verify_in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet"], multiselect = False, label="Select the Excel sheet.", visible=False, allow_custom_value=True)
-        verify_in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text columns that have a response and a title. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
+        verify_in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text columns that have a response and a title/description. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
         #verify_title_colnames = gr.Dropdown(choices=["Choose column with titles"], multiselect = False, label="Select the open text columns that have a title. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
         
-        verify_titles_btn = gr.Button("Verify titles", variant="primary")
-        verify_titles_file_output = gr.File(height=file_input_height, label="Title verification output files")
+        verify_titles_btn = gr.Button("Verify descriptions", variant="primary")
+        verify_titles_file_output = gr.File(height=file_input_height, label="Descriptions verification output files")
         verify_display_topic_table_markdown = gr.Markdown(value="### Language model response will appear here", show_copy_button=True)  
 
         verify_modification_input_files_placeholder = gr.File(height=file_input_height, label="Placeholder for files to avoid errors", visible=False)
@@ -231,7 +225,7 @@ with app:
             batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query", value = batch_size_default, precision=0, minimum=1, maximum=100)
             random_seed = gr.Number(value=42, label="Random seed for LLM generation", visible=False)            
 
-        with gr.Accordion("Prompt settings", open = True):
+        with gr.Accordion("Prompt settings", open = False):
             number_of_prompts = gr.Number(value=1, label="Number of prompts to send to LLM in sequence", minimum=1, maximum=3, visible=False)
             system_prompt_textbox = gr.Textbox(label="Initial system prompt", lines = 4, value = system_prompt)
             initial_table_prompt_textbox = gr.Textbox(label = "Initial topics prompt", lines = 8, value = initial_table_prompt)
@@ -241,9 +235,17 @@ with app:
             add_to_existing_topics_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = add_existing_topics_prompt)
             verify_titles_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = verify_titles_system_prompt)
             verify_titles_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = verify_titles_prompt)
-            
-        log_files_output = gr.File(height=file_input_height, label="Log file output", interactive=False)
-        conversation_metadata_textbox = gr.Textbox(label="Query metadata - usage counts and other parameters", interactive=False, lines=8)
+
+        with gr.Accordion("Join additional columns to reference file outputs", open = False):
+            join_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
+            with gr.Row():
+                in_join_files = gr.File(height=file_input_height, label="Reference file should go here. Original data file should be loaded on the first tab.")
+                join_cols_btn = gr.Button("Join columns to reference output", variant="primary")
+            out_join_files = gr.File(height=file_input_height, label="Output joined reference files will go here.")
+
+        with gr.Accordion("Logging outputs", open = False):
+            log_files_output = gr.File(height=file_input_height, label="Log file output", interactive=False)
+            conversation_metadata_textbox = gr.Textbox(label="Query metadata - usage counts and other parameters", interactive=False, lines=8)
 
         # Invisible text box to hold the session hash/username just for logging purposes
         session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible=False) 
@@ -271,25 +273,28 @@ with app:
     ###
 
     # Tabular data upload
-    in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets, reference_data_file_name_textbox])
+    in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets, reference_data_file_name_textbox, join_colnames])
 
     extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown]).\
     success(load_in_data_file,                           
         inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, reference_data_file_name_textbox, total_number_of_batches], api_name="load_data").\
     success(fn=extract_topics,                           
-        inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, reference_data_file_name_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, in_excel_sheets],        
-        outputs=[display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, modification_input_files], api_name="extract_topics")
+        inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, reference_data_file_name_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, in_excel_sheets, force_single_topic_radio],        
+        outputs=[display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, modification_input_files, in_join_files], api_name="extract_topics")
     
     
     # If the output file count text box changes, keep going with redacting each data file until done. Then reveal the feedback buttons.
     # latest_batch_completed.change(fn=extract_topics,                                  
     #     inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, reference_data_file_name_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, second_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, in_excel_sheets],
-    #     outputs=[display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, modification_input_files]).\
+    #     outputs=[display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, modification_input_files, in_join_files]).\
     #     success(fn = reveal_feedback_buttons,
     #         outputs=[data_feedback_radio, data_further_details_text, data_submit_feedback_btn, data_feedback_title], scroll_to_output=True)
     
     # If you upload data into the deduplication input box, the modifiable topic dataframe box is updated
     modification_input_files.change(fn=load_in_previous_data_files, inputs=[modification_input_files, modified_unique_table_change_bool], outputs=[modifiable_unique_topics_df_state, master_modify_reference_df_state, master_modify_unique_topics_df_state, reference_data_file_name_textbox, unique_topics_table_file_name_textbox, text_output_modify_file_list_state])
+
+    
+    
    
 
     # Modify output table with custom topic names
@@ -314,17 +319,29 @@ with app:
             load_in_data_file, inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, reference_data_file_name_textbox, total_number_of_batches]).\
             success(load_in_previous_data_files, inputs=[in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed, in_previous_data_files_status, reference_data_file_name_textbox])
     
-    # VERIFY TITLES OR DESCRIPTIONS OF TEXT
+    # VERIFY DESCRIPTIONS OF TEXT
 
     # Tabular data upload
-    verify_in_data_files.upload(fn=put_columns_in_df, inputs=[verify_in_data_files], outputs=[verify_in_colnames, verify_in_excel_sheets, reference_data_file_name_textbox])
+    verify_in_data_files.upload(fn=put_columns_in_df, inputs=[verify_in_data_files], outputs=[verify_in_colnames, verify_in_excel_sheets, reference_data_file_name_textbox, join_colnames])
 
     verify_titles_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown]).\
     success(load_in_data_file,
         inputs = [verify_in_data_files, verify_in_colnames, batch_size_number, verify_in_excel_sheets], outputs = [file_data_state, reference_data_file_name_textbox, total_number_of_batches], api_name="verify_load_data").\
     success(fn=verify_titles,                           
         inputs=[verify_in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, reference_data_file_name_textbox, total_number_of_batches, verify_in_api_key, temperature_slide, verify_in_colnames, verify_model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, verify_titles_prompt_textbox, prompt_2_textbox, prompt_3_textbox, verify_titles_system_prompt_textbox, verify_titles_system_prompt_textbox, verify_titles_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, in_excel_sheets],        
-        outputs=[verify_display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, verify_titles_file_output, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, verify_modification_input_files_placeholder], api_name="verify_titles")
+        outputs=[verify_display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, verify_titles_file_output, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, verify_modification_input_files_placeholder], api_name="verify_descriptions")
+    
+    ###
+    #  LLM SETTINGS PAGE
+    ###
+
+    reference_df_data_file_name_textbox = gr.Textbox(label="reference_df_data_file_name_textbox", visible=False)
+    master_reference_df_state_joined = gr.State(pd.DataFrame())
+
+    join_cols_btn.click(fn=load_in_previous_reference_file, inputs=[in_join_files], outputs=[master_reference_df_state, reference_df_data_file_name_textbox]).\
+    success(load_in_data_file,                           
+        inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, reference_data_file_name_textbox, total_number_of_batches]).\
+    success(fn=join_cols_onto_reference_df, inputs=[master_reference_df_state, file_data_state, join_colnames, reference_df_data_file_name_textbox], outputs=[master_reference_df_state_joined, out_join_files])
 
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS

@@ -5,6 +5,7 @@
 *.ipynb
 *.xls
 *.xlsx
+*.csv
 examples/*
 output/*
 tools/__pycache__/*

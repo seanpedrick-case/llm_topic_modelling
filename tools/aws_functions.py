@@ -13,9 +13,14 @@ bucket_name=""
 AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
 print(f'The value of AWS_REGION is {AWS_REGION}')
 
+CONSULTATION_SUMMARY_BUCKET = get_or_create_env_var('CONSULTATION_SUMMARY_BUCKET', '')
+print(f'The value of AWS_REGION is {CONSULTATION_SUMMARY_BUCKET}')
+
+
+
 if RUN_AWS_FUNCTIONS == "1":
     try:
-        bucket_name = os.environ['CONSULTATION_SUMMARY_BUCKET']
+        bucket_name = CONSULTATION_SUMMARY_BUCKET
         session = boto3.Session() # profile_name="default"
     except Exception as e:
         print(e)
