@@ -3,7 +3,7 @@ system_prompt = """You are a researcher analysing responses from an open text da
 initial_table_prompt = """The open text data is shown in the following table that contains two columns, Reference and Response. Response table: 
 {response_table}
 
-Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
+Your task is to create one new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first column identify general topics relevant to responses. Create as many general topics as you can.
 In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be blank or empty.
 {sentiment_choices}.
@@ -23,11 +23,13 @@ prompt3 = ""
 
 add_existing_topics_system_prompt = system_prompt
 
-force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response references', and 'Summary'.
+force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response References', and 'Summary'.
 In the first column, write 'Not assessed'. In the second column, assign Subtopics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
 
-allow_new_topics_prompt = """Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response references', and 'Summary'.
+allow_new_topics_prompt = """Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General Topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
+
+force_single_topic_prompt = """ Wherever possible, assign a response to one single topic, unless there are multiple topics that are equally relevant."""
 
 add_existing_topics_prompt = """Responses are shown in the following Response table: 
 {response_table}
@@ -35,8 +37,8 @@ add_existing_topics_prompt = """Responses are shown in the following Response ta
 Topics known to be relevant to this dataset are shown in the following Topics table: 
 {topics}
 
-Your task is to create one new markdown table, assigning responses from the Response table to existing topics, or to create new topics if no existing topics are relevant.  
-{topic_assignment}
+Your task is to create one new markdown table, assigning responses from the Response table to topics.  
+{topic_assignment}{force_single_topic}
 {sentiment_choices}.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
 In the fifth column, write a short summary of the Subtopic based on relevant responses - highlight specific issues that appear.
@@ -45,7 +47,6 @@ Do not add any other columns. Do not add any other text to your response.
 New table:"""
 
 # Return only one table in markdown format containing all relevant topics. Remove topics from the table that are not assigned to any response. Do not repeat Subtopics with the same Sentiment.
-
 
 summarise_topic_descriptions_system_prompt = system_prompt
 
@@ -56,6 +57,10 @@ summarise_topic_descriptions_prompt = """Below is a table with number of paragra
 Your task is to make a consolidated summary of the above text. {summary_format}. Return only the summary and no other text.
 
 Summary:"""
+
+single_para_summary_format_prompt = "Return a concise summary up to one paragraph long that summarises only the most important themes from the original text"
+
+two_para_summary_format_prompt = "Return a summary up to two paragraphs long that includes as much detail as possible from the original text"
 
 
 ## The following didn't work well in testing and so is not currently used
@@ -70,7 +75,23 @@ Your task is to create a General Topic name for each Subtopic. The new Topics ta
 New Topics table:"""
 
 
+### Verify exisiting categories prompt
+verify_titles_system_prompt = system_prompt
 
+
+verify_titles_prompt = """Response numbers alongside the Response text and assigned descriptions are shown in the table below: 
+{response_table}
+
+The criteria for a suitable description for these responses is that they should be readable, concise, and fully encapsulate the main subject of the response.
+
+Create a markdown table with four columns.
+The first column is 'Response References', and should contain just the response number under consideration.
+The second column is 'Is this a suitable description', answer the question with 'Yes' or 'No', with no other text.
+The third column is 'Explanation', give a short explanation for your response in the second column.
+The fourth column is 'Alternative description', suggest an alternative description for the response that meet the criteria stated above.
+Do not add any other text to your response.
+
+Output markdown table:"""
 
 
 

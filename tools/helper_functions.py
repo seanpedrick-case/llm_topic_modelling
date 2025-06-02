@@ -1,6 +1,9 @@
 import os
+import re
 import gradio as gr
 import pandas as pd
+from typing import List
+import math
 
 def empty_output_vars_extract_topics():
     # Empty output objects before processing a new file
@@ -46,22 +49,35 @@ def get_or_create_env_var(var_name, default_value):
     
     return value
 
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
+RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "1")
 print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
 
 RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
 print(f'The value of RUN_LOCAL_MODEL is {RUN_LOCAL_MODEL}')
 
-if RUN_AWS_FUNCTIONS == "1":
-    model_full_names = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0", "gemini-2.0-flash", "gemini-1.5-pro-002", "gemma_2b_it_local"]
-    model_short_names = ["haiku", "sonnet", "gemini_flash", "gemini_pro", "gemma_local"]
-else:
-    model_full_names = ["gemini-2.0-flash", "gemini-1.5-pro-002", "gemma_2b_it_local"]
-    model_short_names = ["gemini_flash", "gemini_pro", "gemma_local"]
+RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
+print(f'The value of RUN_GEMINI_MODELS is {RUN_GEMINI_MODELS}')
 
-if RUN_LOCAL_MODEL == "0":
-    model_full_names.remove("gemma_2b_it_local")
-    model_short_names.remove("gemma_local")
+GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
+
+# Build up options for models
+model_full_names = []
+model_short_names = []
+
+if RUN_LOCAL_MODEL == "1":
+    model_full_names.append("gemma_2b_it_local")
+    model_short_names.append("gemma_local")
+
+if RUN_AWS_FUNCTIONS == "1":
+    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"])
+    model_short_names.extend(["haiku", "sonnet"])
+
+if RUN_GEMINI_MODELS == "1":
+    model_full_names.extend(["gemini-2.0-flash-001", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-exp-05-06" ]) # , # Gemini pro No longer available on free tier
+    model_short_names.extend(["gemini_flash_2", "gemini_flash_2.5", "gemini_pro"])
+
+print("model_short_names:", model_short_names)
+print("model_full_names:", model_full_names)
 
 model_name_map = {short: full for short, full in zip(model_full_names, model_short_names)}
 
@@ -123,6 +139,113 @@ def read_file(filename:str, sheet:str=""):
     elif file_type == 'parquet':
         return pd.read_parquet(filename)
     
+def load_in_file(file_path: str, colnames:List[str]="", excel_sheet:str=""):
+    """
+    Loads in a tabular data file and returns data and file name.
+
+    Parameters:
+    - file_path (str): The path to the file to be processed.
+    - colnames (List[str], optional): list of colnames to load in
+    """
+
+    #file_type = detect_file_type(file_path)
+    #print("File type is:", file_type)
+
+    file_name = get_file_name_no_ext(file_path)
+    file_data = read_file(file_path, excel_sheet)
+
+    if colnames and isinstance(colnames, list):
+        col_list = colnames
+    else:
+        col_list = list(file_data.columns)
+
+    if not isinstance(col_list, List):
+        col_list = [col_list]
+
+    col_list = [item for item in col_list if item not in ["", "NA"]]
+
+    for col in col_list:
+        file_data[col] = file_data[col].fillna("")
+        file_data[col] = file_data[col].astype(str).str.replace("\bnan\b", "", regex=True)  
+        
+        #print(file_data[colnames])
+
+    return file_data, file_name
+
+def load_in_data_file(file_paths:List[str], in_colnames:List[str], batch_size:int=50, in_excel_sheets:str=""):
+    '''Load in data table, work out how many batches needed.'''
+
+    if not isinstance(in_colnames, list):
+        in_colnames = [in_colnames]
+
+    #print("in_colnames:", in_colnames)
+
+    try:
+        file_data, file_name = load_in_file(file_paths[0], colnames=in_colnames, excel_sheet=in_excel_sheets)
+        num_batches = math.ceil(len(file_data) / batch_size)
+        print("Total number of batches:", num_batches)
+
+    except Exception as e:
+        print(e)
+        file_data = pd.DataFrame()
+        file_name = ""
+        num_batches = 1  
+    
+    return file_data, file_name, num_batches
+
+def load_in_previous_reference_file(file:str):
+    '''Load in data table from a partially completed consultation summary to continue it.'''
+
+    reference_file_data = pd.DataFrame()
+    reference_file_name = ""
+    out_message = ""
+
+    #for file in file_paths:
+
+    print("file:", file)
+
+    # If reference table
+    if 'reference_table' in file:
+        try:
+            reference_file_data, reference_file_name = load_in_file(file)
+            #print("reference_file_data:", reference_file_data.head(2))
+            out_message = out_message + " Reference file load successful."
+        except Exception as e:
+            out_message = "Could not load reference file data:" + str(e)
+            raise Exception("Could not load reference file data:", e)
+
+    if reference_file_data.empty:
+        out_message = out_message + " No reference data table provided."
+        raise Exception(out_message) 
+
+    print(out_message)
+         
+    return reference_file_data, reference_file_name
+
+def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.DataFrame, join_columns:List[str], original_file_name:str, output_folder:str=output_folder):
+
+    #print("original_data_df columns:", original_data_df.columns)
+    #print("original_data_df:", original_data_df)
+
+    original_data_df.reset_index(names="Response References", inplace=True)    
+    original_data_df["Response References"] += 1
+
+    #print("reference_df columns:", reference_df.columns)
+    #print("reference_df:", reference_df)
+
+    join_columns.append("Response References")
+
+    reference_df["Response References"] = reference_df["Response References"].fillna("-1").astype(int) 
+
+    save_file_name = output_folder + original_file_name + "_j.csv"
+
+    out_reference_df = reference_df.merge(original_data_df[join_columns], on = "Response References", how="left")
+    out_reference_df.to_csv(save_file_name, index=None)    
+
+    file_data_outputs = [save_file_name]
+
+    return out_reference_df, file_data_outputs
+
 # Wrap text in each column to the specified max width, including whole words
 def wrap_text(text:str, max_width=60, max_text_length=None):
     if not isinstance(text, str):
@@ -209,6 +332,26 @@ def wrap_text(text:str, max_width=60, max_text_length=None):
     
     return '<br>'.join(wrapped_lines)
 
+def initial_clean(text):
+    #### Some of my cleaning functions
+    html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
+    html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
+    non_ascii_pattern = r'[^\x00-\x7F]+'
+    multiple_spaces_regex = r'\s{2,}'
+        
+    # Define a list of patterns and their replacements
+    patterns = [
+        (html_pattern_regex, ' '),
+        (html_start_pattern_end_dots_regex, ' '),
+        (non_ascii_pattern, ' '),
+        (multiple_spaces_regex, ' ')
+    ]
+    
+    # Apply each regex replacement
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
+    
+    return text
 
 def view_table(file_path: str):  # Added max_width parameter
     df = pd.read_csv(file_path)
@@ -234,7 +377,7 @@ def ensure_output_folder_exists():
     else:
         print(f"The 'output/' folder already exists.")
 
-def put_columns_in_df(in_file):
+def put_columns_in_df(in_file:List[str]):
     new_choices = []
     concat_choices = []
     all_sheet_names = []
@@ -272,9 +415,9 @@ def put_columns_in_df(in_file):
     concat_choices = sorted(set(concat_choices))
 
     if number_of_excel_files > 0:      
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), file_end
+        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), file_end, gr.Dropdown(choices=concat_choices)
     else:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(visible=False), file_end
+        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(visible=False), file_end, gr.Dropdown(choices=concat_choices)
 
 # Following function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
 def add_folder_to_path(folder_path: str):
