@@ -13,7 +13,7 @@ def empty_output_vars_extract_topics():
     # Empty output objects before processing a new file
 
     master_topic_df_state = pd.DataFrame()
-    master_unique_topics_df_state = pd.DataFrame()
+    master_topic_summary_df_state = pd.DataFrame()
     master_reference_df_state = pd.DataFrame()
     text_output_file = []
     text_output_file_list_state = []
@@ -26,20 +26,20 @@ def empty_output_vars_extract_topics():
     reference_data_file_name_textbox = ""
     display_topic_table_markdown = ""
 
-    return master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown
+    return master_topic_df_state, master_topic_summary_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown
 
 def empty_output_vars_summarise():
     # Empty output objects before summarising files
 
     summary_reference_table_sample_state = pd.DataFrame()
-    master_unique_topics_df_revised_summaries_state = pd.DataFrame()
+    master_topic_summary_df_revised_summaries_state = pd.DataFrame()
     master_reference_df_revised_summaries_state = pd.DataFrame()
     summary_output_files = []
     summarised_outputs_list = []
     latest_summary_completed_num = 0
     conversation_metadata_textbox = ""
 
-    return summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox
+    return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
@@ -263,9 +263,9 @@ def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:
 
     return pivot_table
 
-def create_unique_table_df_from_reference_table(reference_df:pd.DataFrame):
+def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
 
-    out_unique_topics_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
+    out_topic_summary_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
             .agg({
                 'Response References': 'size',  # Count the number of references
                 'Summary': lambda x: '<br>'.join(
@@ -276,11 +276,13 @@ def create_unique_table_df_from_reference_table(reference_df:pd.DataFrame):
             .sort_values('Response References', ascending=False)  # Sort by size, biggest first
             .assign(Topic_number=lambda df: np.arange(1, len(df) + 1))  # Add numbering 1 to x
         )
+    
+    out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References": "Number of responses"}, errors="ignore")
 
-    return out_unique_topics_df
+    return out_topic_summary_df
 
 # Wrap text in each column to the specified max width, including whole words
-def wrap_text(text:str, max_width=60, max_text_length=None):
+def wrap_text(text:str, max_width=100, max_text_length=None):
     if not isinstance(text, str):
         return text
         

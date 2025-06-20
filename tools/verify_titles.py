@@ -21,8 +21,7 @@ from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,
 from tools.helper_functions import put_columns_in_df, wrap_text
 from tools.llm_funcs import load_model, construct_gemini_generative_model
 from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table, clean_column_name,  convert_response_text_to_markdown_table, call_llm_with_markdown_table_checks,  ResponseObject, max_tokens, max_time_for_loop, batch_size_default,  GradioFileData
-
-from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER
+from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
 
 def write_llm_output_and_logs_verify(responses: List[ResponseObject],
                               whole_conversation: List[str],
@@ -334,10 +333,10 @@ def verify_titles(in_data_file,
             out_file_paths = []
             #print("model_choice_clean:", model_choice_clean)
 
-            if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
-                progress(0.1, "Loading in Gemma 2b model")
-                local_model, tokenizer = load_model()
-                print("Local model loaded:", local_model)
+            if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+                progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
+                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
+                #print("Local model loaded:", local_model)
 
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)
@@ -662,7 +661,7 @@ def verify_titles(in_data_file,
         out_file_paths.append(reference_table_out_path)
 
         # Create final unique topics table from reference table to ensure consistent numbers
-        final_out_unique_topics_df = existing_unique_topics_df #create_unique_table_df_from_reference_table(existing_reference_df)
+        final_out_unique_topics_df = existing_unique_topics_df #create_topic_summary_df_from_reference_table(existing_reference_df)
 
         ## Unique topic list
         final_out_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)

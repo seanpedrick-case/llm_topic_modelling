@@ -1,16 +1,16 @@
 import pandas as pd
 from rapidfuzz import process, fuzz
-from typing import List, Tuple
+from typing import List
 import re
 import spaces
 import gradio as gr
-from time import time
+import time
 from tqdm import tqdm
 
 from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model
-from tools.helper_functions import create_unique_table_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map
+from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
 
 max_tokens = MAX_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -116,7 +116,7 @@ def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, r
     return result_df
 
 def deduplicate_topics(reference_df:pd.DataFrame,
-                       unique_topics_df:pd.DataFrame,
+                       topic_summary_df:pd.DataFrame,
                        reference_table_file_name:str,
                        unique_topics_table_file_name:str,
                        in_excel_sheets:str="",
@@ -125,8 +125,8 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                        score_threshold:int=90,
                        in_data_files:List[str]=[],
                        chosen_cols:List[str]="",
-                       deduplicate_topics:str="Yes",
-                       output_folder:str=OUTPUT_FOLDER
+                       output_folder:str=OUTPUT_FOLDER,
+                       deduplicate_topics:str="Yes"                       
                        ):
     '''
     Deduplicate topics based on a reference and unique topics table
@@ -141,12 +141,12 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     # For checking that data is not lost during the process
     initial_unique_references = len(reference_df["Response References"].unique())
 
-    if unique_topics_df.empty:
-        unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
+    if topic_summary_df.empty:
+        topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            unique_topics_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            topic_summary_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
             on=['General Topic', 'Subtopic', 'Sentiment'],
             how='left'
         )     
@@ -157,6 +157,8 @@ def deduplicate_topics(reference_df:pd.DataFrame,
         out_message = "No file data found, pivot table output will not be created."
         print(out_message)
         #raise Exception(out_message)
+
+    
 
     # Run through this x times to try to get all duplicate topics
     if deduplicate_topics == "Yes":
@@ -300,17 +302,21 @@ def deduplicate_topics(reference_df:pd.DataFrame,
         reference_df.drop_duplicates(['Response References', 'General Topic', 'Subtopic', 'Sentiment'], inplace=True)
 
 
-        # Remake unique_topics_df based on new reference_df
-        unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
+        # Remake topic_summary_df based on new reference_df
+        topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            unique_topics_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            topic_summary_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
             on=['General Topic', 'Subtopic', 'Sentiment'],
             how='left'
-        ) 
+        )       
 
-        if not file_data.empty:
+    else:
+        print("Topics have not beeen deduplicated")
+
+
+    if not file_data.empty:
             basic_response_data = get_basic_response_data(file_data, chosen_cols)            
             reference_df_pivot = convert_reference_table_to_pivot_table(reference_df, basic_response_data)
 
@@ -318,26 +324,26 @@ def deduplicate_topics(reference_df:pd.DataFrame,
             reference_df_pivot.to_csv(reference_pivot_file_path, index=None, encoding='utf-8')
             log_output_files.append(reference_pivot_file_path)
 
-        #reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
-        #unique_topics_table_file_name_no_ext = get_file_name_no_ext(unique_topics_table_file_name)
+    #reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+    #unique_topics_table_file_name_no_ext = get_file_name_no_ext(unique_topics_table_file_name)
 
-        reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
-        unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
-        reference_df.to_csv(reference_file_path, index = None, encoding='utf-8')
-        unique_topics_df.to_csv(unique_topics_file_path, index=None, encoding='utf-8')
+    reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
+    unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
+    reference_df.to_csv(reference_file_path, index = None, encoding='utf-8')
+    topic_summary_df.to_csv(unique_topics_file_path, index=None, encoding='utf-8')
 
-        output_files.append(reference_file_path)
-        output_files.append(unique_topics_file_path)        
+    output_files.append(reference_file_path)
+    output_files.append(unique_topics_file_path)
 
-        # Outputs for markdown table output
-        unique_table_df_revised_display = unique_topics_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+    # Outputs for markdown table output
+    topic_summary_df_revised_display = topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
 
-        deduplicated_unique_table_markdown = unique_table_df_revised_display.to_markdown(index=False)
+    deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(index=False)
 
-    return reference_df, unique_topics_df, output_files, log_output_files, deduplicated_unique_table_markdown
+    return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown
 
 def sample_reference_table_summaries(reference_df:pd.DataFrame,
-                                     unique_topics_df:pd.DataFrame,
+                                     topic_summary_df:pd.DataFrame,
                                      random_seed:int,
                                      no_of_sampled_summaries:int=150):
     
@@ -383,7 +389,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     summarised_references_markdown = summarised_references.to_markdown(index=False)
 
-    return summarised_references, summarised_references_markdown, reference_df, unique_topics_df
+    return summarised_references, summarised_references_markdown, reference_df, topic_summary_df
 
 def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, local_model=[]):
     conversation_history = []
@@ -421,11 +427,10 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
 @spaces.GPU
 def summarise_output_topics(summarised_references:pd.DataFrame,
-                            unique_table_df:pd.DataFrame,
+                            topic_summary_df:pd.DataFrame,
                             reference_table_df:pd.DataFrame,
                             model_choice:str,
                             in_api_key:str,
-                            topic_summary_table_markdown:str,
                             temperature:float,
                             table_file_name:str,
                             summarised_outputs:list = [],  
@@ -450,7 +455,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     
 
     # Check for data for summarisations
-    if not unique_table_df.empty and not reference_table_df.empty:
+    if not topic_summary_df.empty and not reference_table_df.empty:
         print("Unique table and reference table data found.")
     else:
         out_message = "Please upload a unique topic table and reference table file to continue with summarisation."
@@ -490,19 +495,24 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         else:
             batch_file_path_details = f"{file_name}_col_{in_column_cleaned}"
 
-        summarised_references["Revised summary"] = summarised_outputs        
+        summarised_references["Revised summary"] = summarised_outputs
+
+            
 
         join_cols = ["General Topic", "Subtopic", "Sentiment"]
         join_plus_summary_cols = ["General Topic", "Subtopic", "Sentiment", "Revised summary"]
 
         summarised_references_j = summarised_references[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
 
-        unique_table_df_revised = unique_table_df.merge(summarised_references_j, on = join_cols, how = "left")
+        topic_summary_df_revised = topic_summary_df.merge(summarised_references_j, on = join_cols, how = "left")
 
         # If no new summary is available, keep the original
-        unique_table_df_revised["Revised summary"] = unique_table_df_revised["Revised summary"].combine_first(unique_table_df_revised["Summary"])
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
 
-        unique_table_df_revised = unique_table_df_revised[["General Topic",	"Subtopic",	"Sentiment", "Response References",	"Revised summary"]]        
+        topic_summary_df_revised = topic_summary_df_revised[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Revised summary"]]
+
+        # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
 
         reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
         # If no new summary is available, keep the original
@@ -510,11 +520,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1)
 
         # Remove topics that are tagged as 'Not Mentioned'
-        unique_table_df_revised = unique_table_df_revised.loc[unique_table_df_revised["Sentiment"] != "Not Mentioned", :]
-        reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]
-        
-          
-            
+        topic_summary_df_revised = topic_summary_df_revised.loc[topic_summary_df_revised["Sentiment"] != "Not Mentioned", :]
+        reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]            
 
         if not file_data.empty:
             basic_response_data = get_basic_response_data(file_data, chosen_cols)
@@ -526,33 +533,33 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
             log_output_files.append(reference_table_df_revised_pivot_path)
 
         # Save to file
-        unique_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
-        unique_table_df_revised.to_csv(unique_table_df_revised_path, index = None, encoding='utf-8')
+        topic_summary_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
+        topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8')
 
         reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
         reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8')
 
-        output_files.extend([reference_table_df_revised_path, unique_table_df_revised_path])       
+        output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])       
 
         ###
-        unique_table_df_revised_display = unique_table_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
 
-        summarised_output_markdown = unique_table_df_revised_display.to_markdown(index=False)
+        summarised_output_markdown = topic_summary_df_revised_display.to_markdown(index=False)
 
         # Ensure same file name not returned twice
         output_files = list(set(output_files))
         log_output_files = list(set(log_output_files))
 
-        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
+        return summarised_references, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
 
     tic = time.perf_counter()
     
     #print("Starting with:", latest_summary_completed)
     #print("Last summary number:", length_all_summaries)
 
-    if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
-                progress(0.1, "Loading in Gemma 2b model")
-                local_model, tokenizer = load_model()
+    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+                progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
+                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
                 #print("Local model loaded:", local_model)
 
     summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
@@ -599,4 +606,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     output_files = list(set(output_files))
 
-    return summarised_references, unique_table_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
+    return summarised_references, topic_summary_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
+
+def overall_summary(input_summary_table:str):
+    print("This is a placeholder function for creating an overall summary for your consultation")
+    return
