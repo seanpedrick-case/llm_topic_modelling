@@ -15,3 +15,10 @@ logs/*
 usage/*
 feedback/*
 test_code/*
+input/
+output/
+logs/
+usage/
+feedback/
+config/
+tmp/

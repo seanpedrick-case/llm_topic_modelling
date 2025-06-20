@@ -3,20 +3,12 @@ import pandas as pd
 import boto3
 import tempfile
 import os
-from tools.helper_functions import get_or_create_env_var, RUN_AWS_FUNCTIONS
+from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, CONSULTATION_SUMMARY_BUCKET
 
 PandasDataFrame = Type[pd.DataFrame]
 
 # Get AWS credentials if required
 bucket_name=""
-
-AWS_REGION = get_or_create_env_var('AWS_REGION', 'eu-west-2')
-print(f'The value of AWS_REGION is {AWS_REGION}')
-
-CONSULTATION_SUMMARY_BUCKET = get_or_create_env_var('CONSULTATION_SUMMARY_BUCKET', '')
-print(f'The value of AWS_REGION is {CONSULTATION_SUMMARY_BUCKET}')
-
-
 
 if RUN_AWS_FUNCTIONS == "1":
     try:
@@ -41,11 +33,12 @@ if RUN_AWS_FUNCTIONS == "1":
     try:
         assumed_role_arn, assumed_role_name = get_assumed_role_info()
 
-        print("Assumed Role ARN:", assumed_role_arn)
-        print("Assumed Role Name:", assumed_role_name)
+        #print("Assumed Role ARN:", assumed_role_arn)
+        #print("Assumed Role Name:", assumed_role_name)
 
-    except Exception as e:
-        
+        print("Successfully assumed role with AWS STS")
+
+    except Exception as e:        
         print(e)
 
 # Download direct from S3 - requires login credentials
@@ -112,57 +105,6 @@ def download_files_from_s3(bucket_name, s3_folder, local_folder, filenames):
             print(f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'")
         except Exception as e:
             print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
-
-def load_data_from_aws(in_aws_keyword_file, aws_password="", bucket_name=bucket_name):
-
-    temp_dir = tempfile.mkdtemp()
-    local_address_stub = temp_dir + '/doc-redaction/'
-    files = []
-
-    if not 'LAMBETH_BOROUGH_PLAN_PASSWORD' in os.environ:
-        out_message = "Can't verify password for dataset access. Do you have a valid AWS connection? Data not loaded."
-        return files, out_message
-    
-    if aws_password:
-        if "Lambeth borough plan" in in_aws_keyword_file and aws_password == os.environ['LAMBETH_BOROUGH_PLAN_PASSWORD']:
-
-            s3_folder_stub = 'example-data/lambeth-borough-plan/latest/'
-
-            local_folder_path = local_address_stub                
-
-            # Check if folder exists
-            if not os.path.exists(local_folder_path):
-                print(f"Folder {local_folder_path} does not exist! Making folder.")
-
-                os.mkdir(local_folder_path)
-
-            # Check if folder is empty
-            if len(os.listdir(local_folder_path)) == 0:
-                print(f"Folder {local_folder_path} is empty")
-                # Download data
-                download_files_from_s3(bucket_name, s3_folder_stub, local_folder_path, filenames='*')
-
-                print("AWS data downloaded")
-
-            else:
-                print(f"Folder {local_folder_path} is not empty")
-
-            #files = os.listdir(local_folder_stub)
-            #print(files)
-
-            files = [os.path.join(local_folder_path, f) for f in os.listdir(local_folder_path) if os.path.isfile(os.path.join(local_folder_path, f))]
-
-            out_message = "Data successfully loaded from AWS"
-            print(out_message)
-
-        else:
-            out_message = "Data not loaded from AWS"
-            print(out_message)
-    else:
-        out_message = "No password provided. Please ask the data team for access if you need this."
-        print(out_message)
-
-    return files, out_message
 
 def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=bucket_name, RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS):
     """

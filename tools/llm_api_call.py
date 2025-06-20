@@ -6,51 +6,41 @@ import gradio as gr
 import markdown
 import time
 import boto3
-import json
-import math
 import string
 import re
 import spaces
-from rapidfuzz import process, fuzz
 from tqdm import tqdm
+
 from gradio import Progress
 from typing import List, Tuple
 from io import StringIO
 
 GradioFileData = gr.FileData
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, create_general_topics_system_prompt, create_general_topics_prompt, force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt
-from tools.helper_functions import output_folder, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file
-from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model, load_model, RUN_LOCAL_MODEL
+from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,  add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_unique_table_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data
+from tools.llm_funcs import ResponseObject, process_requests, construct_gemini_generative_model
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
 
-# ResponseObject class for AWS Bedrock calls
-class ResponseObject:
-        def __init__(self, text, usage_metadata):
-            self.text = text
-            self.usage_metadata = usage_metadata
+if RUN_LOCAL_MODEL == "1":
+    from tools.llm_funcs import load_model
 
-max_tokens = 4096 # Maximum number of output tokens
-timeout_wait = 30 # AWS now seems to have a 60 second minimum wait between API calls
-number_of_api_retry_attempts = 5
-# Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
-MAX_OUTPUT_VALIDATION_ATTEMPTS = 3
-max_time_for_loop = 99999
-batch_size_default = 5
-deduplication_threshold = 90
+max_tokens = MAX_TOKENS
+timeout_wait = TIMEOUT_WAIT
+number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
+max_time_for_loop = MAX_TIME_FOR_LOOP
+batch_size_default = BATCH_SIZE_DEFAULT
+deduplication_threshold = DEDUPLICATION_THRESHOLD
+max_comment_character_length = MAX_COMMENT_CHARS
 
-MAX_COMMENT_CHARS = get_or_create_env_var('MAX_COMMENT_CHARS', '14000')
-print(f'The value of MAX_COMMENT_CHARS is {MAX_COMMENT_CHARS}')
-
-max_comment_character_length = int(MAX_COMMENT_CHARS)
-
-AWS_DEFAULT_REGION = get_or_create_env_var('AWS_DEFAULT_REGION', 'eu-west-2')
-print(f'The value of AWS_DEFAULT_REGION is {AWS_DEFAULT_REGION}')
-
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_DEFAULT_REGION)
+if RUN_AWS_FUNCTIONS == '1':
+    bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+else:
+    bedrock_runtime = []
 
 ### HELPER FUNCTIONS
 
-def normalise_string(text):
+def normalise_string(text:str):
     # Replace two or more dashes with a single dash
     text = re.sub(r'-{2,}', '-', text)
     
@@ -130,30 +120,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
         return gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas"), reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names
 
-
-def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verify_titles:bool=False) -> pd.DataFrame:
-
-    if not isinstance(chosen_cols, list):
-        chosen_cols = [chosen_cols]
-    else:
-        chosen_cols = chosen_cols
-
-    basic_response_data = file_data[chosen_cols].reset_index(names="Reference")
-    basic_response_data["Reference"] = basic_response_data["Reference"].astype(int) + 1
-
-    if verify_titles == True:
-        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response", chosen_cols[1]: "Title"})
-        basic_response_data["Title"] = basic_response_data["Title"].str.strip()
-        basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
-    else:
-        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
-
-    basic_response_data["Response"] = basic_response_data["Response"].str.strip()
-    basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)
-
-    return basic_response_data
-
-def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], output_folder: str, batch_number: int, batch_size: int, verify_titles:bool=False) -> Tuple[str, str, str]:
+def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], batch_number: int, batch_size: int, verify_titles:bool=False) -> Tuple[str, str, str]:
     """
     Processes a file by simplifying its content based on chosen columns and saves the result to a specified output folder.
 
@@ -161,7 +128,6 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
     - file_data (pd.DataFrame): Tabular data file with responses.
     - file_name (str): File name with extension.
     - chosen_cols (List[str]): A list of column names to include in the simplified file.
-    - output_folder (str): The directory where the simplified file will be saved.
     - batch_number (int): The current batch number for processing.
     - batch_size (int): The number of rows to process in each batch.
 
@@ -229,309 +195,6 @@ def replace_punctuation_with_underscore(input_string):
     
     # Translate the input string using the translation table
     return input_string.translate(translation_table)
-
-### LLM FUNCTIONS
-
-def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int) -> Tuple[object, dict]:
-    """
-    Constructs a GenerativeModel for Gemini API calls.
-
-    Parameters:
-    - in_api_key (str): The API key for authentication.
-    - temperature (float): The temperature parameter for the model, controlling the randomness of the output.
-    - model_choice (str): The choice of model to use for generation.
-    - system_prompt (str): The system prompt to guide the generation.
-    - max_tokens (int): The maximum number of tokens to generate.
-
-    Returns:
-    - Tuple[object, dict]: A tuple containing the constructed GenerativeModel and its configuration.
-    """
-    # Construct a GenerativeModel
-    try:
-        if in_api_key:
-            #print("Getting API key from textbox")
-            api_key = in_api_key
-            ai.configure(api_key=api_key)
-        elif "GOOGLE_API_KEY" in os.environ:
-            #print("Searching for API key in environmental variables")
-            api_key = os.environ["GOOGLE_API_KEY"]
-            ai.configure(api_key=api_key)
-        else:
-            print("No API key foound")
-            raise gr.Error("No API key found.")
-    except Exception as e:
-        print(e)
-    
-    config = ai.GenerationConfig(temperature=temperature, max_output_tokens=max_tokens)
-
-    #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
-    model = ai.GenerativeModel(model_name='models/' + model_choice, system_instruction=system_prompt, generation_config=config)
-    
-    # Upload CSV file (replace with your actual file path)
-    #file_id = ai.upload_file(upload_file_path)
-
-    
-    # if file_type == 'xlsx':
-    #     print("Running through all xlsx sheets")
-    #     #anon_xlsx = pd.ExcelFile(upload_file_path)
-    #     if not in_excel_sheets:
-    #         out_message.append("No Excel sheets selected. Please select at least one to anonymise.")
-    #         continue
-
-    #     anon_xlsx = pd.ExcelFile(upload_file_path)                
-
-    #     # Create xlsx file:
-    #     anon_xlsx_export_file_name = output_folder + file_name + "_redacted.xlsx"
-
-
-    ### QUERYING LARGE LANGUAGE MODEL ###
-    # Prompt caching the table and system prompt. See here: https://ai.google.dev/gemini-api/docs/caching?lang=python
-    # Create a cache with a 5 minute TTL. ONLY FOR CACHES OF AT LEAST 32k TOKENS!
-    # cache = ai.caching.CachedContent.create(
-    # model='models/' + model_choice,
-    # display_name=file_name, # used to identify the cache
-    # system_instruction=system_prompt,
-    # ttl=datetime.timedelta(minutes=5),
-    # )
-
-    return model, config
-
-def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str) -> ResponseObject:
-    """
-    This function sends a request to AWS Claude with the following parameters:
-    - prompt: The user's input prompt to be processed by the model.
-    - system_prompt: A system-defined prompt that provides context or instructions for the model.
-    - temperature: A value that controls the randomness of the model's output, with higher values resulting in more diverse responses.
-    - max_tokens: The maximum number of tokens (words or characters) in the model's response.
-    - model_choice: The specific model to use for processing the request.
-    
-    The function constructs the request configuration, invokes the model, extracts the response text, and returns a ResponseObject containing the text and metadata.
-    """
-
-    prompt_config = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "top_p": 0.999,
-        "temperature":temperature,
-        "system": system_prompt,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
-    }
-
-    body = json.dumps(prompt_config)
-
-    modelId = model_choice
-    accept = "application/json"
-    contentType = "application/json"
-
-    request = bedrock_runtime.invoke_model(
-        body=body, modelId=modelId, accept=accept, contentType=contentType
-    )
-
-    # Extract text from request
-    response_body = json.loads(request.get("body").read())
-    text = response_body.get("content")[0].get("text")
-
-    response = ResponseObject(
-    text=text,
-    usage_metadata=request['ResponseMetadata']
-    )
-
-    # Now you can access both the text and metadata
-    #print("Text:", response.text)
-    #print("Metadata:", response.usage_metadata)
-    #print("Text:", response.text)
-    
-    return response
-
-# Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], model: object, config: dict, model_choice: str, system_prompt: str, temperature: float, local_model=[], progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
-    """
-    This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
-    It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
-    If the model choice is specific to AWS Claude, it calls the `call_aws_claude` function; otherwise, it uses the `model.generate_content` method.
-    The function returns the response text and the updated conversation history.
-    """
-    # Constructing the full prompt from the conversation history
-    full_prompt = "Conversation history:\n"
-    
-    for entry in conversation_history:
-        role = entry['role'].capitalize()  # Assuming the history is stored with 'role' and 'parts'
-        message = ' '.join(entry['parts'])  # Combining all parts of the message
-        full_prompt += f"{role}: {message}\n"
-    
-    # Adding the new user prompt
-    full_prompt += f"\nUser: {prompt}"
-
-    # Clear any existing progress bars
-    tqdm._instances.clear()
-
-    progress_bar = range(0,number_of_api_retry_attempts)
-
-    # Generate the model's response
-    if "gemini" in model_choice:
-
-        for i in progress_bar:
-            try:
-                print("Calling Gemini model, attempt", i + 1)
-                #print("full_prompt:", full_prompt)
-                #print("generation_config:", config)
-
-                response = model.generate_content(contents=full_prompt, generation_config=config)
-
-                #progress_bar.close()
-                #tqdm._instances.clear()
-
-                print("Successful call to Gemini model.")
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to Gemini model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")               
-
-                time.sleep(timeout_wait)
-            
-            if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-    elif "anthropic.claude" in model_choice:
-        for i in progress_bar:
-            try:
-                print("Calling AWS Claude model, attempt", i + 1)
-                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
-
-                #progress_bar.close()
-                #tqdm._instances.clear()
-
-                print("Successful call to Claude model.")
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to Claude model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
-
-                time.sleep(timeout_wait)
-                #response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
-
-            if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-    else:
-        # This is the Gemma model
-        for i in progress_bar:
-            try:
-                print("Calling Gemma 2B Instruct model, attempt", i + 1)
-
-                gen_config = LlamaCPPGenerationConfig()
-                gen_config.update_temp(temperature)
-
-                response = call_llama_cpp_model(prompt, gen_config, model=local_model)
-
-                #progress_bar.close()
-                #tqdm._instances.clear()
-
-                print("Successful call to Gemma model.")
-                print("Response:", response)
-                break
-            except Exception as e:
-                # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to Gemma model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
-
-                time.sleep(timeout_wait)
-                #response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
-
-            if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history       
-
-    # Update the conversation history with the new prompt and response
-    conversation_history.append({'role': 'user', 'parts': [prompt]})
-
-    # Check if is a LLama.cpp model response
-        # Check if the response is a ResponseObject
-    if isinstance(response, ResponseObject):
-        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
-    elif 'choices' in response:
-        conversation_history.append({'role': 'assistant', 'parts': [response['choices'][0]['text']]})
-    else:
-        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
-    
-    # Print the updated conversation history
-    #print("conversation_history:", conversation_history)
-    
-    return response, conversation_history
-
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], model: object, config: dict, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
-    """
-    Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
-
-    Args:
-        prompts (List[str]): A list of prompts to be processed.
-        system_prompt (str): The system prompt.
-        conversation_history (List[dict]): The history of the conversation.
-        whole_conversation (List[str]): The complete conversation including prompts and responses.
-        whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-        model (object): The model to use for processing the prompts.
-        config (dict): Configuration for the model.
-        model_choice (str): The choice of model to use.        
-        temperature (float): The temperature parameter for the model.
-        batch_no (int): Batch number of the large language model request.
-        local_model: Local gguf model (if loaded)
-        master (bool): Is this request for the master table.
-
-    Returns:
-        Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
-    """
-    responses = []
-
-    # Clear any existing progress bars
-    tqdm._instances.clear()
-
-    for prompt in prompts:
-
-        #print("prompt to LLM:", prompt)
-
-        response, conversation_history = send_request(prompt, conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model)
-
-        if isinstance(response, ResponseObject):
-            response_text = response.text
-        elif 'choices' in response:
-            response_text = response['choices'][0]['text']
-        else:
-            response_text = response.text
-
-        responses.append(response)
-        whole_conversation.append(prompt)
-        whole_conversation.append(response_text)
-
-        # Create conversation metadata
-        if master == False:
-            whole_conversation_metadata.append(f"Query batch {batch_no} prompt {len(responses)} metadata:")
-        else:
-            whole_conversation_metadata.append(f"Query summary metadata:")
-
-        if not isinstance(response, str):
-            try:
-                print("model_choice:", model_choice)
-                if "claude" in model_choice:
-                    print("Appending selected metadata items to metadata")
-                    whole_conversation_metadata.append('x-amzn-bedrock-output-token-count:')
-                    whole_conversation_metadata.append(str(response.usage_metadata['HTTPHeaders']['x-amzn-bedrock-output-token-count']))
-                    whole_conversation_metadata.append('x-amzn-bedrock-input-token-count:')
-                    whole_conversation_metadata.append(str(response.usage_metadata['HTTPHeaders']['x-amzn-bedrock-input-token-count']))
-                elif "gemini" in model_choice:
-                    whole_conversation_metadata.append(str(response.usage_metadata))
-                else:
-                    whole_conversation_metadata.append(str(response['usage']))
-            except KeyError as e:
-                print(f"Key error: {e} - Check the structure of response.usage_metadata")
-        else:
-            print("Response is a string object.")
-            whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
-
-
-    return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
 
 ### INITIAL TOPIC MODEL DEVELOPMENT FUNCTIONS
 
@@ -619,22 +282,6 @@ def clean_column_name(column_name, max_length=20):
     column_name = column_name if column_name else "column"
     # Truncate to max_length
     return column_name[:max_length]
-
-def create_unique_table_df_from_reference_table(reference_df:pd.DataFrame):
-
-    out_unique_topics_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
-            .agg({
-                'Response References': 'size',  # Count the number of references
-                'Summary': lambda x: '<br>'.join(
-                    sorted(set(x), key=lambda summary: reference_df.loc[reference_df['Summary'] == summary, 'Start row of group'].min())
-                )
-            })
-            .reset_index()
-            .sort_values('Response References', ascending=False)  # Sort by size, biggest first
-            .assign(Topic_number=lambda df: np.arange(1, len(df) + 1))  # Add numbering 1 to x
-        )
-
-    return out_unique_topics_df
 
 # Convert output table to markdown and then to a pandas dataframe to csv
 def remove_before_last_term(input_string: str) -> str:
@@ -754,8 +401,9 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         temperature: float,
                                         reported_batch_no: int,
                                         local_model: object,
-                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int,
-                                        master:bool=False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
+                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int,                                        
+                                        master:bool=False,
+                                        CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
     """
     Call the large language model with checks for a valid markdown table.
 
@@ -791,7 +439,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
             call_temperature, reported_batch_no, local_model, master=master
         )
 
-        if (model_choice != "gemma_local") & (model_choice != "gemma_2b_it_local"):
+        if model_choice != CHOSEN_LOCAL_MODEL_TYPE:
             stripped_response = responses[-1].text.strip()
         else:
             stripped_response = responses[-1]['choices'][0]['text'].strip()
@@ -824,8 +472,9 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
                               existing_reference_df:pd.DataFrame,
                               existing_topics_df:pd.DataFrame,
                               batch_size_number:int,
-                              in_column:str,
-                              first_run: bool = False) -> None:
+                              in_column:str,                              
+                              first_run: bool = False,
+                              output_folder:str=OUTPUT_FOLDER) -> None:
     """
     Writes the output of the large language model requests and logs to files.
 
@@ -933,12 +582,24 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         # If no numbers found in the Response References column, check the Summary column in case reference numbers were put there by mistake
         if not references:
             references = re.findall(r'\d+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else []
+        
+        # Filter out references that are outside the valid range
+        if references:
+            try:
+                # Convert all references to integers and keep only those within valid range
+                ref_numbers = [int(ref) for ref in references]
+                references = [str(ref) for ref in ref_numbers if 1 <= ref <= batch_size_number]
+            except ValueError:
+                # If any reference can't be converted to int, skip this row
+                print("Response value could not be converted to number:", references)
+                continue
+        
         topic = row.iloc[0] if pd.notna(row.iloc[0]) else ""
         subtopic = row.iloc[1] if pd.notna(row.iloc[1]) else ""
         sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
         summary = row.iloc[4] if pd.notna(row.iloc[4]) else ""
         # If the reference response column is very long, and there's nothing in the summary column, assume that the summary was put in the reference column
-        if not summary and len(str(row.iloc[3]) > 30):
+        if not summary and (len(str(row.iloc[3])) > 30):
             summary = row.iloc[3]        
 
         summary = row_number_string_start + summary
@@ -1172,10 +833,12 @@ def extract_topics(in_data_file,
               force_zero_shot_radio:str = "No",
               in_excel_sheets:List[str] = [],
               force_single_topic_radio:str = "No",
+              output_folder:str=OUTPUT_FOLDER,
               force_single_topic_prompt:str=force_single_topic_prompt,
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
-              max_time_for_loop:int=max_time_for_loop,              
+              max_time_for_loop:int=max_time_for_loop,
+              CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE,
               progress=Progress(track_tqdm=True)):
 
     '''
@@ -1215,10 +878,12 @@ def extract_topics(in_data_file,
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - force_single_topic_radio (str, optional): Should the model be forced to assign only one single topic to each response (effectively a classifier).
+    - output_folder (str, optional): Output folder where results will be stored.
     - force_single_topic_prompt (str, optional): The prompt for forcing the model to assign only one single topic to each response.
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
+    - CHOSEN_LOCAL_MODEL_TYPE (str, optional): The name of the chosen local model.
     - progress (Progress): A progress tracker.
     '''
 
@@ -1265,9 +930,9 @@ def extract_topics(in_data_file,
             out_message = []
             out_file_paths = []
 
-            if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
-                progress(0.1, "Loading in Gemma 2b model")
-                local_model, tokenizer = load_model()
+            if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+                progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
+                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
 
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)
@@ -1305,7 +970,7 @@ def extract_topics(in_data_file,
             print("Running query batch", str(reported_batch_no))
 
             # Call the function to prepare the input table
-            simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, output_folder, latest_batch_completed, batch_size)
+            simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, latest_batch_completed, batch_size)
             #log_files_output_paths.append(simplified_csv_table_path)
 
             # Conversation history
@@ -1420,7 +1085,7 @@ def extract_topics(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=False)
+                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=False, output_folder=output_folder)
 
                     # Write final output to text file for logging purposes
                     try:
@@ -1484,8 +1149,8 @@ def extract_topics(in_data_file,
                     if "gemini" in model_choice:
                         print("Using Gemini model:", model_choice)
                         model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
-                    elif "gemma" in model_choice:
-                        print("Using local Gemma model:", model_choice)
+                    elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
+                        print("Using local model:", model_choice)
                     else:
                         print("Using AWS Bedrock model:", model_choice)
 
@@ -1512,7 +1177,7 @@ def extract_topics(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
 
 
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=True)
+                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=True, output_folder=output_folder)
 
                     # If error in table parsing, leave function
                     if is_error == True:
@@ -1697,39 +1362,6 @@ def extract_topics(in_data_file,
 
     return unique_table_df_display_table_markdown, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths, join_file_paths
 
-def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:pd.DataFrame=pd.DataFrame()):
-
-    df_in = df[['Response References', 'General Topic', 'Subtopic', 'Sentiment']].copy()
-
-    df_in['Response References'] = df_in['Response References'].astype(int)
-
-    # Create a combined category column
-    df_in['Category'] = df_in['General Topic'] + ' - ' + df_in['Subtopic'] + ' - ' + df_in['Sentiment']
-    
-    # Create pivot table counting occurrences of each unique combination
-    pivot_table = pd.crosstab(
-        index=df_in['Response References'],
-        columns=[df_in['General Topic'], df_in['Subtopic'], df_in['Sentiment']],
-        margins=True
-    )
-    
-    # Flatten column names to make them more readable
-    pivot_table.columns = [' - '.join(col) for col in pivot_table.columns]
-
-    pivot_table.reset_index(inplace=True)
-
-    if not basic_response_data.empty:
-        pivot_table = basic_response_data.merge(pivot_table, right_on="Response References", left_on="Reference", how="left")
-
-        pivot_table.drop("Response References", axis=1, inplace=True)    
-
-    pivot_table.columns = pivot_table.columns.str.replace("Not assessed - ", "").str.replace("- Not assessed", "")
-
-    # print("pivot_table:", pivot_table)
-
-    return pivot_table
-
-
 def join_modified_topic_names_to_ref_table(modified_unique_topics_df:pd.DataFrame, original_unique_topics_df:pd.DataFrame, reference_df:pd.DataFrame):
     '''
     Take a unique topic table that has been modified by the user, and apply the topic name changes to the long-form reference table.
@@ -1770,7 +1402,7 @@ def join_modified_topic_names_to_ref_table(modified_unique_topics_df:pd.DataFram
     return modified_reference_df
 
 # MODIFY EXISTING TABLE
-def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifiable_unique_topics_df:pd.DataFrame, reference_df:pd.DataFrame, text_output_file_list_state:List[str]) -> Tuple:
+def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifiable_unique_topics_df:pd.DataFrame, reference_df:pd.DataFrame, text_output_file_list_state:List[str], output_folder:str=OUTPUT_FOLDER) -> Tuple:
     '''
     Take a unique_topics table that has been modified, apply these new topic names to the long-form reference_df, and save both tables to file.
     '''
@@ -1786,9 +1418,6 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
     # Ensure files exist before accessing
     reference_file_path = os.path.basename(reference_files[0]) if reference_files else None
     unique_table_file_path = os.path.basename(unique_files[0]) if unique_files else None
-
-    print("Reference File:", reference_file_path)
-    print("Unique Table File:", unique_table_file_path)
 
     output_file_list = []
 
@@ -1833,583 +1462,3 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
     
 
     return modifiable_unique_topics_df, reference_df, output_file_list, output_file_list, output_file_list, output_file_list, reference_table_file_name, unique_table_file_name, deduplicated_unique_table_markdown
-
-
-# DEDUPLICATION/SUMMARISATION FUNCTIONS
-def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:
-    """
-    Deduplicates similar category names in a pandas Series based on a fuzzy matching threshold,
-    merging smaller topics into larger topics.
-
-    Parameters:
-        category_series (pd.Series): Series containing category names to deduplicate.
-        join_series (pd.Series): Additional series used for joining back to original results.
-        reference_df (pd.DataFrame): DataFrame containing the reference data to count occurrences.
-        threshold (float): Similarity threshold for considering two strings as duplicates.
-
-    Returns:
-        pd.DataFrame: DataFrame with columns ['old_category', 'deduplicated_category'].
-    """
-    # Count occurrences of each category in the reference_df
-    category_counts = reference_df['Subtopic'].value_counts().to_dict()
-
-    # Initialize dictionaries for both category mapping and scores
-    deduplication_map = {}
-    match_scores = {}  # New dictionary to store match scores
-
-    # First pass: Handle exact matches
-    for category in category_series.unique():
-        if category in deduplication_map:
-            continue
-            
-        # Find all exact matches
-        exact_matches = category_series[category_series.str.lower() == category.lower()].index.tolist()
-        if len(exact_matches) > 1:
-            # Find the variant with the highest count
-            match_counts = {match: category_counts.get(category_series[match], 0) for match in exact_matches}
-            most_common = max(match_counts.items(), key=lambda x: x[1])[0]
-            most_common_category = category_series[most_common]
-            
-            # Map all exact matches to the most common variant and store score
-            for match in exact_matches:
-                deduplication_map[category_series[match]] = most_common_category
-                match_scores[category_series[match]] = 100  # Exact matches get score of 100
-
-    # Second pass: Handle fuzzy matches for remaining categories
-    # Create a DataFrame to maintain the relationship between categories and general topics
-    categories_df = pd.DataFrame({
-        'category': category_series,
-        'general_topic': general_topic_series
-    }).drop_duplicates()
-
-    for _, row in categories_df.iterrows():
-        category = row['category']
-        if category in deduplication_map:
-            continue
-
-        current_general_topic = row['general_topic']
-
-        # Filter potential matches to only those within the same General Topic if relevant
-        if merge_general_topics == "No":
-            potential_matches = categories_df[
-                (categories_df['category'] != category) & 
-                (categories_df['general_topic'] == current_general_topic)
-            ]['category'].tolist()
-        else:
-            potential_matches = categories_df[
-                (categories_df['category'] != category)
-            ]['category'].tolist()
-
-        matches = process.extract(category, 
-                                potential_matches,
-                                scorer=fuzz.WRatio,
-                                score_cutoff=threshold)
-
-        if matches:
-            best_match = max(matches, key=lambda x: x[1])
-            match, score, _ = best_match
-
-            if category_counts.get(category, 0) < category_counts.get(match, 0):
-                deduplication_map[category] = match
-                match_scores[category] = score
-            else:
-                deduplication_map[match] = category
-                match_scores[match] = score
-        else:
-            deduplication_map[category] = category
-            match_scores[category] = 100
-
-    # Create the result DataFrame with scores
-    result_df = pd.DataFrame({
-        'old_category': category_series + " | " + join_series,
-        'deduplicated_category': category_series.map(lambda x: deduplication_map.get(x, x)),
-        'match_score': category_series.map(lambda x: match_scores.get(x, 100))  # Add scores column
-    })
-
-    #print(result_df)
-
-    return result_df
-
-def deduplicate_topics(reference_df:pd.DataFrame,
-                       unique_topics_df:pd.DataFrame,
-                       reference_table_file_name:str,
-                       unique_topics_table_file_name:str,
-                       in_excel_sheets:str="",
-                       merge_sentiment:str= "No",
-                       merge_general_topics:str="No",
-                       score_threshold:int=90,
-                       in_data_files:List[str]=[],
-                       chosen_cols:List[str]="",
-                       deduplicate_topics:str="Yes"
-                       ):
-    '''
-    Deduplicate topics based on a reference and unique topics table
-    '''
-    output_files = []
-    log_output_files = []
-    file_data = pd.DataFrame()
-
-    reference_table_file_name_no_ext = reference_table_file_name #get_file_name_no_ext(reference_table_file_name)
-    unique_topics_table_file_name_no_ext = unique_topics_table_file_name #get_file_name_no_ext(unique_topics_table_file_name)
-
-    # For checking that data is not lost during the process
-    initial_unique_references = len(reference_df["Response References"].unique())
-
-    if unique_topics_df.empty:
-        unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
-
-        # Then merge the topic numbers back to the original dataframe
-        reference_df = reference_df.merge(
-            unique_topics_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
-            on=['General Topic', 'Subtopic', 'Sentiment'],
-            how='left'
-        )     
-
-    if in_data_files and chosen_cols:
-        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(in_data_files, chosen_cols, 1, in_excel_sheets)
-    else:
-        out_message = "No file data found, pivot table output will not be created."
-        print(out_message)
-        #raise Exception(out_message)
-
-    # Run through this x times to try to get all duplicate topics
-    if deduplicate_topics == "Yes":
-        for i in range(0, 8):
-            if merge_sentiment == "No":    
-                if merge_general_topics == "No":
-                    reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
-                    reference_df_unique = reference_df.drop_duplicates("old_category")
-
-                    deduplicated_topic_map_df = reference_df_unique.groupby(["General Topic", "Sentiment"]).apply(
-                        lambda group: deduplicate_categories(
-                            group["Subtopic"], 
-                            group["Sentiment"], 
-                            reference_df, 
-                            general_topic_series=group["General Topic"],
-                            merge_general_topics="No",
-                            threshold=score_threshold
-                        )
-                    ).reset_index(drop=True)
-                else:
-                    # This case should allow cross-topic matching but is still grouping by Sentiment
-                    reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
-                    reference_df_unique = reference_df.drop_duplicates("old_category")
-
-                    deduplicated_topic_map_df = reference_df_unique.groupby("Sentiment").apply(
-                        lambda group: deduplicate_categories(
-                            group["Subtopic"], 
-                            group["Sentiment"], 
-                            reference_df, 
-                            general_topic_series=None,  # Set to None to allow cross-topic matching
-                            merge_general_topics="Yes",
-                            threshold=score_threshold
-                        )
-                    ).reset_index(drop=True)
-            else:
-                if merge_general_topics == "No":
-                    # Update this case to maintain general topic boundaries
-                    reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
-                    reference_df_unique = reference_df.drop_duplicates("old_category")
-
-                    deduplicated_topic_map_df = reference_df_unique.groupby("General Topic").apply(
-                        lambda group: deduplicate_categories(
-                            group["Subtopic"], 
-                            group["Sentiment"], 
-                            reference_df, 
-                            general_topic_series=group["General Topic"],
-                            merge_general_topics="No",
-                            merge_sentiment=merge_sentiment, 
-                            threshold=score_threshold
-                        )
-                    ).reset_index(drop=True)
-                else:
-                    # For complete merging across all categories
-                    reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
-                    reference_df_unique = reference_df.drop_duplicates("old_category")
-
-                    deduplicated_topic_map_df = deduplicate_categories(
-                        reference_df_unique["Subtopic"], 
-                        reference_df_unique["Sentiment"], 
-                        reference_df, 
-                        general_topic_series=None,  # Set to None to allow cross-topic matching
-                        merge_general_topics="Yes",
-                        merge_sentiment=merge_sentiment,
-                        threshold=score_threshold
-                    ).reset_index(drop=True)
-           
-            if deduplicated_topic_map_df['deduplicated_category'].isnull().all():
-            # Check if 'deduplicated_category' contains any values
-                print("No deduplicated categories found, skipping the following code.")
-
-            else:
-                # Remove rows where 'deduplicated_category' is blank or NaN
-                deduplicated_topic_map_df = deduplicated_topic_map_df.loc[(deduplicated_topic_map_df['deduplicated_category'].str.strip() != '') & ~(deduplicated_topic_map_df['deduplicated_category'].isnull()), ['old_category','deduplicated_category', 'match_score']]
-
-                #deduplicated_topic_map_df.to_csv(output_folder + "deduplicated_topic_map_df_" + str(i) + ".csv", index=None)
-
-                reference_df = reference_df.merge(deduplicated_topic_map_df, on="old_category", how="left")
-
-                reference_df.rename(columns={"Subtopic": "Subtopic_old", "Sentiment": "Sentiment_old"}, inplace=True)
-                # Extract subtopic and sentiment from deduplicated_category
-                reference_df["Subtopic"] = reference_df["deduplicated_category"].str.extract(r'^(.*?) \|')[0]  # Extract subtopic
-                reference_df["Sentiment"] = reference_df["deduplicated_category"].str.extract(r'\| (.*)$')[0]  # Extract sentiment
-
-                # Combine with old values to ensure no data is lost
-                reference_df["Subtopic"] = reference_df["deduplicated_category"].combine_first(reference_df["Subtopic_old"])
-                reference_df["Sentiment"] = reference_df["Sentiment"].combine_first(reference_df["Sentiment_old"])
-
-
-            reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")
-
-            reference_df = reference_df[["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group"]]
-
-            #reference_df["General Topic"] = reference_df["General Topic"].str.lower().str.capitalize() 
-            #reference_df["Subtopic"] = reference_df["Subtopic"].str.lower().str.capitalize() 
-            #reference_df["Sentiment"] = reference_df["Sentiment"].str.lower().str.capitalize() 
-
-            if merge_general_topics == "Yes":
-                # Replace General topic names for each Subtopic with that for the Subtopic with the most responses
-                # Step 1: Count the number of occurrences for each General Topic and Subtopic combination
-                count_df = reference_df.groupby(['Subtopic', 'General Topic']).size().reset_index(name='Count')
-
-                # Step 2: Find the General Topic with the maximum count for each Subtopic
-                max_general_topic = count_df.loc[count_df.groupby('Subtopic')['Count'].idxmax()]
-
-                # Step 3: Map the General Topic back to the original DataFrame
-                reference_df = reference_df.merge(max_general_topic[['Subtopic', 'General Topic']], on='Subtopic', suffixes=('', '_max'), how='left')
-
-                reference_df['General Topic'] = reference_df["General Topic_max"].combine_first(reference_df["General Topic"])        
-
-            if merge_sentiment == "Yes":
-                # Step 1: Count the number of occurrences for each General Topic and Subtopic combination
-                count_df = reference_df.groupby(['Subtopic', 'Sentiment']).size().reset_index(name='Count')
-
-                # Step 2: Determine the number of unique Sentiment values for each Subtopic
-                unique_sentiments = count_df.groupby('Subtopic')['Sentiment'].nunique().reset_index(name='UniqueCount')
-
-                # Step 3: Update Sentiment to 'Mixed' where there is more than one unique sentiment
-                reference_df = reference_df.merge(unique_sentiments, on='Subtopic', how='left')
-                reference_df['Sentiment'] = reference_df.apply(
-                    lambda row: 'Mixed' if row['UniqueCount'] > 1 else row['Sentiment'],
-                    axis=1
-                )
-
-                # Clean up the DataFrame by dropping the UniqueCount column
-                reference_df.drop(columns=['UniqueCount'], inplace=True)
-
-            reference_df = reference_df[["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group"]]
-
-        # Update reference summary column with all summaries
-        reference_df["Summary"] = reference_df.groupby(
-        ["Response References", "General Topic", "Subtopic", "Sentiment"]
-        )["Summary"].transform(' <br> '.join)
-
-        # Check that we have not inadvertantly removed some data during the above process
-        end_unique_references = len(reference_df["Response References"].unique())
-
-        if initial_unique_references != end_unique_references:
-            raise Exception(f"Number of unique references changed during processing: Initial={initial_unique_references}, Final={end_unique_references}")
-        
-        # Drop duplicates in the reference table - each comment should only have the same topic referred to once
-        reference_df.drop_duplicates(['Response References', 'General Topic', 'Subtopic', 'Sentiment'], inplace=True)
-
-
-        # Remake unique_topics_df based on new reference_df
-        unique_topics_df = create_unique_table_df_from_reference_table(reference_df)
-
-        # Then merge the topic numbers back to the original dataframe
-        reference_df = reference_df.merge(
-            unique_topics_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
-            on=['General Topic', 'Subtopic', 'Sentiment'],
-            how='left'
-        ) 
-
-        if not file_data.empty:
-            basic_response_data = get_basic_response_data(file_data, chosen_cols)            
-            reference_df_pivot = convert_reference_table_to_pivot_table(reference_df, basic_response_data)
-
-            reference_pivot_file_path = output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
-            reference_df_pivot.to_csv(reference_pivot_file_path, index=None, encoding='utf-8')
-            log_output_files.append(reference_pivot_file_path)
-
-        #reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
-        #unique_topics_table_file_name_no_ext = get_file_name_no_ext(unique_topics_table_file_name)
-
-        reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
-        unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
-        reference_df.to_csv(reference_file_path, index = None, encoding='utf-8')
-        unique_topics_df.to_csv(unique_topics_file_path, index=None, encoding='utf-8')
-
-        output_files.append(reference_file_path)
-        output_files.append(unique_topics_file_path)        
-
-        # Outputs for markdown table output
-        unique_table_df_revised_display = unique_topics_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-
-        deduplicated_unique_table_markdown = unique_table_df_revised_display.to_markdown(index=False)
-
-    return reference_df, unique_topics_df, output_files, log_output_files, deduplicated_unique_table_markdown
-
-def sample_reference_table_summaries(reference_df:pd.DataFrame,
-                                     unique_topics_df:pd.DataFrame,
-                                     random_seed:int,
-                                     no_of_sampled_summaries:int=150):
-    
-    '''
-    Sample x number of summaries from which to produce summaries, so that the input token length is not too long.
-    '''
-    
-    all_summaries = pd.DataFrame()
-    output_files = []
-
-    reference_df_grouped = reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
-
-    if 'Revised summary' in reference_df.columns:
-        out_message = "Summary has already been created for this file"
-        print(out_message)
-        raise Exception(out_message)
-
-    for group_keys, reference_df_group in reference_df_grouped:
-        #print(f"Group: {group_keys}")
-        #print(f"Data: {reference_df_group}")
-
-        if len(reference_df_group["General Topic"]) > 1:
-
-            filtered_reference_df = reference_df_group.reset_index()
-
-            filtered_reference_df_unique = filtered_reference_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Summary"])
-
-            # Sample n of the unique topic summaries. To limit the length of the text going into the summarisation tool
-            filtered_reference_df_unique_sampled = filtered_reference_df_unique.sample(min(no_of_sampled_summaries, len(filtered_reference_df_unique)), random_state=random_seed)
-
-            #topic_summary_table_markdown = filtered_reference_df_unique_sampled.to_markdown(index=False)
-
-            #print(filtered_reference_df_unique_sampled)
-
-            all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
-    
-    summarised_references = all_summaries.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
-    'Response References': 'size',  # Count the number of references
-    'Summary': lambda x: '\n'.join([s.split(': ', 1)[1] for s in x if ': ' in s])  # Join substrings after ': '
-    }).reset_index()
-
-    summarised_references = summarised_references.loc[(summarised_references["Sentiment"] != "Not Mentioned") & (summarised_references["Response References"] > 1)]
-
-    summarised_references_markdown = summarised_references.to_markdown(index=False)
-
-    return summarised_references, summarised_references_markdown, reference_df, unique_topics_df
-
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, local_model=[]):
-    conversation_history = []
-    whole_conversation_metadata = []
-
-    # Prepare Gemini models before query       
-    if "gemini" in model_choice:
-        print("Using Gemini model:", model_choice)
-        model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
-    else:
-        print("Using AWS Bedrock model:", model_choice)
-        model = model_choice
-        config = {}
-
-    whole_conversation = [summarise_topic_descriptions_system_prompt] 
-
-    # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, local_model=local_model)
-
-    print("Finished summary query")
-
-    if isinstance(responses[-1], ResponseObject):
-        response_texts = [resp.text for resp in responses]
-    elif "choices" in responses[-1]:
-        response_texts = [resp["choices"][0]['text'] for resp in responses]
-    else:
-        response_texts = [resp.text for resp in responses]
-
-    latest_response_text = response_texts[-1]
-
-    #print("latest_response_text:", latest_response_text)
-    #print("Whole conversation metadata:", whole_conversation_metadata)
-
-    return latest_response_text, conversation_history, whole_conversation_metadata
-
-@spaces.GPU
-def summarise_output_topics(summarised_references:pd.DataFrame,
-                            unique_table_df:pd.DataFrame,
-                            reference_table_df:pd.DataFrame,
-                            model_choice:str,
-                            in_api_key:str,
-                            topic_summary_table_markdown:str,
-                            temperature:float,
-                            table_file_name:str,
-                            summarised_outputs:list = [],  
-                            latest_summary_completed:int = 0,
-                            out_metadata_str:str = "",
-                            in_data_files:List[str]=[],
-                            in_excel_sheets:str="",
-                            chosen_cols:List[str]=[],
-                            log_output_files:list[str]=[],
-                            summarise_format_radio:str="Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
-                            output_files:list[str] = [],                            
-                            summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
-                            do_summaries="Yes",
-                            progress=gr.Progress(track_tqdm=True)):
-    '''
-    Create better summaries of the raw batch-level summaries created in the first run of the model.
-    '''
-    out_metadata = []
-    local_model = []
-    summarised_output_markdown = ""
-    
-
-    # Check for data for summarisations
-    if not unique_table_df.empty and not reference_table_df.empty:
-        print("Unique table and reference table data found.")
-    else:
-        out_message = "Please upload a unique topic table and reference table file to continue with summarisation."
-        print(out_message)
-        raise Exception(out_message)
-    
-    if 'Revised summary' in reference_table_df.columns:
-        out_message = "Summary has already been created for this file"
-        print(out_message)
-        raise Exception(out_message)
-    
-    # Load in data file and chosen columns if exists to create pivot table later
-    if in_data_files and chosen_cols:
-        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(in_data_files, chosen_cols, 1, in_excel_sheets=in_excel_sheets)
-    else:
-        out_message = "No file data found, pivot table output will not be created."
-        print(out_message)
-        raise Exception(out_message)
-   
-    
-    all_summaries = summarised_references["Summary"].tolist()
-    length_all_summaries = len(all_summaries)
-
-    # If all summaries completed, make final outputs
-    if latest_summary_completed >= length_all_summaries:
-        print("All summaries completed. Creating outputs.")
-
-        model_choice_clean = model_name_map[model_choice]   
-        file_name = re.search(r'(.*?)(?:_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_batch_|_col_)', table_file_name) else table_file_name
-        latest_batch_completed = int(re.search(r'batch_(\d+)_', table_file_name).group(1)) if 'batch_' in table_file_name else ""
-        batch_size_number = int(re.search(r'size_(\d+)_', table_file_name).group(1)) if 'size_' in table_file_name else ""
-        in_column_cleaned = re.search(r'col_(.*?)_reference', table_file_name).group(1) if 'col_' in table_file_name else ""
-
-        # Save outputs for each batch. If master file created, label file as master
-        if latest_batch_completed:
-            batch_file_path_details = f"{file_name}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
-        else:
-            batch_file_path_details = f"{file_name}_col_{in_column_cleaned}"
-
-        summarised_references["Revised summary"] = summarised_outputs        
-
-        join_cols = ["General Topic", "Subtopic", "Sentiment"]
-        join_plus_summary_cols = ["General Topic", "Subtopic", "Sentiment", "Revised summary"]
-
-        summarised_references_j = summarised_references[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
-
-        unique_table_df_revised = unique_table_df.merge(summarised_references_j, on = join_cols, how = "left")
-
-        # If no new summary is available, keep the original
-        unique_table_df_revised["Revised summary"] = unique_table_df_revised["Revised summary"].combine_first(unique_table_df_revised["Summary"])
-
-        unique_table_df_revised = unique_table_df_revised[["General Topic",	"Subtopic",	"Sentiment", "Response References",	"Revised summary"]]        
-
-        reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
-        # If no new summary is available, keep the original
-        reference_table_df_revised["Revised summary"] = reference_table_df_revised["Revised summary"].combine_first(reference_table_df_revised["Summary"])
-        reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1)
-
-        # Remove topics that are tagged as 'Not Mentioned'
-        unique_table_df_revised = unique_table_df_revised.loc[unique_table_df_revised["Sentiment"] != "Not Mentioned", :]
-        reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]
-        
-          
-            
-
-        if not file_data.empty:
-            basic_response_data = get_basic_response_data(file_data, chosen_cols)
-            reference_table_df_revised_pivot = convert_reference_table_to_pivot_table(reference_table_df_revised, basic_response_data)
-
-            ### Save pivot file to log area
-            reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
-            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8')
-            log_output_files.append(reference_table_df_revised_pivot_path)
-
-        # Save to file
-        unique_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
-        unique_table_df_revised.to_csv(unique_table_df_revised_path, index = None, encoding='utf-8')
-
-        reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
-        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8')
-
-        output_files.extend([reference_table_df_revised_path, unique_table_df_revised_path])       
-
-        ###
-        unique_table_df_revised_display = unique_table_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-
-        summarised_output_markdown = unique_table_df_revised_display.to_markdown(index=False)
-
-        # Ensure same file name not returned twice
-        output_files = list(set(output_files))
-        log_output_files = list(set(log_output_files))
-
-        return summarised_references, unique_table_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
-
-    tic = time.perf_counter()
-    
-    #print("Starting with:", latest_summary_completed)
-    #print("Last summary number:", length_all_summaries)
-
-    if (model_choice == "gemma_2b_it_local") & (RUN_LOCAL_MODEL == "1"):
-                progress(0.1, "Loading in Gemma 2b model")
-                local_model, tokenizer = load_model()
-                #print("Local model loaded:", local_model)
-
-    summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
-    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
-
-    if do_summaries == "Yes":
-        for summary_no in summary_loop:
-
-            print("Current summary number is:", summary_no)
-
-            summary_text = all_summaries[summary_no]
-            #print("summary_text:", summary_text)
-            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
-
-            try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
-                summarised_output = response
-                summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
-                summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
-                summarised_output = summarised_output.strip()
-            except Exception as e:
-                print(e)
-                summarised_output = ""
-
-            summarised_outputs.append(summarised_output)
-            out_metadata.extend(metadata)
-            out_metadata_str = '. '.join(out_metadata)
-
-            latest_summary_completed += 1
-
-            # Check if beyond max time allowed for processing and break if necessary
-            toc = time.perf_counter()
-            time_taken = tic - toc
-
-            if time_taken > max_time_for_loop:
-                print("Time taken for loop is greater than maximum time allowed. Exiting and restarting loop")
-                summary_loop.close()
-                tqdm._instances.clear()
-                break
-
-    # If all summaries completeed
-    if latest_summary_completed >= length_all_summaries:
-        print("At last summary.")
-
-    output_files = list(set(output_files))
-
-    return summarised_references, unique_table_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
