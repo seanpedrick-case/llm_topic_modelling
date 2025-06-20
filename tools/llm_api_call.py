@@ -18,7 +18,7 @@ from io import StringIO
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,  add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt
-from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_unique_table_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data
 from tools.llm_funcs import ResponseObject, process_requests, construct_gemini_generative_model
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
 
@@ -101,7 +101,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
         
         reference_file_data.drop("Topic_number", axis=1, inplace=True, errors="ignore")
 
-        unique_file_data = create_unique_table_df_from_reference_table(reference_file_data)
+        unique_file_data = create_topic_summary_df_from_reference_table(reference_file_data)
 
         unique_file_data.drop("Summary",axis=1, inplace=True)
 
@@ -493,14 +493,14 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     - existing_topics_df (pd.DataFrame): The existing unique topics dataframe 
     - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
     """
-    unique_topics_df_out_path = []
+    topic_summary_df_out_path = []
     topic_table_out_path = "topic_table_error.csv"
     reference_table_out_path = "reference_table_error.csv"
-    unique_topics_df_out_path = "unique_topic_table_error.csv"
+    topic_summary_df_out_path = "unique_topic_table_error.csv"
     topic_with_response_df = pd.DataFrame()
     markdown_table = ""
     out_reference_df = pd.DataFrame()
-    out_unique_topics_df = pd.DataFrame()
+    out_topic_summary_df = pd.DataFrame()
     batch_file_path_details = "error"
 
     # If there was an error in parsing, return boolean saying error
@@ -543,7 +543,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         topic_with_response_df, is_error = convert_response_text_to_markdown_table(response_text)
     except Exception as e:
         print("Error in parsing markdown table from response text:", e)
-        return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
+        return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
     # Rename columns to ensure consistent use of data frames later in code
     new_column_names = {
@@ -650,19 +650,19 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     # Table of all unique topics with descriptions
     #print("topic_with_response_df:", topic_with_response_df)
-    new_unique_topics_df = topic_with_response_df[["General Topic", "Subtopic", "Sentiment"]]
+    new_topic_summary_df = topic_with_response_df[["General Topic", "Subtopic", "Sentiment"]]
 
-    new_unique_topics_df = new_unique_topics_df.rename(columns={new_unique_topics_df.columns[0]: "General Topic", new_unique_topics_df.columns[1]: "Subtopic", new_unique_topics_df.columns[2]: "Sentiment"})
+    new_topic_summary_df = new_topic_summary_df.rename(columns={new_topic_summary_df.columns[0]: "General Topic", new_topic_summary_df.columns[1]: "Subtopic", new_topic_summary_df.columns[2]: "Sentiment"})
     
     # Join existing and new unique topics
-    out_unique_topics_df = pd.concat([new_unique_topics_df, existing_topics_df]).dropna(how='all')
+    out_topic_summary_df = pd.concat([new_topic_summary_df, existing_topics_df]).dropna(how='all')
 
-    out_unique_topics_df = out_unique_topics_df.rename(columns={out_unique_topics_df.columns[0]: "General Topic", out_unique_topics_df.columns[1]: "Subtopic", out_unique_topics_df.columns[2]: "Sentiment"})
+    out_topic_summary_df = out_topic_summary_df.rename(columns={out_topic_summary_df.columns[0]: "General Topic", out_topic_summary_df.columns[1]: "Subtopic", out_topic_summary_df.columns[2]: "Sentiment"})
 
-    #print("out_unique_topics_df:", out_unique_topics_df)
+    #print("out_topic_summary_df:", out_topic_summary_df)
 
-    out_unique_topics_df = out_unique_topics_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment"]).\
-            drop(["Response References", "Summary"], axis = 1, errors="ignore") 
+    out_topic_summary_df = out_topic_summary_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment"]).\
+            drop(["Number of responses", "Summary"], axis = 1, errors="ignore") 
 
     # Get count of rows that refer to particular topics
     reference_counts = out_reference_df.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
@@ -670,12 +670,14 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     'Summary': ' <br> '.join
     }).reset_index()
 
-    # Join the counts to existing_unique_topics_df
-    out_unique_topics_df = out_unique_topics_df.merge(reference_counts, how='left', on=["General Topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
+    # Join the counts to existing_topic_summary_df
+    out_topic_summary_df = out_topic_summary_df.merge(reference_counts, how='left', on=["General Topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
 
-    unique_topics_df_out_path = output_folder + batch_file_path_details + "_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+    out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References":"Number of responses"}, errors="ignore")
 
-    return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error
+    topic_summary_df_out_path = output_folder + batch_file_path_details + "_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+
+    return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
 def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                                  force_zero_shot_radio:str="No",
@@ -748,12 +750,12 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
 
             # The following currently doesn't really work. Excluded for now.
 
-            # unique_topics_df = pd.DataFrame(data={
+            # topic_summary_df = pd.DataFrame(data={
             #     "General Topic":zero_shot_topics_gen_topics_list,
             #     "Subtopic":zero_shot_topics_subtopics_list,
             #     "Description": zero_shot_topics_description_list
             #     })
-            # unique_topics_markdown = unique_topics_df.to_markdown()
+            # unique_topics_markdown = topic_summary_df.to_markdown()
 
             # #print("unique_topics_markdown:", unique_topics_markdown)
             
@@ -804,7 +806,7 @@ def extract_topics(in_data_file,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
               existing_reference_df:pd.DataFrame,
-              existing_unique_topics_df:pd.DataFrame,
+              existing_topic_summary_df:pd.DataFrame,
               unique_table_df_display_table_markdown:str,
               file_name:str,
               num_batches:int,
@@ -849,7 +851,7 @@ def extract_topics(in_data_file,
     - file_data (pd.DataFrame): Pandas dataframe containing the consultation response data.
     - existing_topics_table (pd.DataFrame): Pandas dataframe containing the latest master topic table that has been iterated through batches.
     - existing_reference_df (pd.DataFrame): Pandas dataframe containing the list of Response reference numbers alongside the derived topics and subtopics.
-    - existing_unique_topics_df (pd.DataFrame): Pandas dataframe containing the unique list of topics, subtopics, sentiment and summaries until this point.
+    - existing_topic_summary_df (pd.DataFrame): Pandas dataframe containing the unique list of topics, subtopics, sentiment and summaries until this point.
     - unique_table_df_display_table_markdown (str): Table for display in markdown format.
     - file_name (str): File name of the data file.
     - num_batches (int): Number of batches required to go through all the response rows.
@@ -994,7 +996,7 @@ def extract_topics(in_data_file,
                         print("Using local model:", model_choice)
 
                     # Preparing candidate topics if no topics currently exist
-                    if candidate_topics and existing_unique_topics_df.empty:
+                    if candidate_topics and existing_topic_summary_df.empty:
                         progress(0.1, "Creating revised zero shot topics table")
 
                         # 'Zero shot topics' are those supplied by the user
@@ -1006,40 +1008,40 @@ def extract_topics(in_data_file,
                         #print("zero_shot_topics_df:", zero_shot_topics_df)
 
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
-                        if not existing_unique_topics_df.empty and force_zero_shot_radio != "Yes":
-                            existing_unique_topics_df = pd.concat([existing_unique_topics_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
+                        if not existing_topic_summary_df.empty and force_zero_shot_radio != "Yes":
+                            existing_topic_summary_df = pd.concat([existing_topic_summary_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
                         else:
-                            existing_unique_topics_df = zero_shot_topics_df
+                            existing_topic_summary_df = zero_shot_topics_df
 
                     if candidate_topics and not zero_shot_topics_df.empty:
                         # If you have already created revised zero shot topics, concat to the current
-                        existing_unique_topics_df = pd.concat([existing_unique_topics_df, zero_shot_topics_df])
+                        existing_topic_summary_df = pd.concat([existing_topic_summary_df, zero_shot_topics_df])
 
-                    #all_topic_tables_df_merged = existing_unique_topics_df
-                    existing_unique_topics_df["Response References"] = ""
-                    existing_unique_topics_df.fillna("", inplace=True)
-                    existing_unique_topics_df["General Topic"] = existing_unique_topics_df["General Topic"].str.replace('(?i)^Nan$', '', regex=True)
-                    existing_unique_topics_df["Subtopic"] = existing_unique_topics_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
-                    existing_unique_topics_df = existing_unique_topics_df.drop_duplicates()
-                    if "Description" in existing_unique_topics_df:
-                        if existing_unique_topics_df['Description'].isnull().all():
-                            existing_unique_topics_df.drop("Description", axis = 1, inplace = True)
+                    #all_topic_tables_df_merged = existing_topic_summary_df
+                    existing_topic_summary_df["Number of responses"] = ""
+                    existing_topic_summary_df.fillna("", inplace=True)
+                    existing_topic_summary_df["General Topic"] = existing_topic_summary_df["General Topic"].str.replace('(?i)^Nan$', '', regex=True)
+                    existing_topic_summary_df["Subtopic"] = existing_topic_summary_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
+                    existing_topic_summary_df = existing_topic_summary_df.drop_duplicates()
+                    if "Description" in existing_topic_summary_df:
+                        if existing_topic_summary_df['Description'].isnull().all():
+                            existing_topic_summary_df.drop("Description", axis = 1, inplace = True)
 
-                    # print("existing_unique_topics_df:", existing_unique_topics_df)
+                    # print("existing_topic_summary_df:", existing_topic_summary_df)
 
                     # If user has chosen to try to force zero shot topics, then the prompt is changed to ask the model not to deviate at all from submitted topic list.
                     keep_cols = [
                         col for col in ["General Topic", "Subtopic", "Description"]
-                        if col in existing_unique_topics_df.columns
-                        and not existing_unique_topics_df[col].replace(r'^\s*$', pd.NA, regex=True).isna().all()
+                        if col in existing_topic_summary_df.columns
+                        and not existing_topic_summary_df[col].replace(r'^\s*$', pd.NA, regex=True).isna().all()
                         ]
                     
                     if force_zero_shot_radio == "Yes":                        
-                        topics_df_for_markdown = existing_unique_topics_df[keep_cols].drop_duplicates(keep_cols)
+                        topics_df_for_markdown = existing_topic_summary_df[keep_cols].drop_duplicates(keep_cols)
                         unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
                         topic_assignment_prompt = force_existing_topics_prompt
                     else:
-                        topics_df_for_markdown = existing_unique_topics_df[keep_cols].drop_duplicates(keep_cols)
+                        topics_df_for_markdown = existing_topic_summary_df[keep_cols].drop_duplicates(keep_cols)
                         unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
                         topic_assignment_prompt = allow_new_topics_prompt  
 
@@ -1085,7 +1087,7 @@ def extract_topics(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=False, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, first_run=False, output_folder=output_folder)
 
                     # Write final output to text file for logging purposes
                     try:
@@ -1120,14 +1122,14 @@ def extract_topics(in_data_file,
                     out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
-                    new_unique_topics_df = pd.concat([new_unique_topics_df, existing_unique_topics_df]).drop_duplicates('Subtopic')
+                    new_topic_summary_df = pd.concat([new_topic_summary_df, existing_topic_summary_df]).drop_duplicates('Subtopic')
 
-                    new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
-                    out_file_paths.append(unique_topics_df_out_path)
+                    new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
+                    out_file_paths.append(topic_summary_df_out_path)
                     
                     # Outputs for markdown table output
-                    unique_table_df_display_table = new_unique_topics_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-                    unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Response References", "Summary"]].to_markdown(index=False)
+                    unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+                    unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
 
                     #whole_conversation_metadata.append(whole_conversation_metadata_str)
                     whole_conversation_metadata_str = ' '.join(whole_conversation_metadata)
@@ -1177,12 +1179,12 @@ def extract_topics(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
 
 
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=True, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, markdown_table, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, first_run=True, output_folder=output_folder)
 
                     # If error in table parsing, leave function
                     if is_error == True:
                         raise Exception("Error in output table parsing")
-                        # unique_table_df_display_table_markdown, new_topic_df, new_unique_topics_df, new_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, final_message_out
+                        # unique_table_df_display_table_markdown, new_topic_df, new_topic_summary_df, new_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, final_message_out
                     
                     
                     #all_topic_tables_df.append(topic_table_df)
@@ -1195,10 +1197,10 @@ def extract_topics(in_data_file,
 
                     ## Unique topic list
 
-                    new_unique_topics_df = pd.concat([new_unique_topics_df, existing_unique_topics_df]).drop_duplicates('Subtopic')
+                    new_topic_summary_df = pd.concat([new_topic_summary_df, existing_topic_summary_df]).drop_duplicates('Subtopic')
 
-                    new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
-                    out_file_paths.append(unique_topics_df_out_path)
+                    new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
+                    out_file_paths.append(topic_summary_df_out_path)
                     
                     #all_markdown_topic_tables.append(markdown_table)
 
@@ -1249,11 +1251,11 @@ def extract_topics(in_data_file,
 
             # Overwrite 'existing' elements to add new tables
             existing_reference_df = new_reference_df.dropna(how='all')
-            existing_unique_topics_df = new_unique_topics_df.dropna(how='all')
+            existing_topic_summary_df = new_topic_summary_df.dropna(how='all')
             existing_topics_table = new_topic_df.dropna(how='all')
 
             # The topic table that can be modified does not need the summary column
-            modifiable_unique_topics_df = existing_unique_topics_df.drop("Summary", axis=1)
+            modifiable_topic_summary_df = existing_topic_summary_df.drop("Summary", axis=1)
 
         out_time = f"{final_time:0.1f} seconds."
         
@@ -1296,7 +1298,7 @@ def extract_topics(in_data_file,
         #topic_table_out_path = output_folder + batch_file_path_details + "_topic_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
         reference_table_out_pivot_path = output_folder + file_path_details + "_final_reference_table_pivot_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
         reference_table_out_path = output_folder + file_path_details + "_final_reference_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv" 
-        unique_topics_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+        topic_summary_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
         basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
 
         ## Reference table mapping response numbers to topics
@@ -1305,11 +1307,11 @@ def extract_topics(in_data_file,
         join_file_paths.append(reference_table_out_path)
 
         # Create final unique topics table from reference table to ensure consistent numbers
-        final_out_unique_topics_df = create_unique_table_df_from_reference_table(existing_reference_df)
+        final_out_topic_summary_df = create_topic_summary_df_from_reference_table(existing_reference_df)
 
         ## Unique topic list
-        final_out_unique_topics_df.to_csv(unique_topics_df_out_path, index=None, encoding='utf-8')
-        out_file_paths.append(unique_topics_df_out_path)
+        final_out_topic_summary_df.to_csv(topic_summary_df_out_path, index=None, encoding='utf-8')
+        out_file_paths.append(topic_summary_df_out_path)
 
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if '_final_' in x]
@@ -1353,32 +1355,32 @@ def extract_topics(in_data_file,
         final_out_file_paths = [file_path for file_path in out_file_paths if "final_" in file_path]
  
         # The topic table that can be modified does not need the summary column
-        modifiable_unique_topics_df = final_out_unique_topics_df.drop("Summary", axis=1)
+        modifiable_topic_summary_df = final_out_topic_summary_df.drop("Summary", axis=1)
 
         print("latest_batch_completed at end of batch iterations to return is", latest_batch_completed)
 
-        return unique_table_df_display_table_markdown, existing_topics_table, final_out_unique_topics_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), final_out_file_paths, join_file_paths
+        return unique_table_df_display_table_markdown, existing_topics_table, final_out_topic_summary_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"), final_out_file_paths, join_file_paths
 
 
-    return unique_table_df_display_table_markdown, existing_topics_table, existing_unique_topics_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_unique_topics_df, headers=None, col_count=(modifiable_unique_topics_df.shape[1], "fixed"), row_count = (modifiable_unique_topics_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths, join_file_paths
+    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths, join_file_paths
 
-def join_modified_topic_names_to_ref_table(modified_unique_topics_df:pd.DataFrame, original_unique_topics_df:pd.DataFrame, reference_df:pd.DataFrame):
+def join_modified_topic_names_to_ref_table(modified_topic_summary_df:pd.DataFrame, original_topic_summary_df:pd.DataFrame, reference_df:pd.DataFrame):
     '''
     Take a unique topic table that has been modified by the user, and apply the topic name changes to the long-form reference table.
     '''
 
-    # Drop rows where Response References is either NA or null
-    modified_unique_topics_df = modified_unique_topics_df[~modified_unique_topics_df["Response References"].isnull()]
-    modified_unique_topics_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
+    # Drop rows where Number of responses is either NA or null
+    modified_topic_summary_df = modified_topic_summary_df[~modified_topic_summary_df["Number of responses"].isnull()]
+    modified_topic_summary_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
 
     # First, join the modified topics to the original topics dataframe based on index to have the modified names alongside the original names
-    original_unique_topics_df_m = original_unique_topics_df.merge(modified_unique_topics_df[["General Topic", "Subtopic", "Sentiment", "Topic_number"]], on="Topic_number", how="left", suffixes=("", "_mod"))
+    original_topic_summary_df_m = original_topic_summary_df.merge(modified_topic_summary_df[["General Topic", "Subtopic", "Sentiment", "Topic_number"]], on="Topic_number", how="left", suffixes=("", "_mod"))
 
-    original_unique_topics_df_m.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
+    original_topic_summary_df_m.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
 
 
     # Then, join these new topic names onto the reference_df, merge based on the original names
-    modified_reference_df = reference_df.merge(original_unique_topics_df_m[["Topic_number", "General Topic_mod", "Subtopic_mod", "Sentiment_mod"]], on=["Topic_number"], how="left")
+    modified_reference_df = reference_df.merge(original_topic_summary_df_m[["Topic_number", "General Topic_mod", "Subtopic_mod", "Sentiment_mod"]], on=["Topic_number"], how="left")
 
     
     modified_reference_df.drop(["General Topic", "Subtopic", "Sentiment"], axis=1, inplace=True, errors="ignore")
@@ -1402,7 +1404,7 @@ def join_modified_topic_names_to_ref_table(modified_unique_topics_df:pd.DataFram
     return modified_reference_df
 
 # MODIFY EXISTING TABLE
-def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifiable_unique_topics_df:pd.DataFrame, reference_df:pd.DataFrame, text_output_file_list_state:List[str], output_folder:str=OUTPUT_FOLDER) -> Tuple:
+def modify_existing_output_tables(original_topic_summary_df:pd.DataFrame, modifiable_topic_summary_df:pd.DataFrame, reference_df:pd.DataFrame, text_output_file_list_state:List[str], output_folder:str=OUTPUT_FOLDER) -> Tuple:
     '''
     Take a unique_topics table that has been modified, apply these new topic names to the long-form reference_df, and save both tables to file.
     '''
@@ -1423,7 +1425,7 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
 
     if reference_file_path and unique_table_file_path:
 
-        reference_df = join_modified_topic_names_to_ref_table(modifiable_unique_topics_df, original_unique_topics_df, reference_df)
+        reference_df = join_modified_topic_names_to_ref_table(modifiable_topic_summary_df, original_topic_summary_df, reference_df)
 
         ## Reference table mapping response numbers to topics
         reference_table_file_name = reference_file_path.replace(".csv", "_mod") 
@@ -1431,23 +1433,23 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
         reference_df.to_csv(new_reference_df_file_path, index=None, encoding='utf-8')
         output_file_list.append(new_reference_df_file_path)
 
-        # Drop rows where Response References is NA or null
-        modifiable_unique_topics_df = modifiable_unique_topics_df[~modifiable_unique_topics_df["Response References"].isnull()]
+        # Drop rows where Number of responses is NA or null
+        modifiable_topic_summary_df = modifiable_topic_summary_df[~modifiable_topic_summary_df["Number of responses"].isnull()]
 
-        # Convert 'Response References' to numeric (forcing errors to NaN if conversion fails)
-        modifiable_unique_topics_df["Response References"] = pd.to_numeric(
-            modifiable_unique_topics_df["Response References"], errors='coerce'
+        # Convert 'Number of responses' to numeric (forcing errors to NaN if conversion fails)
+        modifiable_topic_summary_df["Number of responses"] = pd.to_numeric(
+            modifiable_topic_summary_df["Number of responses"], errors='coerce'
         )
 
         # Drop any rows where conversion failed (original non-numeric values)
-        modifiable_unique_topics_df.dropna(subset=["Response References"], inplace=True)
+        modifiable_topic_summary_df.dropna(subset=["Number of responses"], inplace=True)
 
         # Sort values
-        modifiable_unique_topics_df.sort_values(["Response References"], ascending=False, inplace=True)
+        modifiable_topic_summary_df.sort_values(["Number of responses"], ascending=False, inplace=True)
 
         unique_table_file_name = unique_table_file_path.replace(".csv", "_mod")
         modified_unique_table_file_path = output_folder + unique_table_file_name + ".csv"
-        modifiable_unique_topics_df.to_csv(modified_unique_table_file_path, index=None, encoding='utf-8')
+        modifiable_topic_summary_df.to_csv(modified_unique_table_file_path, index=None, encoding='utf-8')
         output_file_list.append(modified_unique_table_file_path)
     
     else:
@@ -1457,8 +1459,8 @@ def modify_existing_output_tables(original_unique_topics_df:pd.DataFrame, modifi
         raise Exception("Reference and unique topic tables not found.")
     
     # Outputs for markdown table output
-    unique_table_df_revised_display = modifiable_unique_topics_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+    unique_table_df_revised_display = modifiable_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
     deduplicated_unique_table_markdown = unique_table_df_revised_display.to_markdown(index=False)
     
 
-    return modifiable_unique_topics_df, reference_df, output_file_list, output_file_list, output_file_list, output_file_list, reference_table_file_name, unique_table_file_name, deduplicated_unique_table_markdown
+    return modifiable_topic_summary_df, reference_df, output_file_list, output_file_list, output_file_list, output_file_list, reference_table_file_name, unique_table_file_name, deduplicated_unique_table_markdown

@@ -238,8 +238,8 @@ if RUN_AWS_FUNCTIONS == "1":
     model_short_names.extend(["haiku", "sonnet"])
 
 if RUN_GEMINI_MODELS == "1":
-    model_full_names.extend(["gemini-2.0-flash-001", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-exp-05-06" ]) # , # Gemini pro No longer available on free tier
-    model_short_names.extend(["gemini_flash_2", "gemini_flash_2.5", "gemini_pro"])
+    model_full_names.extend(["gemini-2.5-flash-lite-preview-06-17", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-exp-05-06" ]) # , # Gemini pro No longer available on free tier
+    model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
 
 print("model_short_names:", model_short_names)
 print("model_full_names:", model_full_names)
