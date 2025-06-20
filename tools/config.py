@@ -227,7 +227,7 @@ GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 model_full_names = []
 model_short_names = []
 
-CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 3 4B") # Gemma 3 1B #  "Gemma 2b"
+CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 3 1B") # Gemma 3 1B #  "Gemma 2b"
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
