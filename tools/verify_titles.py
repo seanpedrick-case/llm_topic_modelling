@@ -17,12 +17,12 @@ from gradio import Progress
 from typing import List, Tuple
 from io import StringIO
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, create_general_topics_system_prompt, create_general_topics_prompt, force_existing_topics_prompt, allow_new_topics_prompt, verify_titles_prompt, verify_titles_system_prompt
-from tools.helper_functions import output_folder, detect_file_type, get_file_name_no_ext, read_file, get_or_create_env_var, model_name_map, put_columns_in_df, wrap_text
-from tools.chatfuncs import LlamaCPPGenerationConfig, call_llama_cpp_model, load_model, RUN_LOCAL_MODEL
-from tools.llm_api_call import normalise_string, load_in_file, load_in_data_file, load_in_previous_data_files, get_basic_response_data, data_file_to_markdown_table,replace_punctuation_with_underscore, construct_gemini_generative_model, call_aws_claude, send_request, process_requests, clean_markdown_table, clean_column_name, create_unique_table_df_from_reference_table, remove_before_last_term, convert_response_text_to_markdown_table, call_llm_with_markdown_table_checks, write_llm_output_and_logs, convert_reference_table_to_pivot_table, ResponseObject, max_tokens, timeout_wait, number_of_api_retry_attempts, MAX_OUTPUT_VALIDATION_ATTEMPTS, max_time_for_loop, batch_size_default, MAX_COMMENT_CHARS, max_comment_character_length, AWS_DEFAULT_REGION, bedrock_runtime, GradioFileData
+from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,add_existing_topics_system_prompt, add_existing_topics_prompt
+from tools.helper_functions import put_columns_in_df, wrap_text
+from tools.llm_funcs import load_model, construct_gemini_generative_model
+from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table, clean_column_name,  convert_response_text_to_markdown_table, call_llm_with_markdown_table_checks,  ResponseObject, max_tokens, max_time_for_loop, batch_size_default,  GradioFileData
 
-#
+from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER
 
 def write_llm_output_and_logs_verify(responses: List[ResponseObject],
                               whole_conversation: List[str],
@@ -37,8 +37,9 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
                               existing_reference_df:pd.DataFrame,
                               existing_topics_df:pd.DataFrame,
                               batch_size_number:int,
-                              in_column:str,
-                              first_run: bool = False) -> None:
+                              in_column:str,                              
+                              first_run: bool = False,
+                              output_folder:str=OUTPUT_FOLDER) -> None:
     """
     Writes the output of the large language model requests and logs to files.
 
@@ -56,6 +57,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     - existing_reference_df (pd.DataFrame): The existing reference dataframe mapping response numbers to topics.
     - existing_topics_df (pd.DataFrame): The existing unique topics dataframe 
     - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
+    - output_folder (str): A string indicating the folder to output to
     """
     unique_topics_df_out_path = []
     topic_table_out_path = "topic_table_error.csv"
@@ -236,6 +238,7 @@ def verify_titles(in_data_file,
               sentiment_checkbox:str = "Negative, Neutral, or Positive",
               force_zero_shot_radio:str = "No",
               in_excel_sheets:List[str] = [],
+              output_folder:str=OUTPUT_FOLDER,
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,              
@@ -276,7 +279,8 @@ def verify_titles(in_data_file,
     - time_taken (float, optional): The amount of time taken to process the responses up until this point.
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
-    - in_excel_sheets (List[str], optional): List of excel sheets to load from input file
+    - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
+    - output_folder (str): The output folder where files will be saved.
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).

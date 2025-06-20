@@ -6,7 +6,7 @@ colorTo: yellow
 sdk: gradio
 app_file: app.py
 pinned: true
-license: cc-by-nc-4.0
+license: agpl-3.0
 ---
 
 # Large language model topic modelling

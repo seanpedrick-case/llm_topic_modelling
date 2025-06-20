@@ -1,9 +1,13 @@
 import os
 import re
+import boto3
 import gradio as gr
 import pandas as pd
+import numpy as np
 from typing import List
 import math
+from botocore.exceptions import ClientError
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, CUSTOM_HEADER, CUSTOM_HEADER_VALUE, AWS_USER_POOL_ID
 
 def empty_output_vars_extract_topics():
     # Empty output objects before processing a new file
@@ -37,7 +41,6 @@ def empty_output_vars_summarise():
 
     return summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox
 
-
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
     value = os.environ.get(var_name)
@@ -48,45 +51,6 @@ def get_or_create_env_var(var_name, default_value):
         value = default_value
     
     return value
-
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "1")
-print(f'The value of RUN_AWS_FUNCTIONS is {RUN_AWS_FUNCTIONS}')
-
-RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
-print(f'The value of RUN_LOCAL_MODEL is {RUN_LOCAL_MODEL}')
-
-RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
-print(f'The value of RUN_GEMINI_MODELS is {RUN_GEMINI_MODELS}')
-
-GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
-
-# Build up options for models
-model_full_names = []
-model_short_names = []
-
-if RUN_LOCAL_MODEL == "1":
-    model_full_names.append("gemma_2b_it_local")
-    model_short_names.append("gemma_local")
-
-if RUN_AWS_FUNCTIONS == "1":
-    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"])
-    model_short_names.extend(["haiku", "sonnet"])
-
-if RUN_GEMINI_MODELS == "1":
-    model_full_names.extend(["gemini-2.0-flash-001", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-exp-05-06" ]) # , # Gemini pro No longer available on free tier
-    model_short_names.extend(["gemini_flash_2", "gemini_flash_2.5", "gemini_pro"])
-
-print("model_short_names:", model_short_names)
-print("model_full_names:", model_full_names)
-
-model_name_map = {short: full for short, full in zip(model_full_names, model_short_names)}
-
-# Retrieving or setting output folder
-env_var_name = 'GRADIO_OUTPUT_FOLDER'
-default_value = 'output/'
-
-output_folder = get_or_create_env_var(env_var_name, default_value)
-print(f'The value of {env_var_name} is {output_folder}')
 
 def get_file_path_with_extension(file_path):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
@@ -222,7 +186,7 @@ def load_in_previous_reference_file(file:str):
          
     return reference_file_data, reference_file_name
 
-def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.DataFrame, join_columns:List[str], original_file_name:str, output_folder:str=output_folder):
+def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.DataFrame, join_columns:List[str], original_file_name:str, output_folder:str=OUTPUT_FOLDER):
 
     #print("original_data_df columns:", original_data_df.columns)
     #print("original_data_df:", original_data_df)
@@ -245,6 +209,75 @@ def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.D
     file_data_outputs = [save_file_name]
 
     return out_reference_df, file_data_outputs
+
+
+def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verify_titles:bool=False) -> pd.DataFrame:
+
+    if not isinstance(chosen_cols, list):
+        chosen_cols = [chosen_cols]
+    else:
+        chosen_cols = chosen_cols
+
+    basic_response_data = file_data[chosen_cols].reset_index(names="Reference")
+    basic_response_data["Reference"] = basic_response_data["Reference"].astype(int) + 1
+
+    if verify_titles == True:
+        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response", chosen_cols[1]: "Title"})
+        basic_response_data["Title"] = basic_response_data["Title"].str.strip()
+        basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
+    else:
+        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
+
+    basic_response_data["Response"] = basic_response_data["Response"].str.strip()
+    basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)
+
+    return basic_response_data
+
+def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:pd.DataFrame=pd.DataFrame()):
+
+    df_in = df[['Response References', 'General Topic', 'Subtopic', 'Sentiment']].copy()
+
+    df_in['Response References'] = df_in['Response References'].astype(int)
+
+    # Create a combined category column
+    df_in['Category'] = df_in['General Topic'] + ' - ' + df_in['Subtopic'] + ' - ' + df_in['Sentiment']
+    
+    # Create pivot table counting occurrences of each unique combination
+    pivot_table = pd.crosstab(
+        index=df_in['Response References'],
+        columns=[df_in['General Topic'], df_in['Subtopic'], df_in['Sentiment']],
+        margins=True
+    )
+    
+    # Flatten column names to make them more readable
+    pivot_table.columns = [' - '.join(col) for col in pivot_table.columns]
+
+    pivot_table.reset_index(inplace=True)
+
+    if not basic_response_data.empty:
+        pivot_table = basic_response_data.merge(pivot_table, right_on="Response References", left_on="Reference", how="left")
+
+        pivot_table.drop("Response References", axis=1, inplace=True)    
+
+    pivot_table.columns = pivot_table.columns.str.replace("Not assessed - ", "").str.replace("- Not assessed", "")
+
+    return pivot_table
+
+def create_unique_table_df_from_reference_table(reference_df:pd.DataFrame):
+
+    out_unique_topics_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
+            .agg({
+                'Response References': 'size',  # Count the number of references
+                'Summary': lambda x: '<br>'.join(
+                    sorted(set(x), key=lambda summary: reference_df.loc[reference_df['Summary'] == summary, 'Start row of group'].min())
+                )
+            })
+            .reset_index()
+            .sort_values('Response References', ascending=False)  # Sort by size, biggest first
+            .assign(Topic_number=lambda df: np.arange(1, len(df) + 1))  # Add numbering 1 to x
+        )
+
+    return out_unique_topics_df
 
 # Wrap text in each column to the specified max width, including whole words
 def wrap_text(text:str, max_width=60, max_text_length=None):
@@ -332,7 +365,7 @@ def wrap_text(text:str, max_width=60, max_text_length=None):
     
     return '<br>'.join(wrapped_lines)
 
-def initial_clean(text):
+def initial_clean(text:str):
     #### Some of my cleaning functions
     html_pattern_regex = r'<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;'
     html_start_pattern_end_dots_regex = r'<(.*?)\.\.'
@@ -445,7 +478,7 @@ def add_folder_to_path(folder_path: str):
 def reveal_feedback_buttons():
     return gr.Radio(visible=True), gr.Textbox(visible=True), gr.Button(visible=True), gr.Markdown(visible=True)
 
-def wipe_logs(feedback_logs_loc, usage_logs_loc):
+def wipe_logs(feedback_logs_loc:str, usage_logs_loc:str):
     try:
         os.remove(feedback_logs_loc)
     except Exception as e:
@@ -454,65 +487,67 @@ def wipe_logs(feedback_logs_loc, usage_logs_loc):
         os.remove(usage_logs_loc)
     except Exception as e:
         print("Could not remove usage logs file", e)
-   
-async def get_connection_params(request: gr.Request):
-    base_folder = ""
+    
+async def get_connection_params(request: gr.Request,
+                                output_folder_textbox:str=OUTPUT_FOLDER,
+                                input_folder_textbox:str=INPUT_FOLDER,
+                                session_output_folder:str=SESSION_OUTPUT_FOLDER):
 
-    if request:
-        #print("request user:", request.username)
+    #print("Session hash:", request.session_hash)
 
-        #request_data = await request.json()  # Parse JSON body
-        #print("All request data:", request_data)
-        #context_value = request_data.get('context') 
-        #if 'context' in request_data:
-        #     print("Request context dictionary:", request_data['context'])
-
-        # print("Request headers dictionary:", request.headers)
-        # print("All host elements", request.client)           
-        # print("IP address:", request.client.host)
-        # print("Query parameters:", dict(request.query_params))
-        # To get the underlying FastAPI items you would need to use await and some fancy @ stuff for a live query: https://fastapi.tiangolo.com/vi/reference/request/
-        #print("Request dictionary to object:", request.request.body())
-        print("Session hash:", request.session_hash)
-
-        # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER
-        CUSTOM_CLOUDFRONT_HEADER_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER', '')
-        #print(f'The value of CUSTOM_CLOUDFRONT_HEADER is {CUSTOM_CLOUDFRONT_HEADER_var}')
-
-        # Retrieving or setting CUSTOM_CLOUDFRONT_HEADER_VALUE
-        CUSTOM_CLOUDFRONT_HEADER_VALUE_var = get_or_create_env_var('CUSTOM_CLOUDFRONT_HEADER_VALUE', '')
-        #print(f'The value of CUSTOM_CLOUDFRONT_HEADER_VALUE_var is {CUSTOM_CLOUDFRONT_HEADER_VALUE_var}')
-
-        if CUSTOM_CLOUDFRONT_HEADER_var and CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
-            if CUSTOM_CLOUDFRONT_HEADER_var in request.headers:
-                supplied_cloudfront_custom_value = request.headers[CUSTOM_CLOUDFRONT_HEADER_var]
-                if supplied_cloudfront_custom_value == CUSTOM_CLOUDFRONT_HEADER_VALUE_var:
-                    print("Custom Cloudfront header found:", supplied_cloudfront_custom_value)
+    if CUSTOM_HEADER and CUSTOM_HEADER_VALUE:
+            if CUSTOM_HEADER in request.headers:
+                supplied_custom_header_value = request.headers[CUSTOM_HEADER]
+                if supplied_custom_header_value == CUSTOM_HEADER_VALUE:
+                    print("Custom header supplied and matches CUSTOM_HEADER_VALUE")
                 else:
-                    raise(ValueError, "Custom Cloudfront header value does not match expected value.")
+                    print("Custom header value does not match expected value.")
+                    raise ValueError("Custom header value does not match expected value.")
+            else:
+                print("Custom header value not found.")
+                raise ValueError("Custom header value not found.")   
 
-        # Get output save folder from 1 - username passed in from direct Cognito login, 2 - Cognito ID header passed through a Lambda authenticator, 3 - the session hash.
+    # Get output save folder from 1 - username passed in from direct Cognito login, 2 - Cognito ID header passed through a Lambda authenticator, 3 - the session hash.
 
-        if request.username:
-            out_session_hash = request.username
-            base_folder = "user-files/"
-            print("Request username found:", out_session_hash)
+    if request.username:
+        out_session_hash = request.username
+        #print("Request username found:", out_session_hash)
 
-        elif 'x-cognito-id' in request.headers:
-            out_session_hash = request.headers['x-cognito-id']
-            base_folder = "user-files/"
-            print("Cognito ID found:", out_session_hash)
+    elif 'x-cognito-id' in request.headers:
+        out_session_hash = request.headers['x-cognito-id']
+        #print("Cognito ID found:", out_session_hash)
 
-        else:
-            out_session_hash = request.session_hash
-            base_folder = "temp-files/"
-            # print("Cognito ID not found. Using session hash as save folder:", out_session_hash)
+    elif 'x-amzn-oidc-identity' in request.headers:
+        out_session_hash = request.headers['x-amzn-oidc-identity']
 
-        output_folder = base_folder + out_session_hash + "/"
-        #if bucket_name:
-        #    print("S3 output folder is: " + "s3://" + bucket_name + "/" + output_folder)
+        # Fetch email address using Cognito client
+        cognito_client = boto3.client('cognito-idp')
+        try:
+            response = cognito_client.admin_get_user(
+                UserPoolId=AWS_USER_POOL_ID,  # Replace with your User Pool ID
+                Username=out_session_hash
+            )
+            email = next(attr['Value'] for attr in response['UserAttributes'] if attr['Name'] == 'email')
+            #print("Email address found:", email)
 
-        return out_session_hash, output_folder, out_session_hash
+            out_session_hash = email
+        except ClientError as e:
+            print("Error fetching user details:", e)
+            email = None
+
+        print("Cognito ID found:", out_session_hash)
+
     else:
-        print("No session parameters found.")
-        return "",""
+        out_session_hash = request.session_hash
+
+    if session_output_folder == 'True':
+        output_folder = output_folder_textbox + out_session_hash + "/"
+        input_folder = input_folder_textbox + out_session_hash + "/"
+    else:
+        output_folder = output_folder_textbox
+        input_folder = input_folder_textbox
+
+    if not os.path.exists(output_folder): os.mkdir(output_folder)
+    if not os.path.exists(input_folder): os.mkdir(input_folder)
+
+    return out_session_hash, output_folder, out_session_hash, input_folder

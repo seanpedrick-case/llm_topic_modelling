@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     cmake \
+    libopenblas-dev \
+    pkg-config \
     python3-dev \
     libffi-dev \
     && apt-get clean \
@@ -14,11 +16,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /src
 
+# Optional: Set environment variables for OpenBLAS
+ENV OPENBLAS_VERBOSE=1
+ENV CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
+
 COPY requirements_aws.txt .
 
 RUN pip uninstall -y typing_extensions \
 && pip install --no-cache-dir --target=/install typing_extensions==4.12.2 \
-&& pip install --no-cache-dir --target=/install torch==2.6.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
+&& pip install --no-cache-dir --target=/install torch==2.7.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
 RUN rm requirements_aws.txt

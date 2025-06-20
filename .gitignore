@@ -6,6 +6,7 @@
 *.xls
 *.xlsx
 *.csv
+*.pyc
 examples/*
 output/*
 tools/__pycache__/*
@@ -15,3 +16,5 @@ logs/*
 usage/*
 feedback/*
 test_code/*
+config/*
+tmp/*
