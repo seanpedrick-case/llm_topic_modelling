@@ -10,7 +10,7 @@ from tqdm import tqdm
 from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED
 
 max_tokens = MAX_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -394,20 +394,22 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, local_model=[]):
     conversation_history = []
     whole_conversation_metadata = []
+    google_client = []
+    google_config = {}
 
     # Prepare Gemini models before query       
     if "gemini" in model_choice:
         print("Using Gemini model:", model_choice)
-        model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
+        google_client, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
     else:
         print("Using AWS Bedrock model:", model_choice)
-        model = model_choice
-        config = {}
+        #model = model_choice
+        #config = {}
 
     whole_conversation = [summarise_topic_descriptions_system_prompt] 
 
     # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, local_model=local_model)
+    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, local_model=local_model)
 
     print("Finished summary query")
 
@@ -478,7 +480,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     try:
         all_summaries = summarised_references["Summary"].tolist()
     except:
-        all_summaries = summarised_references["Revised Summary"].tolist()
+        all_summaries = summarised_references["Revised summary"].tolist()
 
     length_all_summaries = len(all_summaries)
 
@@ -551,7 +553,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         output_files = list(set(output_files))
         log_output_files = list(set(log_output_files))
 
-        return summarised_references, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
+        return summarised_references, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files
 
     tic = time.perf_counter()
     
@@ -607,18 +609,18 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     output_files = list(set(output_files))
 
-    return summarised_references, topic_summary_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
+    return summarised_references, topic_summary_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files
 
 def overall_summary(topic_summary_df:pd.DataFrame,
                     model_choice:str,
                     in_api_key:str,
                     temperature:float,
                     table_file_name:str,
-                    summarised_outputs:list = [],  
-                    latest_summary_completed:int = 0,
+                    summarised_outputs:list = [],
                     output_folder:str=OUTPUT_FOLDER,
                     output_files:list[str] = [],                            
-                    summarise_everything_prompt:str=summarise_everything_prompt, comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
+                    summarise_everything_prompt:str=summarise_everything_prompt,
+                    comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     do_summaries:str="Yes",                            
                     progress=gr.Progress(track_tqdm=True)):
     '''
@@ -627,9 +629,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
     out_metadata = []
     local_model = []
-    all_summaries = []
-    summarised_output_markdown = ""
     length_all_summaries = 1
+    latest_summary_completed = 0
 
     model_choice_clean = model_name_map[model_choice]   
     file_name = re.search(r'(.*?)(?:_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_batch_|_col_)', table_file_name) else table_file_name
