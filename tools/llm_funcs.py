@@ -29,7 +29,7 @@ print("Is CUDA enabled? ", torch.cuda.is_available())
 print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
 if torch.cuda.is_available():
     torch_device = "cuda"
-    gpu_layers = LLM_MAX_GPU_LAYERS
+    gpu_layers = int(LLM_MAX_GPU_LAYERS)
     try:
         os.system("nvidia-smi")
     except Exception as e:
@@ -38,10 +38,8 @@ else:
     torch_device =  "cpu"
     gpu_layers = 0
 
-print("Device used is: ", torch_device)
 print("Running on device:", torch_device)
-
-
+print("GPU layers assigned to cuda:", gpu_layers)
 
 if RUN_LOCAL_MODEL == "1":
     print("Running local model - importing llama-cpp-python")
@@ -209,6 +207,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
     tokenizer = []
 
     print("Finished loading model:", local_model_type)
+    print("GPU layers assigned to cuda:", gpu_layers)
     return llama_model, tokenizer
 
 def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
