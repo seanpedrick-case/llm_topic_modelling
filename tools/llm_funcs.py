@@ -31,11 +31,10 @@ if torch.cuda.is_available():
     torch_device = "cuda"
     gpu_layers = int(LLM_MAX_GPU_LAYERS)
     print("CUDA version:", torch.version.cuda)
-    print("CUDA runtime version:", torch.cuda.runtime.version())
     try:
         os.system("nvidia-smi")
     except Exception as e:
-        print("Could not print CUDA settings due to:", e)
+        print("Could not print nvidia-smi settings due to:", e)
 else: 
     torch_device =  "cpu"
     gpu_layers = 0
