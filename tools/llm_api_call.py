@@ -719,7 +719,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
         
         return zero_shot_topics_df
 
-@spaces.GPU
+@spaces.GPU(duration=120)
 def extract_topics(in_data_file,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,

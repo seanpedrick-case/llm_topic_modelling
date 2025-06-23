@@ -12,7 +12,7 @@ google-genai==1.21.1
 html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.10.1
-torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu124
 # CPU only: torch==2.7.1 --extra-index-url https://download.pytorch.org/whl/cpu
 https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.4-cu124/llama_cpp_python-0.3.4-cp310-cp310-linux_x86_64.whl # Specify exact llama_cpp wheel for huggingface compatibility. Will not work with Gemma 3, only Gemma 2
 # llama-cpp-python==0.3.9 - will work on Hugging Face spaces, but will not work for Zero GPU or GPU spaces, only CPU. Can then use Gemma 3.
