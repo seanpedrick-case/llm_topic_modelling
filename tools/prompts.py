@@ -75,6 +75,19 @@ Your task is to create a General Topic name for each Subtopic. The new Topics ta
 New Topics table:"""
 
 
+### Summarise everything prompt
+
+summarise_everything_prompt = """Below is a table that gives an overview of the main topics from a dataset of open text responses along with a description of each topic, and the number of responses that mentioned each topic:
+
+'{topic_summary_table}'
+
+Your task is to summarise the above table in markdown format. {summary_format}. Return only the summary in markdown format and no other text.
+
+Summary:"""
+
+comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table"
+
+
 ### Verify exisiting categories prompt
 verify_titles_system_prompt = system_prompt
 

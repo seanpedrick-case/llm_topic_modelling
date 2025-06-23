@@ -13,7 +13,7 @@ beautifulsoup4==4.12.3
 rapidfuzz==3.10.1
 torch==2.7.1 --extra-index-url https://download.pytorch.org/whl/cu126
 # CPU only: torch==2.7.1 --extra-index-url https://download.pytorch.org/whl/cpu
-llama-cpp-python==0.3.9 -C cmake.args="-DGGML_CUDA=on" # CUDA version by default
+llama-cpp-python==0.3.9 # -C cmake.args="-DGGML_CUDA=on" # CUDA version by default
 #llama-cpp-python==0.3.9 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS"# Linux compatibility - for recent models like Gemma 3
 # For Windows try the following
 # llama-cpp-python==0.3.9 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<root-path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<root-path-to-openblas>/OpenBLAS/lib/libopenblas.lib
