@@ -287,8 +287,8 @@ def verify_titles(in_data_file,
     '''
 
     tic = time.perf_counter()
-    model = ""
-    config = ""
+    google_client = []
+    google_config = {}
     final_time = 0.0
     whole_conversation_metadata = []
     is_error = False
