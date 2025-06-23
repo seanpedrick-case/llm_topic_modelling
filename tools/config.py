@@ -282,7 +282,7 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     print("LOCAL_MODEL_FILE:", LOCAL_MODEL_FILE)
     print("LOCAL_MODEL_FOLDER:", LOCAL_MODEL_FOLDER)
 
-LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('MAX_GPU_LAYERS','-1'))
+LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1'))
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
 LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','3'))
 LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '1'))
