@@ -21,6 +21,7 @@ full_text = "" # Define dummy source text (full text) just to enable highlight f
 model = [] # Define empty list for model functions to run
 tokenizer = [] #[] # Define empty list for model functions to run
 
+from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
 # Check for torch cuda
@@ -28,8 +29,11 @@ print("Is CUDA enabled? ", torch.cuda.is_available())
 print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
 if torch.cuda.is_available():
     torch_device = "cuda"
-    gpu_layers = -1
-    os.system("nvidia-smi")
+    gpu_layers = LLM_MAX_GPU_LAYERS
+    try:
+        os.system("nvidia-smi")
+    except Exception as e:
+        print("Could not print CUDA settings due to:", e)
 else: 
     torch_device =  "cpu"
     gpu_layers = 0
@@ -37,7 +41,7 @@ else:
 print("Device used is: ", torch_device)
 print("Running on device:", torch_device)
 
-from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED
+
 
 if RUN_LOCAL_MODEL == "1":
     print("Running local model - importing llama-cpp-python")
