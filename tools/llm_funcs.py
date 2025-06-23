@@ -30,6 +30,8 @@ print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabl
 if torch.cuda.is_available():
     torch_device = "cuda"
     gpu_layers = int(LLM_MAX_GPU_LAYERS)
+    print("CUDA version:", torch.version.cuda)
+    print("CUDA runtime version:", torch.cuda.runtime.version())
     try:
         os.system("nvidia-smi")
     except Exception as e:
