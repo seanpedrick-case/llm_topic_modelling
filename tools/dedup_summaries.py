@@ -7,7 +7,7 @@ import gradio as gr
 import time
 from tqdm import tqdm
 
-from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt
+from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text
 from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
@@ -475,8 +475,11 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         print(out_message)
         raise Exception(out_message)
    
-    
-    all_summaries = summarised_references["Summary"].tolist()
+    try:
+        all_summaries = summarised_references["Summary"].tolist()
+    except:
+        all_summaries = summarised_references["Revised Summary"].tolist()
+
     length_all_summaries = len(all_summaries)
 
     # If all summaries completed, make final outputs
@@ -495,9 +498,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         else:
             batch_file_path_details = f"{file_name}_col_{in_column_cleaned}"
 
-        summarised_references["Revised summary"] = summarised_outputs
-
-            
+        summarised_references["Revised summary"] = summarised_outputs           
 
         join_cols = ["General Topic", "Subtopic", "Sentiment"]
         join_plus_summary_cols = ["General Topic", "Subtopic", "Sentiment", "Revised summary"]
@@ -608,6 +609,95 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     return summarised_references, topic_summary_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files
 
-def overall_summary(input_summary_table:str):
-    print("This is a placeholder function for creating an overall summary for your consultation")
-    return
+def overall_summary(topic_summary_df:pd.DataFrame,
+                    model_choice:str,
+                    in_api_key:str,
+                    temperature:float,
+                    table_file_name:str,
+                    summarised_outputs:list = [],  
+                    latest_summary_completed:int = 0,
+                    output_folder:str=OUTPUT_FOLDER,
+                    output_files:list[str] = [],                            
+                    summarise_everything_prompt:str=summarise_everything_prompt, comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
+                    do_summaries:str="Yes",                            
+                    progress=gr.Progress(track_tqdm=True)):
+    '''
+    Create an overall summary of all responses based on a topic summary table.
+    '''
+
+    out_metadata = []
+    local_model = []
+    all_summaries = []
+    summarised_output_markdown = ""
+    length_all_summaries = 1
+
+    model_choice_clean = model_name_map[model_choice]   
+    file_name = re.search(r'(.*?)(?:_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_batch_|_col_)', table_file_name) else table_file_name
+    latest_batch_completed = int(re.search(r'batch_(\d+)_', table_file_name).group(1)) if 'batch_' in table_file_name else ""
+    batch_size_number = int(re.search(r'size_(\d+)_', table_file_name).group(1)) if 'size_' in table_file_name else ""
+    in_column_cleaned = re.search(r'col_(.*?)_reference', table_file_name).group(1) if 'col_' in table_file_name else ""
+
+    # Save outputs for each batch. If master file created, label file as master
+    if latest_batch_completed:
+        batch_file_path_details = f"{file_name}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
+    else:
+        batch_file_path_details = f"{file_name}_col_{in_column_cleaned}"
+
+    tic = time.perf_counter()    
+    
+    #print("Starting with:", latest_summary_completed)
+    #print("Last summary number:", length_all_summaries)
+
+    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+                progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
+                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
+                #print("Local model loaded:", local_model)
+
+    summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
+    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
+
+    if do_summaries == "Yes":
+        for summary_no in summary_loop:
+
+            print("Current summary number is:", summary_no)
+
+            summary_text = topic_summary_df.to_markdown(index=False)
+            #print("summary_text:", summary_text)
+            formatted_summary_prompt = [summarise_everything_prompt.format(topic_summary_table=summary_text, summary_format=comprehensive_summary_format_prompt)]
+
+            #print("formatted_summary_prompt:", formatted_summary_prompt)
+
+            try:
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
+                summarised_output = response
+                summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
+                summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
+                summarised_output = summarised_output.strip()
+            except Exception as e:
+                print(e)
+                summarised_output = ""
+
+            summarised_outputs.append(summarised_output)
+            out_metadata.extend(metadata)
+            out_metadata_str = '. '.join(out_metadata)
+
+            latest_summary_completed += 1
+
+            # Check if beyond max time allowed for processing and break if necessary
+            toc = time.perf_counter()
+            time_taken = tic - toc
+
+            # Define the output file path for the formatted prompt
+            formatted_prompt_output_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean + ".txt"
+
+            # Write the formatted prompt to the specified file
+            try:
+                with open(formatted_prompt_output_path, "w", encoding='utf-8', errors='replace') as f:
+                    f.write(summarised_output)
+                output_files.append(formatted_prompt_output_path)
+            except Exception as e:
+                print(f"Error writing prompt to file {formatted_prompt_output_path}: {e}")
+
+            output_files = list(set(output_files))
+
+    return output_files, summarised_output

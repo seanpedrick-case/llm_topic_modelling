@@ -71,7 +71,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
                 out_message = "Could not load reference file data:" + str(e)
                 raise Exception("Could not load reference file data:", e)
         # If unique table
-        if 'unique_topics' in file.name:
+        if 'unique_topic' in file.name:
             try:
                 unique_file_data, unique_file_name = load_in_file(file)
                 #print("unique_topics_file:", unique_file_data.head(2))
@@ -88,7 +88,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
         out_message = out_message + " Latest batch number not found."
     if reference_file_data.empty:
         out_message = out_message + " No reference data table provided."
-        raise Exception(out_message)
+        #raise Exception(out_message)
     if unique_file_data.empty:
         out_message = out_message + " No unique data table provided."   
 
