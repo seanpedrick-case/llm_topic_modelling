@@ -452,7 +452,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
         for i in progress_bar:
             try:
                 print("Calling AWS Claude model, attempt", i + 1)
-                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
+                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime)
 
                 #progress_bar.close()
                 #tqdm._instances.clear()
@@ -461,10 +461,8 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to Claude model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
-
+                print("Call to Claude model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
                 time.sleep(timeout_wait)
-                #response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
@@ -489,7 +487,6 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 print("Call to Gemma model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
 
                 time.sleep(timeout_wait)
-                #response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice)
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history       
