@@ -157,6 +157,22 @@ def load_in_data_file(file_paths:List[str], in_colnames:List[str], batch_size:in
     
     return file_data, file_name, num_batches
 
+def clean_column_name(column_name:str, max_length:int=20, front_characters:bool=True):
+    # Convert to string
+    column_name = str(column_name)  
+    # Replace non-alphanumeric characters (except underscores) with underscores
+    column_name = re.sub(r'\W+', '_', column_name)  
+    # Remove leading/trailing underscores
+    column_name = column_name.strip('_')  
+    # Ensure the result is not empty; fall back to "column" if necessary
+    column_name = column_name if column_name else "column"
+    # Truncate to max_length
+    if front_characters == True:
+        output_text = column_name[:max_length]
+    else:
+        output_text = column_name[-max_length:]
+    return output_text
+
 def load_in_previous_reference_file(file:str):
     '''Load in data table from a partially completed consultation summary to continue it.'''
 

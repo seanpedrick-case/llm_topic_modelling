@@ -5,10 +5,10 @@ import time
 import boto3
 import json
 from tqdm import tqdm
-
 from huggingface_hub import hf_hub_download
 from typing import List, Tuple
-import google.generativeai as ai
+from google import genai as ai
+from google.genai import types
 import gradio as gr
 from gradio import Progress
 
@@ -37,7 +37,7 @@ else:
 print("Device used is: ", torch_device)
 print("Running on device:", torch_device)
 
-from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN
+from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED
 
 if RUN_LOCAL_MODEL == "1":
     print("Running local model - importing llama-cpp-python")
@@ -115,7 +115,6 @@ class llama_cpp_init_config_cpu(llama_cpp_init_config_gpu):
 
 gpu_config = llama_cpp_init_config_gpu()
 cpu_config = llama_cpp_init_config_cpu()
-
 
 class LlamaCPPGenerationConfig:
     def __init__(self, temperature=temperature,
@@ -278,7 +277,7 @@ def llama_cpp_streaming(history, full_prompt, temperature=temperature):
 # LLM FUNCTIONS
 ###
 
-def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int) -> Tuple[object, dict]:
+def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int, random_seed=seed) -> Tuple[object, dict]:
     """
     Constructs a GenerativeModel for Gemini API calls.
 
@@ -297,22 +296,25 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
         if in_api_key:
             #print("Getting API key from textbox")
             api_key = in_api_key
-            ai.configure(api_key=api_key)
+            client = ai.Client(api_key=api_key)
         elif "GOOGLE_API_KEY" in os.environ:
             #print("Searching for API key in environmental variables")
             api_key = os.environ["GOOGLE_API_KEY"]
-            ai.configure(api_key=api_key)
+            client = ai.Client(api_key=api_key)
         else:
             print("No API key foound")
             raise gr.Error("No API key found.")
     except Exception as e:
         print(e)
     
-    config = ai.GenerationConfig(temperature=temperature, max_output_tokens=max_tokens)
-
-    #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
-    model = ai.GenerativeModel(model_name='models/' + model_choice, system_instruction=system_prompt, generation_config=config)
+    # Following now a deprecated method
     
+    config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens, seed=random_seed)
+
+    # Following now a deprecated method
+    #model=ai.GenerativeModel(model_name='models/' + model_choice, system_instruction=system_prompt, generation_config=config)
+    
+    #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
     # Upload CSV file (replace with your actual file path)
     #file_id = ai.upload_file(upload_file_path)
 
@@ -340,9 +342,9 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
     # ttl=datetime.timedelta(minutes=5),
     # )
 
-    return model, config
+    return client, config
 
-def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str) -> ResponseObject:
+def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str, bedrock_runtime:boto3.Session.client) -> ResponseObject:
     """
     This function sends a request to AWS Claude with the following parameters:
     - prompt: The user's input prompt to be processed by the model.
@@ -397,11 +399,11 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     return response
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], model: object, config: dict, model_choice: str, system_prompt: str, temperature: float, local_model=[], progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, local_model=[], progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
-    If the model choice is specific to AWS Claude, it calls the `call_aws_claude` function; otherwise, it uses the `model.generate_content` method.
+    If the model choice is specific to AWS Claude, it calls the `call_aws_claude` function; otherwise, it uses the `client.models.generate_content` method.
     The function returns the response text and the updated conversation history.
     """
     # Constructing the full prompt from the conversation history
@@ -426,10 +428,12 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
         for i in progress_bar:
             try:
                 print("Calling Gemini model, attempt", i + 1)
+                #print("google_client:", google_client)
+                #print("model_choice:", model_choice)
                 #print("full_prompt:", full_prompt)
                 #print("generation_config:", config)
 
-                response = model.generate_content(contents=full_prompt, generation_config=config)
+                response = google_client.models.generate_content(model=model_choice, contents=full_prompt, config=config)
 
                 #progress_bar.close()
                 #tqdm._instances.clear()
@@ -507,7 +511,7 @@ def send_request(prompt: str, conversation_history: List[dict], model: object, c
     
     return response, conversation_history
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], model: object, config: dict, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -517,7 +521,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
         conversation_history (List[dict]): The history of the conversation.
         whole_conversation (List[str]): The complete conversation including prompts and responses.
         whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-        model (object): The model to use for processing the prompts.
+        google_client (object): The google_client to use for processing the prompts.
         config (dict): Configuration for the model.
         model_choice (str): The choice of model to use.        
         temperature (float): The temperature parameter for the model.
@@ -537,7 +541,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         #print("prompt to LLM:", prompt)
 
-        response, conversation_history = send_request(prompt, conversation_history, model=model, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model)
+        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model)
 
         if isinstance(response, ResponseObject):
             response_text = response.text
@@ -575,5 +579,77 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
             print("Response is a string object.")
             whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
 
+
+    return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
+
+def call_llm_with_markdown_table_checks(batch_prompts: List[str],
+                                        system_prompt: str,
+                                        conversation_history: List[dict],
+                                        whole_conversation: List[str], 
+                                        whole_conversation_metadata: List[str],
+                                        google_client: ai.Client,
+                                        google_config: types.GenerateContentConfig,
+                                        model_choice: str, 
+                                        temperature: float,
+                                        reported_batch_no: int,
+                                        local_model: object,
+                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int,                                        
+                                        master:bool=False,
+                                        CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE,
+                                        random_seed:int=seed) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
+    """
+    Call the large language model with checks for a valid markdown table.
+
+    Parameters:
+    - batch_prompts (List[str]): A list of prompts to be processed.
+    - system_prompt (str): The system prompt.
+    - conversation_history (List[dict]): The history of the conversation.
+    - whole_conversation (List[str]): The complete conversation including prompts and responses.
+    - whole_conversation_metadata (List[str]): Metadata about the whole conversation.
+    - google_client (ai.Client): The Google client object for running Gemini API calls.
+    - google_config (types.GenerateContentConfig): Configuration for the model.
+    - model_choice (str): The choice of model to use.        
+    - temperature (float): The temperature parameter for the model.
+    - reported_batch_no (int): The reported batch number.
+    - local_model (object): The local model to use.
+    - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
+    - master (bool, optional): Boolean to determine whether this call is for the master output table.
+    - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded.
+    - random_seed (int, optional): The random seed used for LLM generation.
+
+    Returns:
+    - Tuple[List[ResponseObject], List[dict], List[str], List[str], str]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, the updated whole conversation metadata, and the response text.
+    """
+
+    call_temperature = temperature  # This is correct now with the fixed parameter name
+
+    # Update Gemini config with the new temperature settings
+    google_config = types.GenerateContentConfig(temperature=call_temperature, max_output_tokens=max_tokens, seed=random_seed)
+
+    for attempt in range(MAX_OUTPUT_VALIDATION_ATTEMPTS):
+        # Process requests to large language model
+        responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
+            batch_prompts, system_prompt, conversation_history, whole_conversation, 
+            whole_conversation_metadata, google_client, google_config, model_choice, 
+            call_temperature, reported_batch_no, local_model, master=master
+        )
+
+        if model_choice != CHOSEN_LOCAL_MODEL_TYPE:
+            stripped_response = responses[-1].text.strip()
+        else:
+            stripped_response = responses[-1]['choices'][0]['text'].strip()
+
+        # Check if response meets our criteria (length and contains table)
+        if len(stripped_response) > 120 and '|' in stripped_response:
+            print(f"Attempt {attempt + 1} produced response with markdown table.")
+            break  # Success - exit loop
+
+        # Increase temperature for next attempt
+        call_temperature = temperature + (0.1 * (attempt + 1))
+        print(f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
+            f"Trying again with temperature: {call_temperature}")
+
+    else:  # This runs if no break occurred (all attempts failed)
+        print(f"Failed to get valid response after {MAX_OUTPUT_VALIDATION_ATTEMPTS} attempts")
 
     return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text

@@ -1,5 +1,4 @@
 import os
-import google.generativeai as ai
 import pandas as pd
 import numpy as np
 import gradio as gr
@@ -10,17 +9,15 @@ import string
 import re
 import spaces
 from tqdm import tqdm
-
 from gradio import Progress
 from typing import List, Tuple
 from io import StringIO
-
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,  add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt
-from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data
-from tools.llm_funcs import ResponseObject, process_requests, construct_gemini_generative_model
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name
+from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED
 
 if RUN_LOCAL_MODEL == "1":
     from tools.llm_funcs import load_model
@@ -32,6 +29,7 @@ max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
+random_seed = LLM_SEED
 
 if RUN_AWS_FUNCTIONS == '1':
     bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
@@ -115,8 +113,8 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
         out_file_names = [reference_file_name + ".csv"]
         out_file_names.append(unique_file_name + ".csv")
 
-        print("reference_file_name:", reference_file_name)
-        print("unique_file_name:", unique_file_name)
+        #print("reference_file_name:", reference_file_name)
+        #print("unique_file_name:", unique_file_name)
 
         return gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas"), reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names
 
@@ -271,18 +269,6 @@ def clean_markdown_table(text: str):
     
     return result
 
-def clean_column_name(column_name, max_length=20):
-    # Convert to string
-    column_name = str(column_name)  
-    # Replace non-alphanumeric characters (except underscores) with underscores
-    column_name = re.sub(r'\W+', '_', column_name)  
-    # Remove leading/trailing underscores
-    column_name = column_name.strip('_')  
-    # Ensure the result is not empty; fall back to "column" if necessary
-    column_name = column_name if column_name else "column"
-    # Truncate to max_length
-    return column_name[:max_length]
-
 # Convert output table to markdown and then to a pandas dataframe to csv
 def remove_before_last_term(input_string: str) -> str:
     # Use regex to find the last occurrence of the term
@@ -390,75 +376,6 @@ def convert_response_text_to_markdown_table(response_text:str, table_type:str = 
     
     #print("out_df in convert function:", out_df)
 
-def call_llm_with_markdown_table_checks(batch_prompts: List[str],
-                                        system_prompt: str,
-                                        conversation_history: List[dict],
-                                        whole_conversation: List[str], 
-                                        whole_conversation_metadata: List[str],
-                                        model: object,
-                                        config: dict,
-                                        model_choice: str, 
-                                        temperature: float,
-                                        reported_batch_no: int,
-                                        local_model: object,
-                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int,                                        
-                                        master:bool=False,
-                                        CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
-    """
-    Call the large language model with checks for a valid markdown table.
-
-    Parameters:
-    - batch_prompts (List[str]): A list of prompts to be processed.
-    - system_prompt (str): The system prompt.
-    - conversation_history (List[dict]): The history of the conversation.
-    - whole_conversation (List[str]): The complete conversation including prompts and responses.
-    - whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-    - model (object): The model to use for processing the prompts.
-    - config (dict): Configuration for the model.
-    - model_choice (str): The choice of model to use.        
-    - temperature (float): The temperature parameter for the model.
-    - reported_batch_no (int): The reported batch number.
-    - local_model (object): The local model to use.
-    - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
-    - master (bool, optional): Boolean to determine whether this call is for the master output table.
-
-    Returns:
-    - Tuple[List[ResponseObject], List[dict], List[str], List[str], str]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, the updated whole conversation metadata, and the response text.
-    """
-
-    call_temperature = temperature  # This is correct now with the fixed parameter name
-
-    # Update Gemini config with the temperature settings
-    config = ai.GenerationConfig(temperature=call_temperature, max_output_tokens=max_tokens)
-
-    for attempt in range(MAX_OUTPUT_VALIDATION_ATTEMPTS):
-        # Process requests to large language model
-        responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
-            batch_prompts, system_prompt, conversation_history, whole_conversation, 
-            whole_conversation_metadata, model, config, model_choice, 
-            call_temperature, reported_batch_no, local_model, master=master
-        )
-
-        if model_choice != CHOSEN_LOCAL_MODEL_TYPE:
-            stripped_response = responses[-1].text.strip()
-        else:
-            stripped_response = responses[-1]['choices'][0]['text'].strip()
-
-        # Check if response meets our criteria (length and contains table)
-        if len(stripped_response) > 120 and '|' in stripped_response:
-            print(f"Attempt {attempt + 1} produced response with markdown table.")
-            break  # Success - exit loop
-
-        # Increase temperature for next attempt
-        call_temperature = temperature + (0.1 * (attempt + 1))
-        print(f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
-            f"Trying again with temperature: {call_temperature}")
-
-    else:  # This runs if no break occurred (all attempts failed)
-        print(f"Failed to get valid response after {MAX_OUTPUT_VALIDATION_ATTEMPTS} attempts")
-
-    return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
-
 def write_llm_output_and_logs(responses: List[ResponseObject],
                               whole_conversation: List[str],
                               whole_conversation_metadata: List[str],
@@ -512,18 +429,19 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     start_row_reported = start_row + 1
 
-    # Example usage
+    # 
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     in_column_cleaned = clean_column_name(in_column, max_length=20)
 
     # Need to reduce output file names as full length files may be too long
-    file_name = clean_column_name(file_name, max_length=30)    
+    file_name = clean_column_name(file_name, max_length=20)    
 
     # Save outputs for each batch. If master file created, label file as master
     batch_file_path_details = f"{file_name}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
     row_number_string_start = f"Rows {start_row_reported} to {end_row}: "
 
-    whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
-    whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
+    whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
+    whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
 
     with open(whole_conversation_path, "w", encoding='utf-8', errors='replace') as f:
         f.write(whole_conversation_str)
@@ -771,7 +689,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
 
             # whole_conversation = []
 
-            # general_topic_response, general_topic_conversation_history, general_topic_conversation, general_topic_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
+            # general_topic_response, general_topic_conversation_history, general_topic_conversation, general_topic_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
             # # Convert response text to a markdown table
             # try:
@@ -891,7 +809,7 @@ def extract_topics(in_data_file,
 
     tic = time.perf_counter()
     model = ""
-    config = ""
+    google_config = ""
     final_time = 0.0
     whole_conversation_metadata = []
     is_error = False
@@ -989,7 +907,7 @@ def extract_topics(in_data_file,
                     # Prepare Gemini models before query       
                     if "gemini" in model_choice:
                         print("Using Gemini model:", model_choice)
-                        model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=add_existing_topics_system_prompt, max_tokens=max_tokens)
+                        google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=add_existing_topics_system_prompt, max_tokens=max_tokens)
                     elif "anthropic.claude" in model_choice:
                         print("Using AWS Bedrock model:", model_choice)
                     else:
@@ -1084,7 +1002,7 @@ def extract_topics(in_data_file,
                     whole_conversation = []
 
                     # Process requests to large language model
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
                     # Return output tables
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, first_run=False, output_folder=output_folder)
@@ -1150,7 +1068,7 @@ def extract_topics(in_data_file,
                     # Prepare Gemini models before query       
                     if "gemini" in model_choice:
                         print("Using Gemini model:", model_choice)
-                        model, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
+                        google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
                     elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
                         print("Using local model:", model_choice)
                     else:
@@ -1176,7 +1094,7 @@ def extract_topics(in_data_file,
                     whole_conversation = [formatted_initial_table_system_prompt] 
 
 
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, model, config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
 
 
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, markdown_table, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, first_run=True, output_folder=output_folder)
@@ -1281,12 +1199,12 @@ def extract_topics(in_data_file,
 
         print("All summaries completed. Creating outputs.")
 
-        model_choice_clean = model_name_map[model_choice]   
+        model_choice_clean = clean_column_name(model_name_map[model_choice], max_length=20, front_characters=False) 
         # Example usage
-        in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
+        in_column_cleaned = clean_column_name(chosen_cols, max_length=10)
 
         # Need to reduce output file names as full length files may be too long
-        file_name = clean_column_name(file_name, max_length=30)    
+        file_name = clean_column_name(file_name, max_length=20)    
 
         # Save outputs for each batch. If master file created, label file as master
         file_path_details = f"{file_name}_col_{in_column_cleaned}"
