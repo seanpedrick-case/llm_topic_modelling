@@ -10,7 +10,7 @@ import re
 import spaces
 from tqdm import tqdm
 from gradio import Progress
-from typing import List, Tuple
+from typing import List, Tuple, Any
 from io import StringIO
 GradioFileData = gr.FileData
 
@@ -59,8 +59,13 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
     for file in file_paths_partial_output:
 
+        if isinstance(file, gr.FileData):
+            name = file.name
+        else:
+            name = file
+
         # If reference table
-        if 'reference_table' in file.name:
+        if 'reference_table' in name:
             try:
                 reference_file_data, reference_file_name = load_in_file(file)
                 #print("reference_file_data:", reference_file_data.head(2))
@@ -69,7 +74,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
                 out_message = "Could not load reference file data:" + str(e)
                 raise Exception("Could not load reference file data:", e)
         # If unique table
-        if 'unique_topic' in file.name:
+        if 'unique_topic' in name:
             try:
                 unique_file_data, unique_file_name = load_in_file(file)
                 #print("unique_topics_file:", unique_file_data.head(2))
@@ -77,7 +82,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
             except Exception as e:
                 out_message = "Could not load unique table file data:" + str(e)
                 raise Exception("Could not load unique table file data:", e)
-        if 'batch_' in file.name:
+        if 'batch_' in name:
             latest_batch = re.search(r'batch_(\d+)', file.name).group(1)
             print("latest batch:", latest_batch)
             latest_batch = int(latest_batch)
@@ -113,10 +118,10 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
         out_file_names = [reference_file_name + ".csv"]
         out_file_names.append(unique_file_name + ".csv")
 
-        #print("reference_file_name:", reference_file_name)
-        #print("unique_file_name:", unique_file_name)
+        print("reference_file_name:", reference_file_name)
+        print("unique_file_name:", unique_file_name)
 
-        return gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas"), reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names
+        return unique_file_data, reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names # gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas")
 
 def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], batch_number: int, batch_size: int, verify_titles:bool=False) -> Tuple[str, str, str]:
     """
@@ -434,10 +439,10 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     in_column_cleaned = clean_column_name(in_column, max_length=20)
 
     # Need to reduce output file names as full length files may be too long
-    file_name = clean_column_name(file_name, max_length=20)    
+    file_name_clean = clean_column_name(file_name, max_length=30, front_characters=False)    
 
     # Save outputs for each batch. If master file created, label file as master
-    batch_file_path_details = f"{file_name}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
+    batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
     row_number_string_start = f"Rows {start_row_reported} to {end_row}: "
 
     whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
@@ -541,12 +546,18 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
             })
 
     # Create a new DataFrame from the reference data
-    new_reference_df = pd.DataFrame(reference_data)
+    if reference_data:
+        new_reference_df = pd.DataFrame(reference_data)
+    else:
+        new_reference_df = pd.DataFrame(columns=["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group"])
 
     #print("new_reference_df:", new_reference_df)
     
     # Append on old reference data
-    out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(how='all')
+    if not new_reference_df.empty:
+        out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(how='all')
+    else:
+        out_reference_df = existing_reference_df
 
     # Remove duplicate Response References for the same topic
     out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
@@ -719,7 +730,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
         
         return zero_shot_topics_df
 
-@spaces.GPU(duration=120)
+@spaces.GPU(duration=60)
 def extract_topics(in_data_file,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
@@ -982,7 +993,7 @@ def extract_topics(in_data_file,
                     #latest_batch_number_string = "batch_" + str(latest_batch_completed - 1)
 
                     # Define the output file path for the formatted prompt
-                    formatted_prompt_output_path = output_folder + file_name + "_" + str(reported_batch_no) +  "_full_prompt_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
+                    formatted_prompt_output_path = output_folder + clean_column_name(file_name, max_length=30, front_characters=False) + "_" + str(reported_batch_no) +  "_full_prompt_" + clean_column_name(model_choice_clean, max_length = 20, front_characters=False) + "_temp_" + str(temperature) + ".txt"
 
                     # Write the formatted prompt to the specified file
                     try:
@@ -1201,13 +1212,13 @@ def extract_topics(in_data_file,
 
         model_choice_clean = clean_column_name(model_name_map[model_choice], max_length=20, front_characters=False) 
         # Example usage
-        in_column_cleaned = clean_column_name(chosen_cols, max_length=10)
+        in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
 
         # Need to reduce output file names as full length files may be too long
-        file_name = clean_column_name(file_name, max_length=20)    
+        file_name_cleaned = clean_column_name(file_name, max_length=30, front_characters=False)    
 
         # Save outputs for each batch. If master file created, label file as master
-        file_path_details = f"{file_name}_col_{in_column_cleaned}"
+        file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
 
         # Create a pivoted reference table
         existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)
@@ -1281,6 +1292,232 @@ def extract_topics(in_data_file,
 
 
     return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"), out_file_paths, join_file_paths
+
+def wrapper_extract_topics_per_column_value(
+    selected_col: str,
+    # Parameters for extract_topics that the wrapper will manage/modify significantly
+    in_data_file: Any, # Pass through, extract_topics might need it if file_data is empty initially
+    file_data: pd.DataFrame,
+    initial_existing_topics_table: pd.DataFrame,
+    initial_existing_reference_df: pd.DataFrame,
+    initial_existing_topic_summary_df: pd.DataFrame,
+    initial_unique_table_df_display_table_markdown: str,
+    original_file_name: str, # Original file name, to be modified per segment
+    # Initial state parameters (wrapper will use these for the very first call)
+    total_number_of_batches:int,
+    in_api_key: str,        
+    temperature: float,
+    chosen_cols: List[str],
+    model_choice: str,
+    candidate_topics: GradioFileData,
+
+    initial_first_loop_state: bool = True,
+    initial_whole_conversation_metadata_str: str = '',
+    initial_latest_batch_completed: int = 0, 
+    initial_time_taken: float = 0,
+
+    initial_table_prompt: str = initial_table_prompt,
+    prompt2: str = prompt2,
+    prompt3: str = prompt3,
+    system_prompt: str = system_prompt,
+    add_existing_topics_system_prompt: str = add_existing_topics_system_prompt,
+    add_existing_topics_prompt: str = add_existing_topics_prompt,
+
+    number_of_prompts_used: int = 1,
+    batch_size: int = 50, # Crucial for calculating num_batches per segment
+    context_textbox: str = "",
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
+    in_excel_sheets: List[str] = [],
+    force_single_topic_radio: str = "No",
+    output_folder: str = OUTPUT_FOLDER,
+    force_single_topic_prompt: str = force_single_topic_prompt,
+    max_tokens: int = max_tokens,
+    model_name_map: dict = model_name_map,
+    max_time_for_loop: int = max_time_for_loop, # This applies per call to extract_topics
+    CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
+    progress=Progress(track_tqdm=True) # type: ignore
+) -> Tuple: # Mimicking the return tuple structure of extract_topics
+    
+    if selected_col is None:
+        print("No grouping column found")
+        file_data["group_col"] = "All"
+        selected_col="group_col"
+
+    if selected_col not in file_data.columns:
+        raise ValueError(f"Selected column '{selected_col}' not found in file_data.")
+
+    unique_values = file_data[selected_col].unique()
+    if len(unique_values) > 15:
+        print(f"Warning: More than 15 unique values found in '{selected_col}'. Processing only the first 15.")
+        unique_values = unique_values[:15]
+
+    # Initialize accumulators for results across all unique values
+    # DataFrames are built upon iteratively
+    acc_topics_table = initial_existing_topics_table.copy()
+    acc_reference_df = initial_existing_reference_df.copy()
+    acc_topic_summary_df = initial_existing_topic_summary_df.copy()
+
+    # Lists are extended
+    acc_out_file_paths = []
+    acc_log_files_output_paths = []
+    acc_join_file_paths = [] # join_file_paths seems to be overwritten, so maybe last one or extend? Let's extend.
+
+    # Single value outputs - typically the last one is most relevant, or sum for time
+    acc_markdown_output = initial_unique_table_df_display_table_markdown
+    acc_latest_batch_completed = initial_latest_batch_completed # From the last segment processed
+    acc_whole_conversation_metadata = initial_whole_conversation_metadata_str
+    acc_total_time_taken = float(initial_time_taken)
+    acc_gradio_df = gr.Dataframe(value=pd.DataFrame()) # type: ignore # Placeholder for the last Gradio DF
+
+    print("acc_total_time_taken:", acc_total_time_taken)
+
+    wrapper_first_loop = initial_first_loop_state
+
+    for i, value in enumerate(unique_values):
+        print(f"\nProcessing segment: {selected_col} = {value} ({i+1}/{len(unique_values)})")
+        
+        filtered_file_data = file_data.copy()
+        filtered_file_data = filtered_file_data[filtered_file_data[selected_col] == value]
+
+        print(f"filtered_file_data:", filtered_file_data)
+
+        if filtered_file_data.empty:
+            print(f"No data for {selected_col} = {value}. Skipping.")
+            continue
+
+        # Calculate num_batches for this specific segment
+        current_num_batches = (len(filtered_file_data) + batch_size - 1) // batch_size
+        
+        # Modify file_name to be unique for this segment's outputs
+        # _grp_{clean_column_name(selected_col, max_length=15)}
+        segment_file_name = f"{clean_column_name(original_file_name, max_length=15)}_{clean_column_name(str(value), max_length=15).replace(' ','_')}"
+
+        # Determine first_loop_state for this call to extract_topics
+        # It's True only if this is the very first segment *and* the wrapper was told it's the first loop.
+        # For subsequent segments, it's False, as we are building on accumulated DFs.
+        current_first_loop_state = wrapper_first_loop if i == 0 else False
+        
+        # latest_batch_completed for extract_topics should be 0 for each new segment,
+        # as it processes the new filtered_file_data from its beginning.
+        # However, if it's the very first call, respect initial_latest_batch_completed.
+        current_latest_batch_completed = initial_latest_batch_completed if i == 0 and wrapper_first_loop else 0
+
+
+        # Call extract_topics for the current segment
+        try:
+            (
+                seg_markdown,
+                seg_topics_table,
+                seg_topic_summary_df,
+                seg_reference_df,
+                seg_out_files1,
+                _seg_out_files2, # Often same as 1
+                seg_batch_completed, # Specific to this segment's run
+                seg_log_files1,
+                _seg_log_files2, # Often same as 1
+                seg_conversation_metadata,
+                seg_time_taken,
+                _seg_out_files3, # Often same as 1
+                _seg_out_files4, # Often same as 1
+                seg_gradio_df,
+                _seg_out_files5, # Often same as 1
+                seg_join_files,
+            ) = extract_topics(
+                in_data_file=in_data_file,
+                file_data=filtered_file_data,
+                existing_topics_table=pd.DataFrame(), #acc_topics_table.copy(), # Pass the accumulated table
+                existing_reference_df=pd.DataFrame(),#acc_reference_df.copy(), # Pass the accumulated table
+                existing_topic_summary_df=pd.DataFrame(),#acc_topic_summary_df.copy(), # Pass the accumulated table
+                unique_table_df_display_table_markdown="", # extract_topics will generate this
+                file_name=segment_file_name,
+                num_batches=current_num_batches,
+                latest_batch_completed=current_latest_batch_completed, # Reset for each new segment's internal batching
+                first_loop_state=current_first_loop_state, # True only for the very first iteration of wrapper
+                out_message=[], # Fresh for each call
+                out_file_paths=[],# Fresh for each call
+                log_files_output_paths=[],# Fresh for each call
+                whole_conversation_metadata_str="", # Fresh for each call
+                time_taken=0, # Time taken for this specific call, wrapper sums it.
+                # Pass through other parameters
+                in_api_key=in_api_key,
+                temperature=temperature,
+                chosen_cols=chosen_cols,
+                model_choice=model_choice,
+                candidate_topics=candidate_topics,
+                initial_table_prompt=initial_table_prompt,
+                prompt2=prompt2,
+                prompt3=prompt3,
+                system_prompt=system_prompt,
+                add_existing_topics_system_prompt=add_existing_topics_system_prompt,
+                add_existing_topics_prompt=add_existing_topics_prompt,
+                number_of_prompts_used=number_of_prompts_used,
+                batch_size=batch_size,
+                context_textbox=context_textbox,
+                sentiment_checkbox=sentiment_checkbox,
+                force_zero_shot_radio=force_zero_shot_radio,
+                in_excel_sheets=in_excel_sheets,
+                force_single_topic_radio=force_single_topic_radio,
+                output_folder=output_folder,
+                force_single_topic_prompt=force_single_topic_prompt,
+                max_tokens=max_tokens,
+                model_name_map=model_name_map,
+                max_time_for_loop=max_time_for_loop,
+                CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
+                progress=progress,
+            )
+
+            # Aggregate results
+            # The DFs returned by extract_topics are already cumulative for *its own run*.
+            # We now make them cumulative for the *wrapper's run*.
+            acc_topics_table = seg_topics_table 
+            acc_reference_df = seg_reference_df
+            acc_topic_summary_df = seg_topic_summary_df
+            
+            # For lists, extend. Use set to remove duplicates if paths might be re-added.
+            acc_out_file_paths.extend(f for f in seg_out_files1 if f not in acc_out_file_paths)
+            acc_log_files_output_paths.extend(f for f in seg_log_files1 if f not in acc_log_files_output_paths)
+            acc_join_file_paths.extend(f for f in seg_join_files if f not in acc_join_file_paths)
+
+            acc_markdown_output = seg_markdown # Keep the latest markdown
+            acc_latest_batch_completed = seg_batch_completed # Keep latest batch count
+            acc_whole_conversation_metadata += (("\n---\n" if acc_whole_conversation_metadata else "") +
+                                               f"Segment {selected_col}={value}:\n" +
+                                               seg_conversation_metadata)
+            acc_total_time_taken += float(seg_time_taken)
+            acc_gradio_df = seg_gradio_df # Keep the latest Gradio DF
+
+            print(f"Segment {selected_col} = {value} processed. Time: {seg_time_taken:.2f}s")
+
+        except Exception as e:
+            print(f"Error processing segment {selected_col} = {value}: {e}")
+            # Optionally, decide if you want to continue with other segments or stop
+            # For now, it will continue
+            continue
+            
+    print(f"\nWrapper finished processing all segments. Total time: {acc_total_time_taken:.2f}s")
+
+    # The return signature should match extract_topics.
+    # The aggregated lists will be returned in the multiple slots.
+    return (
+        acc_markdown_output,
+        acc_topics_table,
+        acc_topic_summary_df,
+        acc_reference_df,
+        acc_out_file_paths, # Slot 1 for out_file_paths
+        acc_out_file_paths, # Slot 2 for out_file_paths
+        acc_latest_batch_completed, # From the last successfully processed segment
+        acc_log_files_output_paths, # Slot 1 for log_files_output_paths
+        acc_log_files_output_paths, # Slot 2 for log_files_output_paths
+        acc_whole_conversation_metadata,
+        acc_total_time_taken,
+        acc_out_file_paths, # Slot 3
+        acc_out_file_paths, # Slot 4
+        acc_gradio_df,      # Last Gradio DF
+        acc_out_file_paths, # Slot 5
+        acc_join_file_paths
+    )
+
 
 def join_modified_topic_names_to_ref_table(modified_topic_summary_df:pd.DataFrame, original_topic_summary_df:pd.DataFrame, reference_df:pd.DataFrame):
     '''
