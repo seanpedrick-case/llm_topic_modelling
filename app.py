@@ -107,8 +107,8 @@ with app:
         in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet"], multiselect = False, label="Select the Excel sheet.", visible=False, allow_custom_value=True)
         in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
 
-        with gr.Accordion("Group analysis by a specific column", open=False):
-            in_group_col = gr.Dropdown(info="Choose grouping column", multiselect = False, label="Select the open text column to group by. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
+        with gr.Accordion("Group analysis by unique values in a specific column", open=False):
+            in_group_col = gr.Dropdown(multiselect = False, label="Select the open text column to group by", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
             candidate_topics = gr.File(height=file_input_height, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General Topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.")

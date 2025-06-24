@@ -240,7 +240,8 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
     else:
         chosen_cols = chosen_cols
 
-    basic_response_data = file_data[chosen_cols].reset_index(drop=True) #.reset_index(names="Reference")
+    basic_response_data = file_data[chosen_cols].reset_index(names="Original Reference")#.reset_index(drop=True) #
+    basic_response_data["Original Reference"] = basic_response_data["Original Reference"] + 1
     basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1 # basic_response_data["Reference"].astype(int) + 1
 
     if verify_titles == True:
@@ -249,12 +250,10 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
         basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
         basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
-        basic_response_data = basic_response_data[['Reference', 'Response']]
+        basic_response_data = basic_response_data[['Reference', 'Response', 'Original Reference']]
 
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
-    basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)
-
-    
+    basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)    
 
     print("basic_response_data:", basic_response_data)
 
