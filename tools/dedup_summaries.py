@@ -443,8 +443,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             chosen_cols:List[str]=[],
                             log_output_files:list[str]=[],
                             summarise_format_radio:str="Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
-                            output_folder:str=OUTPUT_FOLDER,
-                            output_files:list[str] = [],                            
+                            output_folder:str=OUTPUT_FOLDER,                         
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries:str="Yes",                            
                             progress=gr.Progress(track_tqdm=True)):
@@ -454,7 +453,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     out_metadata = []
     local_model = []
     summarised_output_markdown = ""
-    
+    output_files = []
 
     # Check for data for summarisations
     if not topic_summary_df.empty and not reference_table_df.empty:
@@ -617,8 +616,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     temperature:float,
                     table_file_name:str,
                     summarised_outputs:list = [],
-                    output_folder:str=OUTPUT_FOLDER,
-                    output_files:list[str] = [],                            
+                    output_folder:str=OUTPUT_FOLDER,                         
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     do_summaries:str="Yes",                            
@@ -631,6 +629,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     local_model = []
     length_all_summaries = 1
     latest_summary_completed = 0
+    output_files = []
 
     model_choice_clean = model_name_map[model_choice]   
     file_name = re.search(r'(.*?)(?:_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_batch_|_col_)', table_file_name) else table_file_name

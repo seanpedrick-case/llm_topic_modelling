@@ -25,8 +25,13 @@ def empty_output_vars_extract_topics():
     file_data_state = pd.DataFrame()
     reference_data_file_name_textbox = ""
     display_topic_table_markdown = ""
+    summary_output_file_list = []
+    summary_input_file_list = []
+    overall_summarisation_input_files = []
+    overall_summary_output_files = []
 
-    return master_topic_df_state, master_topic_summary_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown
+    return master_topic_df_state, master_topic_summary_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown, summary_output_file_list, summary_input_file_list, overall_summarisation_input_files, overall_summary_output_files
+
 
 def empty_output_vars_summarise():
     # Empty output objects before summarising files
@@ -38,8 +43,9 @@ def empty_output_vars_summarise():
     summarised_outputs_list = []
     latest_summary_completed_num = 0
     conversation_metadata_textbox = ""
+    overall_summarisation_input_files = []
 
-    return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox
+    return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, overall_summarisation_input_files
 
 def get_or_create_env_var(var_name, default_value):
     # Get the environment variable if it exists
@@ -234,8 +240,8 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
     else:
         chosen_cols = chosen_cols
 
-    basic_response_data = file_data[chosen_cols].reset_index(names="Reference")
-    basic_response_data["Reference"] = basic_response_data["Reference"].astype(int) + 1
+    basic_response_data = file_data[chosen_cols].reset_index(drop=True) #.reset_index(names="Reference")
+    basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1 # basic_response_data["Reference"].astype(int) + 1
 
     if verify_titles == True:
         basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response", chosen_cols[1]: "Title"})
@@ -243,9 +249,14 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
         basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
         basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
+        basic_response_data = basic_response_data[['Reference', 'Response']]
 
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
     basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)
+
+    
+
+    print("basic_response_data:", basic_response_data)
 
     return basic_response_data
 
@@ -466,9 +477,9 @@ def put_columns_in_df(in_file:List[str]):
     concat_choices = sorted(set(concat_choices))
 
     if number_of_excel_files > 0:      
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), file_end, gr.Dropdown(choices=concat_choices)
+        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), file_end, gr.Dropdown(choices=concat_choices), gr.Dropdown(choices=concat_choices)
     else:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(visible=False), file_end, gr.Dropdown(choices=concat_choices)
+        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(visible=False), file_end, gr.Dropdown(choices=concat_choices), gr.Dropdown(choices=concat_choices)
 
 # Following function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
 def add_folder_to_path(folder_path: str):
