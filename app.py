@@ -80,23 +80,18 @@ with app:
     # UI LAYOUT
     ###
 
-    gr.Markdown(
-    """# Large language model topic modelling
+    gr.Markdown("""# Large language model topic modelling
 
     Extract topics and summarise outputs using Large Language Models (LLMs, a Gemma model if local, Gemini Flash/Pro, or Claude 3 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify). 
     
     Instructions on use can be found in the README.md file. Try it out with this [dummy development consultation dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation), which you can also try with [zero-shot topics](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/blob/main/example_zero_shot.csv), or this [dummy case notes dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_case_notes).
 
-    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). The use of Gemini models requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information). 
+    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). The use of Gemini models requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information).
 
     NOTE: that **API calls to Gemini are not considered secure**, so please only submit redacted, non-sensitive tabular files to this source. Also, large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
     
     with gr.Tab(label="Extract topics"):
-        gr.Markdown(
-        """
-        ### Choose a tabular data file (xlsx or csv) of open text to extract topics from.
-        """
-        )
+        gr.Markdown("""### Choose a tabular data file (xlsx or csv) of open text to extract topics from.""")
         with gr.Row():
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
             in_api_key = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
@@ -138,10 +133,7 @@ with app:
             s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
     with gr.Tab(label="Modify, deduplicate, and summarise topic outputs"):
-        gr.Markdown(
-        """
-        Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to modify topics, deduplicate topics, or summarise the outputs. If you want pivot table outputs, please load in the original data file along with the selected open text column on the first tab before deduplicating or summarising.
-        """)
+        gr.Markdown("""Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to modify topics, deduplicate topics, or summarise the outputs. If you want pivot table outputs, please load in the original data file along with the selected open text column on the first tab before deduplicating or summarising.""")
 
         with gr.Accordion("Modify existing topics", open = False):
             modification_input_files = gr.File(height=file_input_height, label="Upload files to modify topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
@@ -184,19 +176,13 @@ with app:
         overall_summarised_output_markdown = gr.Markdown(value="### Overall summary will appear here", show_copy_button=True)    
     
     with gr.Tab(label="Topic table viewer"):
-        gr.Markdown(
-        """
-        ### View a 'unique_topic_table' csv file in markdown format.
-        """)
+        gr.Markdown("""### View a 'unique_topic_table' csv file in markdown format.""")
     
         in_view_table = gr.File(height=file_input_height, label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet', '.csv.gz'])
         view_table_markdown = gr.Markdown(value = "", label="View table", show_copy_button=True)
 
     with gr.Tab(label="Continue unfinished topic extraction"):
-        gr.Markdown(
-        """
-        ### Load in output files from a previous topic extraction process and continue topic extraction with new data.
-        """)
+        gr.Markdown("""### Load in output files from a previous topic extraction process and continue topic extraction with new data.""")
 
         with gr.Accordion("Upload reference data file and unique data files", open = True):
             in_previous_data_files = gr.File(height=file_input_height, label="Choose output csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
@@ -204,11 +190,7 @@ with app:
             continue_previous_data_files_btn = gr.Button(value="Continue previous topic extraction", variant="primary")
 
     with gr.Tab(label="Verify descriptions"):
-        gr.Markdown(
-        """
-        ### Choose a tabular data file (xlsx or csv) with titles and original text to verify descriptions for.
-        """
-        )
+        gr.Markdown("""### Choose a tabular data file (xlsx or csv) with titles and original text to verify descriptions for.""")
         with gr.Row():
             verify_model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
             verify_in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
@@ -227,10 +209,7 @@ with app:
         verify_modification_input_files_placeholder = gr.File(height=file_input_height, label="Placeholder for files to avoid errors", visible=False)
 
     with gr.Tab(label="Topic extraction settings"):
-        gr.Markdown(
-        """
-        Define settings that affect large language model output.
-        """)
+        gr.Markdown("""Define settings that affect large language model output.""")
         with gr.Accordion("Settings for LLM generation", open = True):
             temperature_slide = gr.Slider(minimum=0.1, maximum=1.0, value=0.1, label="Choose LLM temperature setting")
             batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query", value = BATCH_SIZE_DEFAULT, precision=0, minimum=1, maximum=100)
@@ -296,32 +275,28 @@ with app:
     success(fn=wrapper_extract_topics_per_column_value,                           
         inputs=[in_group_col,
                 in_data_files,
-
                 file_data_state,              
                 master_topic_df_state,
                 master_reference_df_state,
                 master_unique_topics_df_state,
                 display_topic_table_markdown,
                 reference_data_file_name_textbox,
-
                 total_number_of_batches,
                 in_api_key,
                 temperature_slide,
                 in_colnames,
                 model_choice,
                 candidate_topics,
-
                 first_loop_state,
                 conversation_metadata_textbox,
                 latest_batch_completed,
-                estimated_time_taken_number,
-                
+                estimated_time_taken_number,                
                 initial_table_prompt_textbox,
                 prompt_2_textbox,
                 prompt_3_textbox,
                 system_prompt_textbox,
-                add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox,
-
+                add_to_existing_topics_system_prompt_textbox,
+                add_to_existing_topics_prompt_textbox,
                 number_of_prompts,
                 batch_size_number,
                 context_textbox,
@@ -371,14 +346,14 @@ with app:
     # When button pressed, summarise previous data
     summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, overall_summarisation_input_files]).\
         success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, reference_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(sample_reference_table_summaries, inputs=[master_reference_df_state, master_unique_topics_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown, master_reference_df_state, master_unique_topics_df_state], api_name="sample_summaries").\
+            success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
                 success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, reference_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files], api_name="summarise_topics")
 
     latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, reference_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files], scroll_to_output=True)
 
     # SUMMARISE WHOLE TABLE PAGE
     overall_summarise_previous_data_btn.click(load_in_previous_data_files, inputs=[overall_summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, reference_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, in_api_key, temperature_slide, reference_data_file_name_textbox, summarised_outputs_list, output_folder_state], outputs=[overall_summary_output_files, overall_summarised_output_markdown], scroll_to_output=True, api_name="overall_summary")
+            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, in_api_key, temperature_slide, unique_topics_table_file_name_textbox, summarised_outputs_list, output_folder_state], outputs=[overall_summary_output_files, overall_summarised_output_markdown], scroll_to_output=True, api_name="overall_summary")
 
     ###
     # CONTINUE PREVIOUS TOPIC EXTRACTION PAGE

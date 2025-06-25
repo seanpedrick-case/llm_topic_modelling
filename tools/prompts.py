@@ -85,7 +85,7 @@ Your task is to summarise the above table in markdown format. {summary_format}. 
 
 Summary:"""
 
-comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table"
+comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table. If there are different values in the Group column of the data, compare and contrast differences between the topics and themes from each Group."
 
 
 ### Verify exisiting categories prompt

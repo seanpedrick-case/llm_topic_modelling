@@ -421,7 +421,6 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     reference_table_out_path = "reference_table_error.csv"
     topic_summary_df_out_path = "unique_topic_table_error.csv"
     topic_with_response_df = pd.DataFrame()
-    markdown_table = ""
     out_reference_df = pd.DataFrame()
     out_topic_summary_df = pd.DataFrame()
     batch_file_path_details = "error"    
@@ -461,7 +460,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         topic_with_response_df, is_error = convert_response_text_to_dataframe(response_text)
     except Exception as e:
         print("Error in parsing markdown table from response text:", e)
-        return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
+        return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
     # Rename columns to ensure consistent use of data frames later in code
     new_column_names = {
@@ -607,9 +606,11 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References":"Number of responses"}, errors="ignore")
 
+    out_topic_summary_df["Group"] = group_name
+
     topic_summary_df_out_path = output_folder + batch_file_path_details + "_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
 
-    return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
+    return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
 def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                                  force_zero_shot_radio:str="No",
@@ -988,7 +989,7 @@ def extract_topics(in_data_file,
                         full_prompt = formatted_system_prompt + formatted_summary_prompt                        
 
                     # Define the output file path for the formatted prompt
-                    formatted_prompt_output_path = output_folder + clean_column_name(file_name, max_length=30, front_characters=False) + "_" + str(reported_batch_no) +  "_full_prompt_" + clean_column_name(model_choice_clean, max_length = 20, front_characters=False) + "_temp_" + str(temperature) + ".txt"
+                    formatted_prompt_output_path = output_folder + batch_file_path_details +  "_full_prompt_" + clean_column_name(model_choice_clean, max_length = 20, front_characters=False) + "_temp_" + str(temperature) + ".txt"
 
                     # Write the formatted prompt to the specified file
                     try:
@@ -1009,7 +1010,7 @@ def extract_topics(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, first_run=False, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, first_run=False, output_folder=output_folder)
 
                     # Write final output to text file for logging purposes
                     try:
@@ -1045,6 +1046,8 @@ def extract_topics(in_data_file,
 
                     ## Unique topic list
                     new_topic_summary_df = pd.concat([new_topic_summary_df, existing_topic_summary_df]).drop_duplicates('Subtopic')
+
+                    new_topic_summary_df["Group"] = group_name
 
                     new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
                     out_file_paths.append(topic_summary_df_out_path)
@@ -1101,7 +1104,7 @@ def extract_topics(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
 
 
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, markdown_table, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, first_run=True, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, first_run=True, output_folder=output_folder)
 
                     # If error in table parsing, leave function
                     if is_error == True:
@@ -1121,6 +1124,8 @@ def extract_topics(in_data_file,
 
                     new_topic_summary_df = pd.concat([new_topic_summary_df, existing_topic_summary_df]).drop_duplicates('Subtopic')
 
+                    new_topic_summary_df["Group"] = group_name
+
                     new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
                     out_file_paths.append(topic_summary_df_out_path)
                     
@@ -1131,20 +1136,23 @@ def extract_topics(in_data_file,
                     
                     # Write final output to text file also
                     try:
-                        final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
+                        final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + clean_column_name(model_choice_clean, max_length = 20, front_characters=False) + "_temp_" + str(temperature) + ".txt"
 
-                        if isinstance(responses[-1], ResponseObject):
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
-                                f.write(responses[-1].text)
-                            unique_table_df_display_table_markdown = responses[-1].text
-                        elif "choices" in responses[-1]:
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
-                                f.write(responses[-1]["choices"][0]['text'])
-                            unique_table_df_display_table_markdown =responses[-1]["choices"][0]['text']
-                        else:
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
-                                f.write(responses[-1].text)
-                            unique_table_df_display_table_markdown = responses[-1].text
+                        # if isinstance(responses[-1], ResponseObject):
+                        #     with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                        #         f.write(responses[-1].text)
+                        #     unique_table_df_display_table_markdown = responses[-1].text
+                        # elif "choices" in responses[-1]:
+                        #     with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                        #         f.write(responses[-1]["choices"][0]['text'])
+                        #     unique_table_df_display_table_markdown =responses[-1]["choices"][0]['text']
+                        # else:
+                        #     with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                        #         f.write(responses[-1].text)
+                        #     unique_table_df_display_table_markdown = responses[-1].text
+
+                        unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+                        unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
 
                         log_files_output_paths.append(final_table_output_path)
 
@@ -1203,7 +1211,7 @@ def extract_topics(in_data_file,
 
         print("All summaries completed. Creating outputs.")
 
-        model_choice_clean = clean_column_name(model_name_map[model_choice], max_length=20, front_characters=False) 
+        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False) 
         # Example usage
         in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
 
@@ -1214,14 +1222,13 @@ def extract_topics(in_data_file,
         file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
 
         # Create a pivoted reference table
-        existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)
+        existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)        
 
         # Save the new DataFrame to CSV
-        #topic_table_out_path = output_folder + batch_file_path_details + "_topic_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
-        reference_table_out_pivot_path = output_folder + file_path_details + "_final_reference_table_pivot_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
-        reference_table_out_path = output_folder + file_path_details + "_final_reference_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv" 
-        topic_summary_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
-        basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_pivot_path = output_folder + file_path_details + "_final_reference_table_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_path = output_folder + file_path_details + "_final_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
+        topic_summary_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
 
         ## Reference table mapping response numbers to topics
         existing_reference_df.to_csv(reference_table_out_path, index=None)
@@ -1230,29 +1237,32 @@ def extract_topics(in_data_file,
 
         # Create final unique topics table from reference table to ensure consistent numbers
         final_out_topic_summary_df = create_topic_summary_df_from_reference_table(existing_reference_df)
+        final_out_topic_summary_df["Group"] = group_name
 
         ## Unique topic list
         final_out_topic_summary_df.to_csv(topic_summary_df_out_path, index=None, encoding='utf-8')
         out_file_paths.append(topic_summary_df_out_path)
 
+        # Outputs for markdown table output
+        unique_table_df_display_table = final_out_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
+
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if '_final_' in x]
 
         ## Reference table mapping response numbers to topics
+        existing_reference_df_pivot["Group"] = group_name
         existing_reference_df_pivot.to_csv(reference_table_out_pivot_path, index = None, encoding='utf-8')
         log_files_output_paths.append(reference_table_out_pivot_path)
 
         ## Create a dataframe for missing response references:
         # Assuming existing_reference_df and file_data are already defined
-        # Simplify table to just responses column and the Response reference number        
-
+        # Simplify table to just responses column and the Response reference number
         basic_response_data = get_basic_response_data(file_data, chosen_cols)
-
 
         # Save simplified file data to log outputs
         pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None, encoding='utf-8')
         log_files_output_paths.append(basic_response_data_out_path)
-
 
         # Step 1: Identify missing references
         missing_references = basic_response_data[~basic_response_data['Reference'].astype(str).isin(existing_reference_df['Response References'].astype(str).unique())]
@@ -1267,7 +1277,7 @@ def extract_topics(in_data_file,
         # Display the new DataFrame
         #print("missing_df:", missing_df)
 
-        missing_df_out_path = output_folder + file_path_details + "_missing_references_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
+        missing_df_out_path = output_folder + file_path_details + "_missing_references_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
         missing_df.to_csv(missing_df_out_path, index=None, encoding='utf-8')
         log_files_output_paths.append(missing_df_out_path)
 
@@ -1281,10 +1291,10 @@ def extract_topics(in_data_file,
 
         print("latest_batch_completed at end of batch iterations to return is", latest_batch_completed)
 
-        return unique_table_df_display_table_markdown, existing_topics_table, final_out_topic_summary_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, modifiable_topic_summary_df, final_out_file_paths, join_file_paths # gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"),
+        return unique_table_df_display_table_markdown, existing_topics_table, final_out_topic_summary_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, modifiable_topic_summary_df, final_out_file_paths, join_file_paths, existing_reference_df_pivot # gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"),
 
 
-    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths # gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"),
+    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths, existing_reference_df_pivot # gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"),
 
 def wrapper_extract_topics_per_column_value(
     selected_col: str,
@@ -1350,6 +1360,7 @@ def wrapper_extract_topics_per_column_value(
     acc_topics_table = initial_existing_topics_table.copy()
     acc_reference_df = initial_existing_reference_df.copy()
     acc_topic_summary_df = initial_existing_topic_summary_df.copy()
+    acc_reference_df_pivot = pd.DataFrame()
 
     # Lists are extended
     acc_out_file_paths = []
@@ -1365,7 +1376,7 @@ def wrapper_extract_topics_per_column_value(
 
     wrapper_first_loop = initial_first_loop_state
 
-    for i, group_value in enumerate(unique_values):
+    for i, group_value in tqdm(enumerate(unique_values), desc=f"Analysing by group", total=len(unique_values), unit="groups"):
         print(f"\nProcessing segment: {selected_col} = {group_value} ({i+1}/{len(unique_values)})")
         
         filtered_file_data = file_data.copy()
@@ -1412,6 +1423,7 @@ def wrapper_extract_topics_per_column_value(
                 seg_gradio_df,
                 _seg_out_files5, # Often same as 1
                 seg_join_files,
+                seg_reference_df_pivot
             ) = extract_topics(
                 in_data_file=in_data_file,
                 file_data=filtered_file_data,
@@ -1460,9 +1472,9 @@ def wrapper_extract_topics_per_column_value(
             # Aggregate results
             # The DFs returned by extract_topics are already cumulative for *its own run*.
             # We now make them cumulative for the *wrapper's run*.
-            acc_topics_table = seg_topics_table 
-            acc_reference_df = seg_reference_df
-            acc_topic_summary_df = seg_topic_summary_df
+            acc_reference_df = pd.concat([acc_reference_df, seg_reference_df])
+            acc_topic_summary_df = pd.concat([acc_topic_summary_df, seg_topic_summary_df])
+            acc_reference_df_pivot = pd.concat([acc_reference_df_pivot, seg_reference_df_pivot])
             
             # For lists, extend. Use set to remove duplicates if paths might be re-added.
             acc_out_file_paths.extend(f for f in seg_out_files1 if f not in acc_out_file_paths)
@@ -1484,6 +1496,32 @@ def wrapper_extract_topics_per_column_value(
             # Optionally, decide if you want to continue with other segments or stop
             # For now, it will continue
             continue
+
+    if "Group" in acc_reference_df.columns:
+        model_choice_clean = model_name_map[model_choice]
+        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+        overall_file_name = f"{clean_column_name(original_file_name, max_length=30)}_"
+        
+        acc_reference_df_path = output_folder + overall_file_name + "all_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        acc_topic_summary_df_path = output_folder + overall_file_name +  "all_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        acc_reference_df_pivot_path = output_folder + overall_file_name +  "all_reference_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+
+        acc_reference_df.to_csv(acc_reference_df_path, index=None)
+        acc_topic_summary_df.to_csv(acc_topic_summary_df_path, index=None)
+        acc_reference_df_pivot.to_csv(acc_reference_df_pivot_path, index=None)
+
+        # Remove the existing output file list and replace with the updated concatenated outputs
+        substring_list_to_remove = ["_final_reference_table_pivot_", "_final_reference_table_", "_final_unique_topics_"]
+        acc_out_file_paths = [
+            x for x in acc_out_file_paths
+            if not any(sub in x for sub in substring_list_to_remove)
+        ]
+
+        acc_out_file_paths.extend([acc_reference_df_path, acc_topic_summary_df_path])
+
+        # Outputs for markdown table output
+        unique_table_df_display_table = acc_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        acc_markdown_output = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
             
     print(f"\nWrapper finished processing all segments. Total time: {acc_total_time_taken:.2f}s")
 
