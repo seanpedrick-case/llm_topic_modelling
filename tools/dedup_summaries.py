@@ -7,7 +7,7 @@ import gradio as gr
 import time
 from tqdm import tqdm
 
-from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt
+from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name
 from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED
@@ -437,7 +437,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             chosen_cols:List[str]=[],
                             log_output_files:list[str]=[],
                             summarise_format_radio:str="Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
-                            output_folder:str=OUTPUT_FOLDER,                         
+                            output_folder:str=OUTPUT_FOLDER,
+                            context_textbox:str="",                  
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries:str="Yes",                            
                             progress=gr.Progress(track_tqdm=True)):
@@ -566,8 +567,10 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
             #print("summary_text:", summary_text)
             formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
 
+            formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
+
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, local_model)
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
                 summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
@@ -584,7 +587,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
             # Check if beyond max time allowed for processing and break if necessary
             toc = time.perf_counter()
-            time_taken = tic - toc
+            time_taken = toc - tic
 
             if time_taken > max_time_for_loop:
                 print("Time taken for loop is greater than maximum time allowed. Exiting and restarting loop")
@@ -594,7 +597,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
     # If all summaries completeed
     if latest_summary_completed >= length_all_summaries:
-        print("At last summary.")
+        print("At last summary. Time taken:", time_taken)
 
     output_files = list(set(output_files))
 
@@ -605,10 +608,13 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     in_api_key:str,
                     temperature:float,
                     table_file_name:str,
-                    summarised_outputs:list = [],
-                    output_folder:str=OUTPUT_FOLDER,                         
+                    output_folder:str=OUTPUT_FOLDER,
+                    chosen_cols:List[str]=[],
+                    context_textbox:str="",               
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
+                    comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
+                    summarise_everything_system_prompt:str=summarise_everything_system_prompt,
                     do_summaries:str="Yes",                            
                     progress=gr.Progress(track_tqdm=True)):
     '''
@@ -616,17 +622,35 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     '''
 
     out_metadata = []
-    local_model = []
-    length_all_summaries = 1
+    local_model = []    
     latest_summary_completed = 0
     output_files = []
+    txt_summarised_outputs = []
+    summarised_outputs = []
+
+    if "Group" not in topic_summary_df.columns:
+        topic_summary_df["Group"] = "All"
+        
+
+    topic_summary_df = topic_summary_df.sort_values(by=["Group", "Number of responses"], ascending=[True, False])
+
+    unique_groups = sorted(topic_summary_df["Group"].unique())
+
+    print("unique_groups:", unique_groups)
+
+    length_groups = len(unique_groups)
+
+    if length_groups > 1:
+        comprehensive_summary_format_prompt = comprehensive_summary_format_prompt_by_group        
+    else:
+        comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
     model_choice_clean = model_name_map[model_choice]
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', table_file_name) else table_file_name
     latest_batch_completed = int(re.search(r'batch_(\d+)_', table_file_name).group(1)) if 'batch_' in table_file_name else ""
     batch_size_number = int(re.search(r'size_(\d+)_', table_file_name).group(1)) if 'size_' in table_file_name else ""
-    in_column_cleaned = re.search(r'col_(.*?)_reference', table_file_name).group(1) if 'col_' in table_file_name else ""
+    in_column_cleaned = re.search(r'col_(.*?)_unique', table_file_name).group(1) if 'col_' in table_file_name else ""
 
     # Save outputs for each batch. If master file created, label file as master
     if latest_batch_completed:
@@ -644,48 +668,75 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                 local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
                 #print("Local model loaded:", local_model)
 
-    summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
-    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
+    summary_loop = tqdm(unique_groups, desc="Creating summaries for groups", unit="groups")   
 
     if do_summaries == "Yes":
-        for summary_no in summary_loop:
+        for summary_group in summary_loop:
 
-            summary_text = topic_summary_df.to_markdown(index=False)
+            print("Creating summary for group:", summary_group)
+
+            summary_text = topic_summary_df.loc[topic_summary_df["Group"]==summary_group].to_markdown(index=False)
             
             formatted_summary_prompt = [summarise_everything_prompt.format(topic_summary_table=summary_text, summary_format=comprehensive_summary_format_prompt)]
 
+            formatted_summarise_everything_system_prompt = summarise_everything_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
+
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, summarise_topic_descriptions_system_prompt, local_model)
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, local_model)
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
                 summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
                 summarised_output = summarised_output.strip()
             except Exception as e:
-                print(e)
+                print("Cannot create overall summary for group:", summary_group, "due to:", e)
                 summarised_output = ""
 
             summarised_outputs.append(summarised_output)
+            txt_summarised_outputs.append(f"""Group name: {summary_group}\n""" + summarised_output)
+
             out_metadata.extend(metadata)
             out_metadata_str = '. '.join(out_metadata)
 
             latest_summary_completed += 1
 
-            # Check if beyond max time allowed for processing and break if necessary
-            toc = time.perf_counter()
-            time_taken = tic - toc
+            summary_group_short = clean_column_name(summary_group)            
 
-            # Define the output file path for the output
-            print("batch_file_path_details just before save:", batch_file_path_details)
-            overall_summary_output_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
+            # Write outputs
+            overall_summary_output_path = output_folder + batch_file_path_details + "_overall_summary_grp" + summary_group_short + "_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
 
-            # Write the formatted prompt to the specified file
+            # Write single group outputs
             try:
                 with open(overall_summary_output_path, "w", encoding='utf-8', errors='replace') as f:
                     f.write(summarised_output)
-                output_files.append(overall_summary_output_path)
+                # output_files.append(overall_summary_output_path)
             except Exception as e:
                 print(f"Error writing prompt to file {overall_summary_output_path}: {e}")
 
-            output_files = list(set(output_files))
+        # Write overall outputs to csv
+        overall_summary_output_csv_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
+        summarised_outputs_df = pd.DataFrame(data={"Group":unique_groups, "Summary":summarised_outputs})
+        summarised_outputs_df.to_csv(overall_summary_output_csv_path, index=None)
+        output_files.append(overall_summary_output_csv_path)
 
-    return output_files, summarised_output
+        markdown_output_table = summarised_outputs_df.to_markdown(index=False)
+
+        # Text output file
+        summarised_outputs_join = "\n".join(txt_summarised_outputs)        
+        overall_summary_output_txt_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"     
+
+        try:
+            with open(overall_summary_output_txt_path, "w", encoding='utf-8', errors='replace') as f:
+                f.write(summarised_outputs_join)
+            output_files.append(overall_summary_output_txt_path)
+        except Exception as e:
+            print(f"Error writing prompt to file {overall_summary_output_txt_path}: {e}")
+
+        output_files = list(set(output_files))
+
+        # Check if beyond max time allowed for processing and break if necessary
+        toc = time.perf_counter()
+        time_taken = toc - tic
+
+        print("All group summaries created. Time taken:", time_taken)
+
+    return output_files, markdown_output_table

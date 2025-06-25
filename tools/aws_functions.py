@@ -3,7 +3,7 @@ import pandas as pd
 import boto3
 import tempfile
 import os
-from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, CONSULTATION_SUMMARY_BUCKET
+from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, S3_LOG_BUCKET
 
 PandasDataFrame = Type[pd.DataFrame]
 
@@ -12,7 +12,7 @@ bucket_name=""
 
 if RUN_AWS_FUNCTIONS == "1":
     try:
-        bucket_name = CONSULTATION_SUMMARY_BUCKET
+        bucket_name = S3_LOG_BUCKET
         session = boto3.Session() # profile_name="default"
     except Exception as e:
         print(e)

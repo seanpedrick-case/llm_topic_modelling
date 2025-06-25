@@ -186,7 +186,7 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
 
     return simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_data
 
-def replace_punctuation_with_underscore(input_string):
+def replace_punctuation_with_underscore(input_string:str):
     # Create a translation table where each punctuation character maps to '_'
     translation_table = str.maketrans(string.punctuation, '_' * len(string.punctuation))
     
