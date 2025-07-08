@@ -234,7 +234,7 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
 
 if RUN_AWS_FUNCTIONS == "1":
-    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"])
+    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
     model_short_names.extend(["haiku", "sonnet"])
 
 if RUN_GEMINI_MODELS == "1":

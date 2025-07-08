@@ -1,12 +1,12 @@
-from typing import TypeVar
 import torch.cuda
 import os
 import time
 import boto3
+import pandas as pd
 import json
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
-from typing import List, Tuple
+from typing import List, Tuple, TypeVar
 from google import genai as ai
 from google.genai import types
 import gradio as gr
@@ -22,6 +22,7 @@ model = [] # Define empty list for model functions to run
 tokenizer = [] #[] # Define empty list for model functions to run
 
 from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS
+from tools.prompts import initial_table_assistant_prefill
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
 # Check for torch cuda
@@ -310,45 +311,12 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
             raise gr.Error("No API key found.")
     except Exception as e:
         print(e)
-    
-    # Following now a deprecated method
-    
+        
     config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens, seed=random_seed)
-
-    # Following now a deprecated method
-    #model=ai.GenerativeModel(model_name='models/' + model_choice, system_instruction=system_prompt, generation_config=config)
-    
-    #model = ai.GenerativeModel.from_cached_content(cached_content=cache, generation_config=config)
-    # Upload CSV file (replace with your actual file path)
-    #file_id = ai.upload_file(upload_file_path)
-
-    
-    # if file_type == 'xlsx':
-    #     print("Running through all xlsx sheets")
-    #     #anon_xlsx = pd.ExcelFile(upload_file_path)
-    #     if not in_excel_sheets:
-    #         out_message.append("No Excel sheets selected. Please select at least one to anonymise.")
-    #         continue
-
-    #     anon_xlsx = pd.ExcelFile(upload_file_path)                
-
-    #     # Create xlsx file:
-    #     anon_xlsx_export_file_name = output_folder + file_name + "_redacted.xlsx"
-
-
-    ### QUERYING LARGE LANGUAGE MODEL ###
-    # Prompt caching the table and system prompt. See here: https://ai.google.dev/gemini-api/docs/caching?lang=python
-    # Create a cache with a 5 minute TTL. ONLY FOR CACHES OF AT LEAST 32k TOKENS!
-    # cache = ai.caching.CachedContent.create(
-    # model='models/' + model_choice,
-    # display_name=file_name, # used to identify the cache
-    # system_instruction=system_prompt,
-    # ttl=datetime.timedelta(minutes=5),
-    # )
 
     return client, config
 
-def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice: str, bedrock_runtime:boto3.Session.client) -> ResponseObject:
+def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice:str, bedrock_runtime:boto3.Session.client, assistant_prefill:str="") -> ResponseObject:
     """
     This function sends a request to AWS Claude with the following parameters:
     - prompt: The user's input prompt to be processed by the model.
@@ -356,54 +324,75 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     - temperature: A value that controls the randomness of the model's output, with higher values resulting in more diverse responses.
     - max_tokens: The maximum number of tokens (words or characters) in the model's response.
     - model_choice: The specific model to use for processing the request.
+    - bedrock_runtime: The client object for boto3 Bedrock runtime
+    - assistant_prefill: A string indicating the text that the response should start with.
     
     The function constructs the request configuration, invokes the model, extracts the response text, and returns a ResponseObject containing the text and metadata.
     """
 
-    prompt_config = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "top_p": 0.999,
+    inference_config = {
+        "maxTokens": max_tokens,
+        "topP": 0.999,
         "temperature":temperature,
-        "system": system_prompt,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                ],
-            }
-        ],
     }
 
-    body = json.dumps(prompt_config)
+    if not assistant_prefill:
+        messages =  [
+                {
+                    "role": "user",
+                    "content": [
+                        {"text": prompt},
+                    ],
+                }
+            ]
+    else:
+        messages =  [
+                {
+                    "role": "user",
+                    "content": [
+                        {"text": prompt},
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    # Pre-filling with just '|' is a great general-purpose start
+                    "content": [{"text": assistant_prefill}]
+                }
+            ]
+    
+    system_prompt_list = [
+        {
+            'text': system_prompt
+        }
+    ]
 
-    modelId = model_choice
-    accept = "application/json"
-    contentType = "application/json"
-
-    request = bedrock_runtime.invoke_model(
-        body=body, modelId=modelId, accept=accept, contentType=contentType
+    # The converse API call itself. Note I've renamed the response variable for clarity.
+    api_response = bedrock_runtime.converse(
+        modelId=model_choice,
+        messages=messages,
+        system=system_prompt_list,
+        inferenceConfig=inference_config
     )
 
-    # Extract text from request
-    response_body = json.loads(request.get("body").read())
-    text = response_body.get("content")[0].get("text")
+    output_message = api_response['output']['message']
+    text = assistant_prefill + output_message['content'][0]['text']
 
+    # The usage statistics are neatly provided in the 'usage' key.
+    usage = api_response['usage']
+    
+    # The full API response metadata is in 'ResponseMetadata' if you still need it.
+    metadata = api_response['ResponseMetadata']
+
+    # Create ResponseObject with the cleanly extracted data.
     response = ResponseObject(
-    text=text,
-    usage_metadata=request['ResponseMetadata']
+        text=text,
+        usage_metadata=usage
     )
-
-    # Now you can access both the text and metadata
-    #print("Text:", response.text)
-    #print("Metadata:", response.usage_metadata)
-    #print("Text:", response.text)
     
     return response
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, local_model=[], progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, local_model=[], assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -456,7 +445,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
         for i in progress_bar:
             try:
                 print("Calling AWS Claude model, attempt", i + 1)
-                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime)
+                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime, assistant_prefill=assistant_prefill)
 
                 #progress_bar.close()
                 #tqdm._instances.clear()
@@ -512,7 +501,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     
     return response, conversation_history
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -529,6 +518,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
         batch_no (int): Batch number of the large language model request.
         local_model: Local gguf model (if loaded)
         master (bool): Is this request for the master table.
+        assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS Claude model calls
 
     Returns:
         Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
@@ -542,7 +532,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         #print("prompt to LLM:", prompt)
 
-        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model)
+        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill)
 
         if isinstance(response, ResponseObject):
             response_text = response.text
@@ -552,6 +542,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
             response_text = response.text
 
         responses.append(response)
+        whole_conversation.append(system_prompt)
         whole_conversation.append(prompt)
         whole_conversation.append(response_text)
 
@@ -565,11 +556,17 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
             try:
                 print("model_choice:", model_choice)
                 if "claude" in model_choice:
-                    print("Appending selected metadata items to metadata")
-                    whole_conversation_metadata.append('x-amzn-bedrock-output-token-count:')
-                    whole_conversation_metadata.append(str(response.usage_metadata['HTTPHeaders']['x-amzn-bedrock-output-token-count']))
-                    whole_conversation_metadata.append('x-amzn-bedrock-input-token-count:')
-                    whole_conversation_metadata.append(str(response.usage_metadata['HTTPHeaders']['x-amzn-bedrock-input-token-count']))
+                    print("Extracting usage metadata from Converse API response...")
+                       
+                    # Using .get() is safer than direct access, in case a key is missing.
+                    output_tokens = response.usage_metadata.get('outputTokens', 0)
+                    input_tokens = response.usage_metadata.get('inputTokens', 0)
+                    
+                    print(f"Extracted Token Counts - Input: {input_tokens}, Output: {output_tokens}")
+                    
+                    # Append the clean, standardised data
+                    whole_conversation_metadata.append('outputTokens: ' + str(output_tokens) + ' inputTokens: ' + str(input_tokens))
+
                 elif "gemini" in model_choice:
                     whole_conversation_metadata.append(str(response.usage_metadata))
                 else:
@@ -594,7 +591,8 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         temperature: float,
                                         reported_batch_no: int,
                                         local_model: object,
-                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int,                                        
+                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int, 
+                                        assistant_prefill:str = "",                                       
                                         master:bool=False,
                                         CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE,
                                         random_seed:int=seed) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
@@ -614,6 +612,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     - reported_batch_no (int): The reported batch number.
     - local_model (object): The local model to use.
     - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
+    - assistant_prefill (str, optional): The text to prefill the LLM response. Currently only working with AWS Claude calls.
     - master (bool, optional): Boolean to determine whether this call is for the master output table.
     - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded.
     - random_seed (int, optional): The random seed used for LLM generation.
@@ -632,7 +631,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
         responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
             batch_prompts, system_prompt, conversation_history, whole_conversation, 
             whole_conversation_metadata, google_client, google_config, model_choice, 
-            call_temperature, reported_batch_no, local_model, master=master
+            call_temperature, reported_batch_no, local_model, master=master, assistant_prefill=assistant_prefill
         )
 
         if model_choice != CHOSEN_LOCAL_MODEL_TYPE:
@@ -654,3 +653,43 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
         print(f"Failed to get valid response after {MAX_OUTPUT_VALIDATION_ATTEMPTS} attempts")
 
     return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
+
+def create_missing_references_df(basic_response_df: pd.DataFrame, existing_reference_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Identifies references in basic_response_df that are not present in existing_reference_df.
+    Returns a DataFrame with the missing references and the character count of their responses.
+
+    Args:
+        basic_response_df (pd.DataFrame): DataFrame containing 'Reference' and 'Response' columns.
+        existing_reference_df (pd.DataFrame): DataFrame containing 'Response References' column.
+
+    Returns:
+        pd.DataFrame: A DataFrame with 'Missing Reference' and 'Response Character Count' columns.
+                      'Response Character Count' will be 0 for empty strings and NaN for actual missing data.
+    """
+    # Ensure columns are treated as strings for robust comparison
+    existing_references_unique = existing_reference_df['Response References'].astype(str).unique()
+
+    # Step 1: Identify all rows from basic_response_df that correspond to missing references
+    # We want the entire row to access the 'Response' column later
+    missing_data_rows = basic_response_df[
+        ~basic_response_df['Reference'].astype(str).isin(existing_references_unique)
+    ].copy() # .copy() to avoid SettingWithCopyWarning
+
+    # Step 2: Create the new DataFrame
+    # Populate the 'Missing Reference' column directly
+    missing_df = pd.DataFrame({
+        'Missing Reference': missing_data_rows['Reference']
+    })
+
+    # Step 3: Calculate and add 'Response Character Count'
+    # .str.len() works on Series of strings, handling empty strings (0) and NaN (NaN)
+    missing_df['Response Character Count'] = missing_data_rows['Response'].str.len()
+
+    # Optional: Add the actual response text for easier debugging/inspection if needed
+    # missing_df['Response Text'] = missing_data_rows['Response']
+
+    # Reset index to have a clean, sequential index for the new DataFrame
+    missing_df = missing_df.reset_index(drop=True)
+
+    return missing_df

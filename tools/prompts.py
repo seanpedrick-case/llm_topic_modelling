@@ -2,6 +2,12 @@ generic_system_prompt = """You are a researcher analysing responses from an open
 
 system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. The context of this analysis is '{consultation_context}'."""
 
+markdown_additional_prompt = """ You will be given a request for a markdown table. You must respond with ONLY the markdown table. Do not include any introduction, explanation, or concluding text."""
+
+initial_table_system_prompt = system_prompt + markdown_additional_prompt
+
+initial_table_assistant_prefill = "|"
+
 initial_table_prompt = """The open text data is shown in the following table that contains two columns, Reference and Response. Response table: 
 {response_table}
 
@@ -23,7 +29,9 @@ prompt3 = ""
 
 ## Adding existing topics to consultation responses
 
-add_existing_topics_system_prompt = system_prompt
+add_existing_topics_system_prompt = system_prompt + markdown_additional_prompt
+
+add_existing_topics_assistant_prefill = "|"
 
 force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response References', and 'Summary'.
 In the first column, write 'Not assessed'. In the second column, assign Subtopics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
@@ -31,7 +39,9 @@ In the first column, write 'Not assessed'. In the second column, assign Subtopic
 allow_new_topics_prompt = """Create a new markdown table with the headings 'General Topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General Topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General Topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
 
-force_single_topic_prompt = """ Wherever possible, assign a response to one single topic, unless there are multiple topics that are equally relevant."""
+#force_single_topic_prompt = """ Wherever possible, assign a response to one single topic, unless there are multiple topics that are equally relevant."""
+
+force_single_topic_prompt = """ Assign each response to one single topic only."""
 
 add_existing_topics_prompt = """Responses are shown in the following Response table: 
 {response_table}
