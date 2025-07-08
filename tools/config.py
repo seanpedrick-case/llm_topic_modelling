@@ -105,7 +105,7 @@ if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
 AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
 if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
-CONSULTATION_SUMMARY_BUCKET = get_or_create_env_var('CONSULTATION_SUMMARY_BUCKET', '')
+S3_LOG_BUCKET = get_or_create_env_var('S3_LOG_BUCKET', '')
 
 # Custom headers e.g. if routing traffic through Cloudfront
 # Retrieving or setting CUSTOM_HEADER
@@ -234,7 +234,7 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
 
 if RUN_AWS_FUNCTIONS == "1":
-    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-sonnet-20240229-v1:0"])
+    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
     model_short_names.extend(["haiku", "sonnet"])
 
 if RUN_GEMINI_MODELS == "1":
@@ -320,7 +320,7 @@ GET_DEFAULT_ALLOW_LIST = get_or_create_env_var('GET_DEFAULT_ALLOW_LIST', '')
 
 ALLOW_LIST_PATH = get_or_create_env_var('ALLOW_LIST_PATH', '') # config/default_allow_list.csv
 
-S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_allow_list.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
+S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_allow_list.csv # This is a path within the named S3 bucket
 
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'

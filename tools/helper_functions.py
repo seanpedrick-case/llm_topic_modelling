@@ -32,7 +32,6 @@ def empty_output_vars_extract_topics():
 
     return master_topic_df_state, master_topic_summary_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown, summary_output_file_list, summary_input_file_list, overall_summarisation_input_files, overall_summary_output_files
 
-
 def empty_output_vars_summarise():
     # Empty output objects before summarising files
 
@@ -47,7 +46,7 @@ def empty_output_vars_summarise():
 
     return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, overall_summarisation_input_files
 
-def get_or_create_env_var(var_name, default_value):
+def get_or_create_env_var(var_name:str, default_value:str):
     # Get the environment variable if it exists
     value = os.environ.get(var_name)
     
@@ -58,14 +57,14 @@ def get_or_create_env_var(var_name, default_value):
     
     return value
 
-def get_file_path_with_extension(file_path):
+def get_file_path_with_extension(file_path:str):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
     basename = os.path.basename(file_path)
     
     # Return the basename with its extension
     return basename
 
-def get_file_name_no_ext(file_path):
+def get_file_name_no_ext(file_path:str):
     # First, get the basename of the file (e.g., "example.txt" from "/path/to/example.txt")
     basename = os.path.basename(file_path)
     
@@ -76,7 +75,7 @@ def get_file_name_no_ext(file_path):
     
     return filename_without_extension
 
-def detect_file_type(filename):
+def detect_file_type(filename:str):
     """Detect the file type based on its extension."""
     if (filename.endswith('.csv')) | (filename.endswith('.csv.gz')) | (filename.endswith('.zip')):
         return 'csv'
@@ -232,7 +231,6 @@ def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.D
 
     return out_reference_df, file_data_outputs
 
-
 def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verify_titles:bool=False) -> pd.DataFrame:
 
     if not isinstance(chosen_cols, list):
@@ -240,7 +238,8 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
     else:
         chosen_cols = chosen_cols
 
-    basic_response_data = file_data[chosen_cols].reset_index(drop=True) #.reset_index(names="Reference")
+    basic_response_data = file_data[chosen_cols].reset_index(names="Original Reference")#.reset_index(drop=True) #
+    basic_response_data["Original Reference"] = basic_response_data["Original Reference"] + 1
     basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1 # basic_response_data["Reference"].astype(int) + 1
 
     if verify_titles == True:
@@ -249,14 +248,10 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
         basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
         basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
-        basic_response_data = basic_response_data[['Reference', 'Response']]
+        basic_response_data = basic_response_data[['Reference', 'Response', 'Original Reference']]
 
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
     basic_response_data["Response"] = basic_response_data["Response"].apply(initial_clean)
-
-    
-
-    print("basic_response_data:", basic_response_data)
 
     return basic_response_data
 
@@ -292,7 +287,10 @@ def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:
 
 def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
 
-    out_topic_summary_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment"])
+    if "Group" not in reference_df.columns:
+        reference_df["Group"] = "All"
+
+    out_topic_summary_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment", "Group"])
             .agg({
                 'Response References': 'size',  # Count the number of references
                 'Summary': lambda x: '<br>'.join(
@@ -300,11 +298,13 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
                 )
             })
             .reset_index()
-            .sort_values('Response References', ascending=False)  # Sort by size, biggest first
+            #.sort_values('Response References', ascending=False)  # Sort by size, biggest first
             .assign(Topic_number=lambda df: np.arange(1, len(df) + 1))  # Add numbering 1 to x
         )
     
     out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References": "Number of responses"}, errors="ignore")
+
+    out_topic_summary_df = out_topic_summary_df.sort_values(["Group", "Number of responses", "General Topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True])
 
     return out_topic_summary_df
 

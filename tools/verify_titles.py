@@ -13,7 +13,7 @@ GradioFileData = gr.FileData
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,add_existing_topics_system_prompt, add_existing_topics_prompt
 from tools.helper_functions import put_columns_in_df, wrap_text, clean_column_name
 from tools.llm_funcs import load_model, construct_gemini_generative_model, call_llm_with_markdown_table_checks
-from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table,  convert_response_text_to_markdown_table, ResponseObject
+from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table,  convert_response_text_to_dataframe, ResponseObject
 from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_TOKENS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT
 
 max_tokens = MAX_TOKENS
@@ -105,7 +105,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
 
     # Convert response text to a markdown table
     try:
-        topic_with_response_df, is_error = convert_response_text_to_markdown_table(response_text, table_type="Verify titles table")
+        topic_with_response_df, is_error = convert_response_text_to_dataframe(response_text, table_type="Verify titles table")
     except Exception as e:
         print("Error in parsing markdown table from response text:", e)
         return topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_with_response_df, markdown_table, out_reference_df, out_unique_topics_df, batch_file_path_details, is_error   
