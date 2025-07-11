@@ -100,10 +100,11 @@ with app:
             in_group_col = gr.Dropdown(multiselect = False, label="Select the open text column to group by", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
-            candidate_topics = gr.File(height=FILE_INPUT_HEIGHT, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General Topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.")
+            candidate_topics = gr.File(height=FILE_INPUT_HEIGHT, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.")
             with gr.Row(equal_height=True):
                 force_zero_shot_radio = gr.Radio(label="Force responses into zero shot topics", value="No", choices=["Yes", "No"])
                 force_single_topic_radio = gr.Radio(label="Ask the model to assign responses to only a single topic", value="No", choices=["Yes", "No"])
+                produce_structures_summary_radio = gr.Radio(label="Ask the model to produce structured summaries using the zero shot topics as headers rather than extract topics", value="No", choices=["Yes", "No"])
 
         context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
 
@@ -167,7 +168,7 @@ with app:
         
         overall_summarise_previous_data_btn = gr.Button("Summarise table", variant="primary")
         overall_summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False)
-        overall_summarised_output_markdown = gr.Markdown(value="### Overall summary will appear here", show_copy_button=True)    
+        overall_summarised_output_markdown = gr.HTML(value="### Overall summary will appear here")    
     
     with gr.Tab(label="Topic table viewer"):
         gr.Markdown("""### View a 'unique_topic_table' csv file in markdown format.""")
@@ -298,7 +299,8 @@ with app:
                 force_zero_shot_radio,
                 in_excel_sheets,
                 force_single_topic_radio,
-                output_folder_state],        
+                produce_structures_summary_radio,
+                output_folder_state],
         outputs=[display_topic_table_markdown,
                  master_topic_df_state,
                  master_unique_topics_df_state,

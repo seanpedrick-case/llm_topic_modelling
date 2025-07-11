@@ -155,7 +155,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(how='all')
 
     # # Remove duplicate Response References for the same topic
-    # out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    # out_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     # Try converting response references column to int, keep as string if fails
     try:
@@ -167,33 +167,33 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     out_reference_df.sort_values(["Start row of group", "Response References"], inplace=True)
 
     # # Each topic should only be associated with each individual response once
-    # out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    # out_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     # # Save the new DataFrame to CSV
     # reference_table_out_path = output_folder + batch_file_path_details + "_reference_table_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"    
 
     # # Table of all unique topics with descriptions
     # #print("topic_with_response_df:", topic_with_response_df)
-    # new_unique_topics_df = topic_with_response_df[["General Topic", "Subtopic", "Sentiment"]]
+    # new_unique_topics_df = topic_with_response_df[["General topic", "Subtopic", "Sentiment"]]
 
-    # new_unique_topics_df = new_unique_topics_df.rename(columns={new_unique_topics_df.columns[0]: "General Topic", new_unique_topics_df.columns[1]: "Subtopic", new_unique_topics_df.columns[2]: "Sentiment"})
+    # new_unique_topics_df = new_unique_topics_df.rename(columns={new_unique_topics_df.columns[0]: "General topic", new_unique_topics_df.columns[1]: "Subtopic", new_unique_topics_df.columns[2]: "Sentiment"})
     
     # # Join existing and new unique topics
     # out_unique_topics_df = pd.concat([new_unique_topics_df, existing_topics_df]).dropna(how='all')
 
-    # out_unique_topics_df = out_unique_topics_df.rename(columns={out_unique_topics_df.columns[0]: "General Topic", out_unique_topics_df.columns[1]: "Subtopic", out_unique_topics_df.columns[2]: "Sentiment"})
+    # out_unique_topics_df = out_unique_topics_df.rename(columns={out_unique_topics_df.columns[0]: "General topic", out_unique_topics_df.columns[1]: "Subtopic", out_unique_topics_df.columns[2]: "Sentiment"})
 
-    # out_unique_topics_df = out_unique_topics_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment"]).\
+    # out_unique_topics_df = out_unique_topics_df.drop_duplicates(["General topic", "Subtopic", "Sentiment"]).\
     #         drop(["Response References", "Summary"], axis = 1, errors="ignore") 
 
     # # Get count of rows that refer to particular topics
-    # reference_counts = out_reference_df.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
+    # reference_counts = out_reference_df.groupby(["General topic", "Subtopic", "Sentiment"]).agg({
     # 'Response References': 'size',  # Count the number of references
     # 'Summary': ' <br> '.join
     # }).reset_index()
 
     # # Join the counts to existing_unique_topics_df
-    # out_unique_topics_df = out_unique_topics_df.merge(reference_counts, how='left', on=["General Topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
+    # out_unique_topics_df = out_unique_topics_df.merge(reference_counts, how='left', on=["General topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
 
     #out_reference_df = topic_with_response_df
     out_unique_topics_df = topic_with_response_df
@@ -236,6 +236,7 @@ def verify_titles(in_data_file,
               time_taken:float = 0,
               sentiment_checkbox:str = "Negative, Neutral, or Positive",
               force_zero_shot_radio:str = "No",
+              produce_structures_summary_radio:str = "No",
               in_excel_sheets:List[str] = [],
               output_folder:str=OUTPUT_FOLDER,
               max_tokens:int=max_tokens,
@@ -278,6 +279,7 @@ def verify_titles(in_data_file,
     - time_taken (float, optional): The amount of time taken to process the responses up until this point.
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
+    - produce_structures_summary_radio (str, optional): Has the option to produce structured summaries been selected.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - output_folder (str): The output folder where files will be saved.
     - max_tokens (int): The maximum number of tokens for the model.
@@ -445,7 +447,7 @@ def verify_titles(in_data_file,
                     # print("responses:", responses[-1].text)
                     # print("Whole conversation metadata:", whole_conversation_metadata)
 
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs_verify(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=False)
+                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs_verify(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, produce_structures_summary_radio=produce_structures_summary_radio, first_run=False)
 
                     # Write final output to text file for logging purposes
                     try:
