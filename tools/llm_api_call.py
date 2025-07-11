@@ -14,10 +14,10 @@ from typing import List, Tuple, Any
 from io import StringIO
 GradioFileData = gr.FileData
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill
+from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS
 
 if RUN_LOCAL_MODEL == "1":
     from tools.llm_funcs import load_model
@@ -70,6 +70,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
                 reference_file_data, reference_file_name = load_in_file(file)
                 #print("reference_file_data:", reference_file_data.head(2))
                 out_message = out_message + " Reference file load successful."
+
             except Exception as e:
                 out_message = "Could not load reference file data:" + str(e)
                 raise Exception("Could not load reference file data:", e)
@@ -100,8 +101,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
     # Return all data if using for deduplication task. Return just modified unique table if using just for table modification
     if for_modified_table == False:            
         return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name, unique_file_name
-    else:
-        
+    else:        
         reference_file_data.drop("Topic_number", axis=1, inplace=True, errors="ignore")
 
         unique_file_data = create_topic_summary_df_from_reference_table(reference_file_data)
@@ -110,8 +110,8 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
         # Then merge the topic numbers back to the original dataframe
         reference_file_data = reference_file_data.merge(
-            unique_file_data[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
-            on=['General Topic', 'Subtopic', 'Sentiment'],
+            unique_file_data[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            on=['General topic', 'Subtopic', 'Sentiment'],
             how='left'
         )        
 
@@ -273,7 +273,7 @@ def clean_markdown_table(text: str):
 # Convert output table to markdown and then to a pandas dataframe to csv
 def remove_before_last_term(input_string: str) -> str:
     # Use regex to find the last occurrence of the term
-    match = re.search(r'(\| ?General Topic)', input_string)
+    match = re.search(r'(\| ?General topic)', input_string)
     if match:
         # Find the last occurrence by using rfind
         last_index = input_string.rfind(match.group(0))
@@ -308,7 +308,7 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
             html_table = f"""
             <table>
                 <tr>
-                    <th>General Topic</th>
+                    <th>General topic</th>
                     <th>Subtopic</th>
                     <th>Sentiment</th>                
                     <th>Response References</th>
@@ -322,7 +322,7 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
             html_table = f"""
             <table>
                 <tr>
-                    <th>General Topic</th>
+                    <th>General topic</th>
                     <th>Subtopic</th>
                 </tr>
                 {html_table}
@@ -392,7 +392,8 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
                               batch_size_number:int,
                               in_column:str,
                               batch_basic_response_df:pd.DataFrame,
-                              group_name:str = "All",                      
+                              group_name:str = "All",
+                              produce_structures_summary_radio:str = "No",                      
                               first_run: bool = False,
                               output_folder:str=OUTPUT_FOLDER) -> Tuple:
     """
@@ -415,6 +416,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     - in_column (str): The name of the open text column that is being analysed.
     - batch_basic_response_df (pd.DataFrame): The dataframe that contains the response data.
     - group_name (str, optional): The name of the current group.
+    - produce_structures_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
     - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
     - output_folder (str): The name of the folder where output files are saved.
     """
@@ -471,7 +473,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     # Rename columns to ensure consistent use of data frames later in code
     new_column_names = {
-    topic_with_response_df.columns[0]: "General Topic",
+    topic_with_response_df.columns[0]: "General topic",
     topic_with_response_df.columns[1]: "Subtopic",
     topic_with_response_df.columns[2]: "Sentiment",
     topic_with_response_df.columns[3]: "Response References",
@@ -487,7 +489,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     topic_with_response_df["Response References"] = topic_with_response_df["Response References"].astype(str).str.replace(".0", "", regex=False)
 
     # Strip and lower case topic names to remove issues where model is randomly capitalising topics/sentiment
-    topic_with_response_df["General Topic"] = topic_with_response_df["General Topic"].astype(str).str.strip().str.lower().str.capitalize()
+    topic_with_response_df["General topic"] = topic_with_response_df["General topic"].astype(str).str.strip().str.lower().str.capitalize()
     topic_with_response_df["Subtopic"] = topic_with_response_df["Subtopic"].astype(str).str.strip().str.lower().str.capitalize()
     topic_with_response_df["Sentiment"] = topic_with_response_df["Sentiment"].astype(str).str.strip().str.lower().str.capitalize()
     
@@ -525,7 +527,8 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         if not summary and (len(str(row.iloc[3])) > 30):
             summary = row.iloc[3]        
 
-        summary = row_number_string_start + summary
+        if produce_structures_summary_radio != "Yes":
+            summary = row_number_string_start + summary
 
         # Create a new entry for each reference number
         for ref in references:
@@ -545,7 +548,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
             reference_data.append({
                 'Response References': response_ref_no,
-                'General Topic': topic,
+                'General topic': topic,
                 'Subtopic': subtopic,
                 'Sentiment': sentiment,
                 'Summary': summary,
@@ -556,7 +559,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     if reference_data:
         new_reference_df = pd.DataFrame(reference_data)
     else:
-        new_reference_df = pd.DataFrame(columns=["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group"])
+        new_reference_df = pd.DataFrame(columns=["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group"])
 
     #print("new_reference_df:", new_reference_df)
     
@@ -567,7 +570,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         out_reference_df = existing_reference_df
 
     # Remove duplicate Response References for the same topic
-    out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    out_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     # Try converting response references column to int, keep as string if fails
     try:
@@ -576,10 +579,10 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
         print("Could not convert Response References column to integer due to", e)
         print("out_reference_df['Response References']:", out_reference_df["Response References"].head())
 
-    out_reference_df.sort_values(["Start row of group", "Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    out_reference_df.sort_values(["Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     # Each topic should only be associated with each individual response once
-    out_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    out_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     out_reference_df["Group"] = group_name
 
@@ -588,28 +591,28 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
 
     # Table of all unique topics with descriptions
     #print("topic_with_response_df:", topic_with_response_df)
-    new_topic_summary_df = topic_with_response_df[["General Topic", "Subtopic", "Sentiment"]]
+    new_topic_summary_df = topic_with_response_df[["General topic", "Subtopic", "Sentiment"]]
 
-    new_topic_summary_df = new_topic_summary_df.rename(columns={new_topic_summary_df.columns[0]: "General Topic", new_topic_summary_df.columns[1]: "Subtopic", new_topic_summary_df.columns[2]: "Sentiment"})
+    new_topic_summary_df = new_topic_summary_df.rename(columns={new_topic_summary_df.columns[0]: "General topic", new_topic_summary_df.columns[1]: "Subtopic", new_topic_summary_df.columns[2]: "Sentiment"})
     
     # Join existing and new unique topics
     out_topic_summary_df = pd.concat([new_topic_summary_df, existing_topics_df]).dropna(how='all')
 
-    out_topic_summary_df = out_topic_summary_df.rename(columns={out_topic_summary_df.columns[0]: "General Topic", out_topic_summary_df.columns[1]: "Subtopic", out_topic_summary_df.columns[2]: "Sentiment"})
+    out_topic_summary_df = out_topic_summary_df.rename(columns={out_topic_summary_df.columns[0]: "General topic", out_topic_summary_df.columns[1]: "Subtopic", out_topic_summary_df.columns[2]: "Sentiment"})
 
     #print("out_topic_summary_df:", out_topic_summary_df)
 
-    out_topic_summary_df = out_topic_summary_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment"]).\
+    out_topic_summary_df = out_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment"]).\
             drop(["Number of responses", "Summary"], axis = 1, errors="ignore") 
 
     # Get count of rows that refer to particular topics
-    reference_counts = out_reference_df.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
+    reference_counts = out_reference_df.groupby(["General topic", "Subtopic", "Sentiment"]).agg({
     'Response References': 'size',  # Count the number of references
     'Summary': ' <br> '.join
     }).reset_index()
 
     # Join the counts to existing_topic_summary_df
-    out_topic_summary_df = out_topic_summary_df.merge(reference_counts, how='left', on=["General Topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
+    out_topic_summary_df = out_topic_summary_df.merge(reference_counts, how='left', on=["General topic", "Subtopic", "Sentiment"]).sort_values("Response References", ascending=False)
 
     out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References":"Number of responses"}, errors="ignore")
 
@@ -652,7 +655,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
             zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])                    
         # Allow for possibility that the user only wants to set general topics and not subtopics
         elif zero_shot_topics.shape[1] == 1 and "General topic" in zero_shot_topics.columns: 
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General Topic"])
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
             zero_shot_topics_subtopics_list = [""] * zero_shot_topics.shape[0]
         # If general topic and subtopic are specified
         elif set(["General topic", "Subtopic"]).issubset(zero_shot_topics.columns):
@@ -693,7 +696,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
         
         # Add description or not
         zero_shot_topics_df = pd.DataFrame(data={
-                "General Topic":zero_shot_topics_gen_topics_list,
+                "General topic":zero_shot_topics_gen_topics_list,
                 "Subtopic":zero_shot_topics_subtopics_list,
                 "Description": zero_shot_topics_description_list
                 })
@@ -737,6 +740,7 @@ def extract_topics(in_data_file: GradioFileData,
               output_folder:str=OUTPUT_FOLDER,
               force_single_topic_prompt:str=force_single_topic_prompt,
               group_name:str="All",
+              produce_structures_summary_radio:str="No",
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,
@@ -780,6 +784,7 @@ def extract_topics(in_data_file: GradioFileData,
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - force_single_topic_radio (str, optional): Should the model be forced to assign only one single topic to each response (effectively a classifier).
+    - produce_structures_summary_radio (str, optional): Should the model create a structured summary instead of extracting topics.
     - output_folder (str, optional): Output folder where results will be stored.
     - force_single_topic_prompt (str, optional): The prompt for forcing the model to assign only one single topic to each response.
     - max_tokens (int): The maximum number of tokens for the model.
@@ -897,15 +902,17 @@ def extract_topics(in_data_file: GradioFileData,
 
                     # Preparing candidate topics if no topics currently exist
                     if candidate_topics and existing_topic_summary_df.empty:
-                        progress(0.1, "Creating revised zero shot topics table")
+                        #progress(0.1, "Creating revised zero shot topics table")
 
                         # 'Zero shot topics' are those supplied by the user
                         max_topic_no = 120
-                        zero_shot_topics = read_file(candidate_topics.name)                       
+                        zero_shot_topics = read_file(candidate_topics.name)
+                        zero_shot_topics = zero_shot_topics.fillna("")           # Replace NaN with empty string
+                        zero_shot_topics = zero_shot_topics.astype(str)
                             
                         zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics, max_topic_no)
 
-                        #print("zero_shot_topics_df:", zero_shot_topics_df)
+                        
 
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
                         if not existing_topic_summary_df.empty and force_zero_shot_radio != "Yes":
@@ -920,7 +927,7 @@ def extract_topics(in_data_file: GradioFileData,
                     #all_topic_tables_df_merged = existing_topic_summary_df
                     existing_topic_summary_df["Number of responses"] = ""
                     existing_topic_summary_df.fillna("", inplace=True)
-                    existing_topic_summary_df["General Topic"] = existing_topic_summary_df["General Topic"].str.replace('(?i)^Nan$', '', regex=True)
+                    existing_topic_summary_df["General topic"] = existing_topic_summary_df["General topic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df["Subtopic"] = existing_topic_summary_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df = existing_topic_summary_df.drop_duplicates()
                     if "Description" in existing_topic_summary_df:
@@ -929,15 +936,21 @@ def extract_topics(in_data_file: GradioFileData,
 
                     # If user has chosen to try to force zero shot topics, then the prompt is changed to ask the model not to deviate at all from submitted topic list.
                     keep_cols = [
-                        col for col in ["General Topic", "Subtopic", "Description"]
+                        col for col in ["General topic", "Subtopic", "Description"]
                         if col in existing_topic_summary_df.columns
                         and not existing_topic_summary_df[col].replace(r'^\s*$', pd.NA, regex=True).isna().all()
                         ]
                     
                     # Create topics table to be presented to LLM
                     topics_df_for_markdown = existing_topic_summary_df[keep_cols].drop_duplicates(keep_cols)
-                    if "General Topic" in topics_df_for_markdown.columns and "Subtopic" in topics_df_for_markdown.columns:
-                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["General Topic", "Subtopic"])
+                    if "General topic" in topics_df_for_markdown.columns and "Subtopic" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"])
+
+                    if produce_structures_summary_radio == "Yes":
+                        if "General topic" in topics_df_for_markdown.columns:
+                            topics_df_for_markdown = topics_df_for_markdown.rename(columns={"General topic":"Main Heading"})
+                        if "Subtopic" in topics_df_for_markdown.columns:
+                            topics_df_for_markdown = topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"})
 
                     unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
                     
@@ -949,8 +962,14 @@ def extract_topics(in_data_file: GradioFileData,
                     else:
                         topic_assignment_prompt = topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")         
 
-                    # Format the summary prompt with the response table and topics 
-                    formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown, topic_assignment=topic_assignment_prompt, force_single_topic=force_single_topic_prompt, sentiment_choices=sentiment_prompt)
+                    # Format the summary prompt with the response table and topics
+                    if produce_structures_summary_radio != "Yes":
+                        formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table,
+                                                                                     topics=unique_topics_markdown,
+                                                                                     topic_assignment=topic_assignment_prompt, force_single_topic=force_single_topic_prompt, sentiment_choices=sentiment_prompt)
+                    else:
+                        formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
+                                                                                    topics=unique_topics_markdown)
                     
                     if "gemma" in model_choice:
                         formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
@@ -988,7 +1007,7 @@ def extract_topics(in_data_file: GradioFileData,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, first_run=False, output_folder=output_folder)                   
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
                     
                     # Write final output to text file for logging purposes
                     try:
@@ -1032,7 +1051,7 @@ def extract_topics(in_data_file: GradioFileData,
                     
                     # Outputs for markdown table output
                     unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-                    unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
+                    unique_table_df_display_table_markdown = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
 
                     whole_conversation_metadata_str = ' '.join(whole_conversation_metadata)
 
@@ -1049,9 +1068,14 @@ def extract_topics(in_data_file: GradioFileData,
                     elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
                         print("Using local model:", model_choice)
                     else:
-                        print("Using AWS Bedrock model:", model_choice)                    
+                        print("Using AWS Bedrock model:", model_choice)
 
-                    formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
+                    # Format the summary prompt with the response table and topics
+                    if produce_structures_summary_radio != "Yes":
+                        formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
+                    else:
+                        unique_topics_markdown="No suggested headings for this summary"
+                        formatted_initial_table_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown)
 
                     if prompt2: formatted_prompt2 = prompt2.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
                     else: formatted_prompt2 = prompt2
@@ -1070,7 +1094,7 @@ def extract_topics(in_data_file: GradioFileData,
 
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_initial_table_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
                     
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, first_run=True, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, produce_structures_summary_radio, first_run=True, output_folder=output_folder)
 
                     # If error in table parsing, leave function
                     if is_error == True:
@@ -1105,7 +1129,7 @@ def extract_topics(in_data_file: GradioFileData,
                         final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + clean_column_name(model_choice_clean, max_length = 20, front_characters=False) + "_temp_" + str(temperature) + ".txt"
 
                         unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-                        unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
+                        unique_table_df_display_table_markdown = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
 
                         log_files_output_paths.append(final_table_output_path)
 
@@ -1164,11 +1188,8 @@ def extract_topics(in_data_file: GradioFileData,
 
         print("All summaries completed. Creating outputs.")
 
-        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False) 
-        # Example usage
+        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
         in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
-
-        # Need to reduce output file names as full length files may be too long
         file_name_cleaned = clean_column_name(file_name, max_length=30, front_characters=False)    
 
         # Save outputs for each batch. If master file created, label file as master
@@ -1198,7 +1219,7 @@ def extract_topics(in_data_file: GradioFileData,
 
         # Outputs for markdown table output
         unique_table_df_display_table = final_out_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-        unique_table_df_display_table_markdown = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
+        unique_table_df_display_table_markdown = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
 
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if '_final_' in x]
@@ -1289,6 +1310,7 @@ def wrapper_extract_topics_per_column_value(
     force_zero_shot_radio: str = "No",
     in_excel_sheets: List[str] = [],
     force_single_topic_radio: str = "No",
+    produce_structures_summary_radio: str = "No",
     output_folder: str = OUTPUT_FOLDER,
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
@@ -1309,9 +1331,9 @@ def wrapper_extract_topics_per_column_value(
     unique_values = file_data[grouping_col].unique()
     #print("unique_values:", unique_values)
 
-    if len(unique_values) > 15:
-        print(f"Warning: More than 15 unique values found in '{grouping_col}'. Processing only the first 15.")
-        unique_values = unique_values[:15]
+    if len(unique_values) > MAX_GROUPS:
+        print(f"Warning: More than {MAX_GROUPS} unique values found in '{grouping_col}'. Processing only the first {MAX_GROUPS}.")
+        unique_values = unique_values[:MAX_GROUPS]
 
     # Initialize accumulators for results across all unique values
     # DataFrames are built upon iteratively
@@ -1420,6 +1442,7 @@ def wrapper_extract_topics_per_column_value(
                 output_folder=output_folder,
                 force_single_topic_prompt=force_single_topic_prompt,
                 group_name=group_value,
+                produce_structures_summary_radio=produce_structures_summary_radio,
                 max_tokens=max_tokens,
                 model_name_map=model_name_map,
                 max_time_for_loop=max_time_for_loop,
@@ -1479,7 +1502,7 @@ def wrapper_extract_topics_per_column_value(
 
         # Outputs for markdown table output
         unique_table_df_display_table = acc_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-        acc_markdown_output = unique_table_df_display_table[["General Topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
+        acc_markdown_output = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
             
     print(f"\nWrapper finished processing all segments. Total time: {acc_total_time_taken:.2f}s")
 
@@ -1512,32 +1535,32 @@ def join_modified_topic_names_to_ref_table(modified_topic_summary_df:pd.DataFram
 
     # Drop rows where Number of responses is either NA or null
     modified_topic_summary_df = modified_topic_summary_df[~modified_topic_summary_df["Number of responses"].isnull()]
-    modified_topic_summary_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
+    modified_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
 
     # First, join the modified topics to the original topics dataframe based on index to have the modified names alongside the original names
-    original_topic_summary_df_m = original_topic_summary_df.merge(modified_topic_summary_df[["General Topic", "Subtopic", "Sentiment", "Topic_number"]], on="Topic_number", how="left", suffixes=("", "_mod"))
+    original_topic_summary_df_m = original_topic_summary_df.merge(modified_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic_number"]], on="Topic_number", how="left", suffixes=("", "_mod"))
 
-    original_topic_summary_df_m.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
+    original_topic_summary_df_m.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
 
 
     # Then, join these new topic names onto the reference_df, merge based on the original names
     modified_reference_df = reference_df.merge(original_topic_summary_df_m[["Topic_number", "General Topic_mod", "Subtopic_mod", "Sentiment_mod"]], on=["Topic_number"], how="left")
 
     
-    modified_reference_df.drop(["General Topic", "Subtopic", "Sentiment"], axis=1, inplace=True, errors="ignore")
+    modified_reference_df.drop(["General topic", "Subtopic", "Sentiment"], axis=1, inplace=True, errors="ignore")
     
-    modified_reference_df.rename(columns={"General Topic_mod":"General Topic",
+    modified_reference_df.rename(columns={"General Topic_mod":"General topic",
                                                                  "Subtopic_mod":"Subtopic",
                                                                  "Sentiment_mod":"Sentiment"}, inplace=True)
 
     modified_reference_df.drop(["General Topic_mod", "Subtopic_mod", "Sentiment_mod"], inplace=True, errors="ignore")  
     
 
-    #modified_reference_df.drop_duplicates(["Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    #modified_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
-    modified_reference_df.sort_values(["Start row of group", "Response References", "General Topic", "Subtopic", "Sentiment"], inplace=True)
+    modified_reference_df.sort_values(["Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
-    modified_reference_df = modified_reference_df.loc[:, ["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Topic_number"]]
+    modified_reference_df = modified_reference_df.loc[:, ["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Topic_number"]]
 
     # Drop rows where Response References is either NA or null
     modified_reference_df = modified_reference_df[~modified_reference_df["Response References"].isnull()]

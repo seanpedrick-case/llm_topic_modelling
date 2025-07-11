@@ -5,6 +5,7 @@ import re
 import spaces
 import gradio as gr
 import time
+import markdown
 from tqdm import tqdm
 
 from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group
@@ -74,7 +75,7 @@ def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, r
 
         current_general_topic = row['general_topic']
 
-        # Filter potential matches to only those within the same General Topic if relevant
+        # Filter potential matches to only those within the same General topic if relevant
         if merge_general_topics == "No":
             potential_matches = categories_df[
                 (categories_df['category'] != category) & 
@@ -146,8 +147,8 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            topic_summary_df[['General Topic', 'Subtopic', 'Sentiment', 'Topic_number']],
-            on=['General Topic', 'Subtopic', 'Sentiment'],
+            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            on=['General topic', 'Subtopic', 'Sentiment'],
             how='left'
         )     
 
@@ -168,12 +169,12 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
 
-                    deduplicated_topic_map_df = reference_df_unique.groupby(["General Topic", "Sentiment", "Group"]).apply(
+                    deduplicated_topic_map_df = reference_df_unique.groupby(["General topic", "Sentiment", "Group"]).apply(
                         lambda group: deduplicate_categories(
                             group["Subtopic"], 
                             group["Sentiment"], 
                             reference_df, 
-                            general_topic_series=group["General Topic"],
+                            general_topic_series=group["General topic"],
                             merge_general_topics="No",
                             threshold=score_threshold
                         )
@@ -199,12 +200,12 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
 
-                    deduplicated_topic_map_df = reference_df_unique.groupby("General Topic").apply(
+                    deduplicated_topic_map_df = reference_df_unique.groupby("General topic").apply(
                         lambda group: deduplicate_categories(
                             group["Subtopic"], 
                             group["Sentiment"], 
                             reference_df, 
-                            general_topic_series=group["General Topic"],
+                            general_topic_series=group["General topic"],
                             merge_general_topics="No",
                             merge_sentiment=merge_sentiment, 
                             threshold=score_threshold
@@ -246,23 +247,23 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
             #reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")
             #print("reference_df:", reference_df)
-            reference_df = reference_df[["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Group"]]
+            reference_df = reference_df[["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Group"]]
 
             if merge_general_topics == "Yes":
                 # Replace General topic names for each Subtopic with that for the Subtopic with the most responses
-                # Step 1: Count the number of occurrences for each General Topic and Subtopic combination
-                count_df = reference_df.groupby(['Subtopic', 'General Topic']).size().reset_index(name='Count')
+                # Step 1: Count the number of occurrences for each General topic and Subtopic combination
+                count_df = reference_df.groupby(['Subtopic', 'General topic']).size().reset_index(name='Count')
 
-                # Step 2: Find the General Topic with the maximum count for each Subtopic
+                # Step 2: Find the General topic with the maximum count for each Subtopic
                 max_general_topic = count_df.loc[count_df.groupby('Subtopic')['Count'].idxmax()]
 
-                # Step 3: Map the General Topic back to the original DataFrame
-                reference_df = reference_df.merge(max_general_topic[['Subtopic', 'General Topic']], on='Subtopic', suffixes=('', '_max'), how='left')
+                # Step 3: Map the General topic back to the original DataFrame
+                reference_df = reference_df.merge(max_general_topic[['Subtopic', 'General topic']], on='Subtopic', suffixes=('', '_max'), how='left')
 
-                reference_df['General Topic'] = reference_df["General Topic_max"].combine_first(reference_df["General Topic"])        
+                reference_df['General topic'] = reference_df["General Topic_max"].combine_first(reference_df["General topic"])        
 
             if merge_sentiment == "Yes":
-                # Step 1: Count the number of occurrences for each General Topic and Subtopic combination
+                # Step 1: Count the number of occurrences for each General topic and Subtopic combination
                 count_df = reference_df.groupby(['Subtopic', 'Sentiment']).size().reset_index(name='Count')
 
                 # Step 2: Determine the number of unique Sentiment values for each Subtopic
@@ -279,12 +280,12 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                 reference_df.drop(columns=['UniqueCount'], inplace=True)
 
             #print("reference_df:", reference_df)
-            reference_df = reference_df[["Response References", "General Topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Group"]]
+            reference_df = reference_df[["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Group"]]
             #reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")        
         
         # Update reference summary column with all summaries
         reference_df["Summary"] = reference_df.groupby(
-        ["Response References", "General Topic", "Subtopic", "Sentiment"]
+        ["Response References", "General topic", "Subtopic", "Sentiment"]
         )["Summary"].transform(' <br> '.join)
 
         # Check that we have not inadvertantly removed some data during the above process
@@ -294,15 +295,15 @@ def deduplicate_topics(reference_df:pd.DataFrame,
             raise Exception(f"Number of unique references changed during processing: Initial={initial_unique_references}, Final={end_unique_references}")
         
         # Drop duplicates in the reference table - each comment should only have the same topic referred to once
-        reference_df.drop_duplicates(['Response References', 'General Topic', 'Subtopic', 'Sentiment'], inplace=True)
+        reference_df.drop_duplicates(['Response References', 'General topic', 'Subtopic', 'Sentiment'], inplace=True)
 
         # Remake topic_summary_df based on new reference_df
         topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            topic_summary_df[['General Topic', 'Subtopic', 'Sentiment', 'Group', 'Topic_number']],
-            on=['General Topic', 'Subtopic', 'Sentiment', 'Group'],
+            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic_number']],
+            on=['General topic', 'Subtopic', 'Sentiment', 'Group'],
             how='left'
         )       
 
@@ -348,7 +349,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
 
-    reference_df_grouped = reference_df.groupby(["General Topic", "Subtopic", "Sentiment", "Group"])
+    reference_df_grouped = reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
 
     if 'Revised summary' in reference_df.columns:
         out_message = "Summary has already been created for this file"
@@ -359,11 +360,11 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
         #print(f"Group: {group_keys}")
         #print(f"Data: {reference_df_group}")
 
-        if len(reference_df_group["General Topic"]) > 1:
+        if len(reference_df_group["General topic"]) > 1:
 
             filtered_reference_df = reference_df_group.reset_index()
 
-            filtered_reference_df_unique = filtered_reference_df.drop_duplicates(["General Topic", "Subtopic", "Sentiment", "Summary"])
+            filtered_reference_df_unique = filtered_reference_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Summary"])
 
             # Sample n of the unique topic summaries. To limit the length of the text going into the summarisation tool
             filtered_reference_df_unique_sampled = filtered_reference_df_unique.sample(min(no_of_sampled_summaries, len(filtered_reference_df_unique)), random_state=random_seed)
@@ -374,7 +375,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
             all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
     
-    summarised_references = all_summaries.groupby(["General Topic", "Subtopic", "Sentiment"]).agg({
+    summarised_references = all_summaries.groupby(["General topic", "Subtopic", "Sentiment"]).agg({
     'Response References': 'size',  # Count the number of references
     'Summary': lambda x: '\n'.join([s.split(': ', 1)[1] for s in x if ': ' in s])  # Join substrings after ': '
     }).reset_index()
@@ -495,8 +496,8 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
         summarised_references["Revised summary"] = summarised_outputs           
 
-        join_cols = ["General Topic", "Subtopic", "Sentiment"]
-        join_plus_summary_cols = ["General Topic", "Subtopic", "Sentiment", "Revised summary"]
+        join_cols = ["General topic", "Subtopic", "Sentiment"]
+        join_plus_summary_cols = ["General topic", "Subtopic", "Sentiment", "Revised summary"]
 
         summarised_references_j = summarised_references[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
 
@@ -505,7 +506,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         # If no new summary is available, keep the original
         topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
 
-        topic_summary_df_revised = topic_summary_df_revised[["General Topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
+        topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
 
         # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
         topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
@@ -718,7 +719,11 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         summarised_outputs_df.to_csv(overall_summary_output_csv_path, index=None)
         output_files.append(overall_summary_output_csv_path)
 
-        markdown_output_table = summarised_outputs_df.to_markdown(index=False)
+        summarised_outputs_df_for_display = summarised_outputs_df.copy()
+        summarised_outputs_df_for_display['Summary'] = summarised_outputs_df_for_display['Summary'].apply(
+            lambda x: markdown.markdown(x) if isinstance(x, str) else x
+        ).str.replace(r"\n", "<br>", regex=False)
+        html_output_table = summarised_outputs_df_for_display.to_html(index=False, escape=False)
 
         # Text output file
         summarised_outputs_join = "\n".join(txt_summarised_outputs)        
@@ -739,4 +744,4 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
         print("All group summaries created. Time taken:", time_taken)
 
-    return output_files, markdown_output_table
+    return output_files, html_output_table

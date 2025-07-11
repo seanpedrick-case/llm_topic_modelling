@@ -297,6 +297,8 @@ LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '256'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
 
+MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
+
 ###
 # Gradio app variables
 ###

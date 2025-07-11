@@ -257,17 +257,17 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
 
 def convert_reference_table_to_pivot_table(df:pd.DataFrame, basic_response_data:pd.DataFrame=pd.DataFrame()):
 
-    df_in = df[['Response References', 'General Topic', 'Subtopic', 'Sentiment']].copy()
+    df_in = df[['Response References', 'General topic', 'Subtopic', 'Sentiment']].copy()
 
     df_in['Response References'] = df_in['Response References'].astype(int)
 
     # Create a combined category column
-    df_in['Category'] = df_in['General Topic'] + ' - ' + df_in['Subtopic'] + ' - ' + df_in['Sentiment']
+    df_in['Category'] = df_in['General topic'] + ' - ' + df_in['Subtopic'] + ' - ' + df_in['Sentiment']
     
     # Create pivot table counting occurrences of each unique combination
     pivot_table = pd.crosstab(
         index=df_in['Response References'],
-        columns=[df_in['General Topic'], df_in['Subtopic'], df_in['Sentiment']],
+        columns=[df_in['General topic'], df_in['Subtopic'], df_in['Sentiment']],
         margins=True
     )
     
@@ -290,7 +290,7 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
 
-    out_topic_summary_df = (reference_df.groupby(["General Topic", "Subtopic", "Sentiment", "Group"])
+    out_topic_summary_df = (reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
             .agg({
                 'Response References': 'size',  # Count the number of references
                 'Summary': lambda x: '<br>'.join(
@@ -304,7 +304,7 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
     
     out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References": "Number of responses"}, errors="ignore")
 
-    out_topic_summary_df = out_topic_summary_df.sort_values(["Group", "Number of responses", "General Topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True])
+    out_topic_summary_df = out_topic_summary_df.sort_values(["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True])
 
     return out_topic_summary_df
 
