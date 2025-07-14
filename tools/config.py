@@ -100,10 +100,10 @@ AWS_CLIENT_SECRET = get_or_create_env_var('AWS_CLIENT_SECRET', '')
 AWS_USER_POOL_ID = get_or_create_env_var('AWS_USER_POOL_ID', '')
 
 AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
-if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
+#if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
 
 AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
-if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
+#if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
 S3_LOG_BUCKET = get_or_create_env_var('S3_LOG_BUCKET', '')
 

@@ -90,10 +90,10 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
     whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
 
-    with open(whole_conversation_path, "w", encoding='utf-8', errors='replace') as f:
+    with open(whole_conversation_path, "w", encoding='utf-8-sig', errors='replace') as f:
         f.write(whole_conversation_str)
 
-    with open(whole_conversation_path_meta, "w", encoding='utf-8', errors='replace') as f:
+    with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f:
         f.write(whole_conversation_metadata_str)
 
     #log_files_output_paths.append(whole_conversation_path)
@@ -423,7 +423,7 @@ def verify_titles(in_data_file,
 
                     # Write the formatted prompt to the specified file
                     try:
-                        with open(formatted_prompt_output_path, "w", encoding='utf-8', errors='replace') as f:
+                        with open(formatted_prompt_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                             f.write(full_prompt)
                     except Exception as e:
                         print(f"Error writing prompt to file {formatted_prompt_output_path}: {e}")
@@ -454,13 +454,13 @@ def verify_titles(in_data_file,
                         final_table_output_path = output_folder + master_batch_out_file_part + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
                         if isinstance(responses[-1], ResponseObject):
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                                 f.write(responses[-1].text)
                         elif "choices" in responses[-1]:
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                                 f.write(responses[-1]["choices"][0]['text'])
                         else:
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                                 f.write(responses[-1].text)
 
                     except Exception as e:
@@ -571,15 +571,15 @@ def verify_titles(in_data_file,
                         final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
                         if isinstance(responses[-1], ResponseObject):
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                                 f.write(responses[-1].text)
                             unique_table_df_display_table_markdown = responses[-1].text
                         elif "choices" in responses[-1]:
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                                 f.write(responses[-1]["choices"][0]['text'])
                             unique_table_df_display_table_markdown =responses[-1]["choices"][0]['text']
                         else:
-                            with open(final_table_output_path, "w", encoding='utf-8', errors='replace') as f:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                                 f.write(responses[-1].text)
                             unique_table_df_display_table_markdown = responses[-1].text
 

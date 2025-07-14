@@ -103,6 +103,7 @@ pip install llama-cpp-python==0.3.9 --force-reinstall --verbose --no-cache-dir -
 
 ## With Cuda
 
+### Make sure you are using the x64 version of Developer command tools ###
 
 Use NVIDIA GPU (cuBLAS): If you have an NVIDIA GPU, using cuBLAS is often easier because the CUDA Toolkit installer handles most of the setup.
 

@@ -207,6 +207,80 @@ def load_in_previous_reference_file(file:str):
          
     return reference_file_data, reference_file_name
 
+def load_in_previous_data_files(file_paths_partial_output:List[str], for_modified_table:bool=False):
+    '''Load in data table from a partially completed consultation summary to continue it.'''
+
+    reference_file_data = pd.DataFrame()
+    reference_file_name = ""
+    unique_file_data = pd.DataFrame()
+    unique_file_name = ""
+    out_message = ""
+    latest_batch = 0
+
+    for file in file_paths_partial_output:
+
+        if isinstance(file, gr.FileData):
+            name = file.name
+        else:
+            name = file
+
+        # If reference table
+        if 'reference_table' in name:
+            try:
+                reference_file_data, reference_file_name = load_in_file(file)
+                #print("reference_file_data:", reference_file_data.head(2))
+                out_message = out_message + " Reference file load successful."
+
+            except Exception as e:
+                out_message = "Could not load reference file data:" + str(e)
+                raise Exception("Could not load reference file data:", e)
+        # If unique table
+        if 'unique_topic' in name:
+            try:
+                unique_file_data, unique_file_name = load_in_file(file)
+                #print("unique_topics_file:", unique_file_data.head(2))
+                out_message = out_message + " Unique table file load successful."
+            except Exception as e:
+                out_message = "Could not load unique table file data:" + str(e)
+                raise Exception("Could not load unique table file data:", e)
+        if 'batch_' in name:
+            latest_batch = re.search(r'batch_(\d+)', file.name).group(1)
+            print("latest batch:", latest_batch)
+            latest_batch = int(latest_batch)
+
+    if latest_batch == 0:
+        out_message = out_message + " Latest batch number not found."
+    if reference_file_data.empty:
+        out_message = out_message + " No reference data table provided."
+        #raise Exception(out_message)
+    if unique_file_data.empty:
+        out_message = out_message + " No unique data table provided."   
+
+    print(out_message)
+
+    # Return all data if using for deduplication task. Return just modified unique table if using just for table modification
+    if for_modified_table == False:            
+        return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name, unique_file_name
+    else:        
+        reference_file_data.drop("Topic_number", axis=1, inplace=True, errors="ignore")
+
+        unique_file_data = create_topic_summary_df_from_reference_table(reference_file_data)
+
+        unique_file_data.drop("Summary",axis=1, inplace=True)
+
+        # Then merge the topic numbers back to the original dataframe
+        reference_file_data = reference_file_data.merge(
+            unique_file_data[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            on=['General topic', 'Subtopic', 'Sentiment'],
+            how='left'
+        )        
+
+        out_file_names = [reference_file_name + ".csv"]
+        out_file_names.append(unique_file_name + ".csv")
+
+        return unique_file_data, reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names # gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas")
+
+
 def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.DataFrame, join_columns:List[str], original_file_name:str, output_folder:str=OUTPUT_FOLDER):
 
     #print("original_data_df columns:", original_data_df.columns)
