@@ -12,8 +12,5 @@ google-genai==1.21.1
 html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.13.0
-llama-cpp-python==0.3.9
-#llama-cpp-python==0.3.2 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 python-dotenv==1.1.0
-#numpy==1.26.4
-#typing_extensions==4.12.2
+llama-cpp-python==0.3.12

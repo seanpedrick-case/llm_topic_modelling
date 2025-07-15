@@ -14,8 +14,6 @@ from gradio import Progress
 
 torch.cuda.empty_cache()
 
-PandasDataFrame = TypeVar('pd.core.frame.DataFrame')
-
 model_type = None # global variable setup
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
 model = [] # Define empty list for model functions to run
@@ -55,10 +53,10 @@ batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 
-if RUN_AWS_FUNCTIONS == '1':
-    bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
-else:
-    bedrock_runtime = []
+# if RUN_AWS_FUNCTIONS == '1':
+#     bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+# else:
+#     bedrock_runtime = []
 
 if not LLM_THREADS:
     threads = torch.get_num_threads() # 8
@@ -176,16 +174,17 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
     print("Loading model ", local_model_type)
     model_path = get_model_path(repo_id=repo_id, model_filename=model_filename, model_dir=model_dir)  
 
-    print("model_path:", model_path)
+    print("model_path:", model_path)    
 
     # GPU mode    
     if torch_device == "cuda":
+        torch.cuda.empty_cache()
         gpu_config.update_gpu(gpu_layers)
         gpu_config.update_context(max_context_length)        
 
         try:
             print("GPU load variables:" , vars(gpu_config))
-            llama_model = Llama(model_path=model_path, **vars(gpu_config)) #  type_k=8, type_v = 8, flash_attn=True, 
+            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config)) #  type_k=8, type_v = 8, flash_attn=True, 
     
         except Exception as e:
             print("GPU load failed due to:", e)
@@ -392,7 +391,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     return response
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, local_model=[], assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model=[], assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -501,7 +500,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     
     return response, conversation_history
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, batch_no:int = 1, local_model = [], master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = [], master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -515,10 +514,12 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
         config (dict): Configuration for the model.
         model_choice (str): The choice of model to use.        
         temperature (float): The temperature parameter for the model.
+        model_source (str): Source of the model, whether local, AWS, or Gemini
         batch_no (int): Batch number of the large language model request.
         local_model: Local gguf model (if loaded)
         master (bool): Is this request for the master table.
-        assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS Claude model calls
+        assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS model calls
+        bedrock_runtime: The client object for boto3 Bedrock runtime
 
     Returns:
         Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
@@ -532,7 +533,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         #print("prompt to LLM:", prompt)
 
-        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill)
+        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
 
         if isinstance(response, ResponseObject):
             response_text = response.text
@@ -554,9 +555,8 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         if not isinstance(response, str):
             try:
-                print("model_choice:", model_choice)
                 if "claude" in model_choice:
-                    print("Extracting usage metadata from Converse API response...")
+                    #print("Extracting usage metadata from Converse API response...")
                        
                     # Using .get() is safer than direct access, in case a key is missing.
                     output_tokens = response.usage_metadata.get('outputTokens', 0)
@@ -577,7 +577,6 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
             print("Response is a string object.")
             whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
 
-
     return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
 
 def call_llm_with_markdown_table_checks(batch_prompts: List[str],
@@ -591,7 +590,9 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         temperature: float,
                                         reported_batch_no: int,
                                         local_model: object,
-                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int, 
+                                        bedrock_runtime:boto3.Session.client,
+                                        model_source:str,
+                                        MAX_OUTPUT_VALIDATION_ATTEMPTS: int,
                                         assistant_prefill:str = "",                                       
                                         master:bool=False,
                                         CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE,
@@ -611,6 +612,8 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     - temperature (float): The temperature parameter for the model.
     - reported_batch_no (int): The reported batch number.
     - local_model (object): The local model to use.
+    - bedrock_runtime (boto3.Session.client): The client object for boto3 Bedrock runtime.
+    - model_source (str): The source of the model, whether in AWS, Gemini, or local.
     - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
     - assistant_prefill (str, optional): The text to prefill the LLM response. Currently only working with AWS Claude calls.
     - master (bool, optional): Boolean to determine whether this call is for the master output table.
@@ -631,7 +634,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
         responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
             batch_prompts, system_prompt, conversation_history, whole_conversation, 
             whole_conversation_metadata, google_client, google_config, model_choice, 
-            call_temperature, reported_batch_no, local_model, master=master, assistant_prefill=assistant_prefill
+            call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, master=master, assistant_prefill=assistant_prefill
         )
 
         if model_choice != CHOSEN_LOCAL_MODEL_TYPE:

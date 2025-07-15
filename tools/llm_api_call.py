@@ -18,6 +18,7 @@ from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS
+from tools.aws_functions import connect_to_bedrock_runtime
 
 if RUN_LOCAL_MODEL == "1":
     from tools.llm_funcs import load_model
@@ -31,11 +32,12 @@ deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 random_seed = LLM_SEED
 
-if RUN_AWS_FUNCTIONS == '1':
-    
-    bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
-else:
-    bedrock_runtime = []
+# if RUN_AWS_FUNCTIONS == '1':    
+#     bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+# else:
+#     bedrock_runtime = []
+
+
 
 ### HELPER FUNCTIONS
 
@@ -218,9 +220,12 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
         print("input_string:", input_string)
         lines = input_string.strip().split("\n")
         clean_md_text = "\n".join([lines[0]] + lines[2:])  # Keep header, skip separator, keep data
+
+        print("clean_md_text:", clean_md_text)
         
         # Read Markdown table into a DataFrame
-        df = pd.read_csv(pd.io.common.StringIO(clean_md_text), sep="|", skipinitialspace=True)
+        df = pd.read_csv(pd.io.common.StringIO(clean_md_text), sep="|", skipinitialspace=True,
+            dtype={'Response References': str})
         
         # Ensure unique column names
         df.columns = [f"{col}_{i}" if df.columns.tolist().count(col) > 1 else col for i, col in enumerate(df.columns)]
@@ -275,6 +280,9 @@ def convert_response_text_to_dataframe(response_text:str, table_type:str = "Main
     start_of_table_response = remove_before_last_term(response_text)
 
     cleaned_response = clean_markdown_table(start_of_table_response)
+
+    # Add a space after commas between numbers (e.g., "1,2" -> "1, 2")
+    cleaned_response = re.sub(r'(\d),(\d)', r'\1, \2', cleaned_response)    
 
     try:
         string_html_table = markdown.markdown(cleaned_response, extensions=['markdown.extensions.tables'])
@@ -370,7 +378,6 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     row_number_string_start = f"Rows {start_row_reported} to {end_row + 1}: "
 
     whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
-    print("whole_conversation_path:", whole_conversation_path)
 
     whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
 
@@ -386,8 +393,6 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
     elif "choices" in responses[-1]: response_text =  responses[-1]["choices"][0]['text']
     else: response_text =  responses[-1].text
-
-    print("response_text:", response_text)
 
     # Convert response text to a markdown table
     try:
@@ -667,6 +672,8 @@ def extract_topics(in_data_file: GradioFileData,
               force_single_topic_prompt:str=force_single_topic_prompt,
               group_name:str="All",
               produce_structures_summary_radio:str="No",
+              aws_access_key_textbox:str='',
+              aws_secret_key_textbox:str='',
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,
@@ -713,6 +720,8 @@ def extract_topics(in_data_file: GradioFileData,
     - produce_structures_summary_radio (str, optional): Should the model create a structured summary instead of extracting topics.
     - output_folder (str, optional): Output folder where results will be stored.
     - force_single_topic_prompt (str, optional): The prompt for forcing the model to assign only one single topic to each response.
+    - aws_access_key_textbox (str, optional): AWS access key for account with Bedrock permissions.
+    - aws_secret_key_textbox (str, optional): AWS secret key for account with Bedrock permissions.
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
@@ -754,9 +763,13 @@ def extract_topics(in_data_file: GradioFileData,
             print(out_message)
             raise Exception(out_message)
 
-
     #model_choice_clean = replace_punctuation_with_underscore(model_choice)
-    model_choice_clean = model_name_map[model_choice]    
+    print("model_name_map:", model_name_map)
+
+    model_choice_clean = model_name_map[model_choice]['short_name']
+    model_source = model_name_map[model_choice]["source"]
+
+    bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -819,7 +832,7 @@ def extract_topics(in_data_file: GradioFileData,
                     formatted_system_prompt = add_existing_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
 
                     # Prepare Gemini models before query       
-                    if "gemini" in model_choice:
+                    if "Gemini" in model_source:
                         print("Using Gemini model:", model_choice)
                         google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
                     elif "anthropic.claude" in model_choice:
@@ -931,14 +944,14 @@ def extract_topics(in_data_file: GradioFileData,
                     whole_conversation = []
 
                     # Process requests to large language model
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
 
                     # Return output tables
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
                     
                     # Write final output to text file for logging purposes
                     try:
-                        final_table_output_path = output_folder + master_batch_out_file_part + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
+                        final_table_output_path = output_folder + master_batch_out_file_part + "_full_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
                         if isinstance(responses[-1], ResponseObject):
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
@@ -1019,7 +1032,7 @@ def extract_topics(in_data_file: GradioFileData,
                     
                     whole_conversation = []
 
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_initial_table_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_initial_table_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
                     
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, produce_structures_summary_radio, first_run=True, output_folder=output_folder)
 
@@ -1052,13 +1065,19 @@ def extract_topics(in_data_file: GradioFileData,
                     whole_conversation_metadata_str = '. '.join(whole_conversation_metadata)
                     
                     # Write final output to text file also
+                    # Write final output to text file for logging purposes
                     try:
-                        final_table_output_path = output_folder + batch_file_path_details + "_full_final_response_" + clean_column_name(model_choice_clean, max_length = 20, front_characters=False) + "_temp_" + str(temperature) + ".txt"
+                        final_table_output_path = output_folder + batch_file_path_details + "_full_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
-                        unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-                        unique_table_df_display_table_markdown = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
-
-                        log_files_output_paths.append(final_table_output_path)
+                        if isinstance(responses[-1], ResponseObject):
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                                f.write(responses[-1].text)
+                        elif "choices" in responses[-1]:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                                f.write(responses[-1]["choices"][0]['text'])
+                        else:
+                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                                f.write(responses[-1].text)
 
                     except Exception as e:
                         print("Error in returning model response:", e)
@@ -1238,6 +1257,8 @@ def wrapper_extract_topics_per_column_value(
     in_excel_sheets: List[str] = [],
     force_single_topic_radio: str = "No",
     produce_structures_summary_radio: str = "No",
+    aws_access_key_textbox:str="",
+    aws_secret_key_textbox:str="",
     output_folder: str = OUTPUT_FOLDER,
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
@@ -1372,6 +1393,8 @@ def wrapper_extract_topics_per_column_value(
                 force_single_topic_prompt=force_single_topic_prompt,
                 group_name=group_value,
                 produce_structures_summary_radio=produce_structures_summary_radio,
+                aws_access_key_textbox=aws_access_key_textbox,
+                aws_secret_key_textbox=aws_secret_key_textbox,
                 max_tokens=max_tokens,
                 model_name_map=model_name_map,
                 max_time_for_loop=max_time_for_loop,
@@ -1409,17 +1432,21 @@ def wrapper_extract_topics_per_column_value(
             continue
 
     if "Group" in acc_reference_df.columns:
-        model_choice_clean = model_name_map[model_choice]
+        model_choice_clean = model_name_map[model_choice]["short_name"]
         model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
         overall_file_name = f"{clean_column_name(original_file_name, max_length=30)}_"
         
         acc_reference_df_path = output_folder + overall_file_name + "all_final_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
         acc_topic_summary_df_path = output_folder + overall_file_name +  "all_final_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
         acc_reference_df_pivot_path = output_folder + overall_file_name +  "all_final_reference_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        acc_missing_df_path = output_folder + overall_file_name +  "all_missing_df_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"        
 
         acc_reference_df.to_csv(acc_reference_df_path, index=None)
         acc_topic_summary_df.to_csv(acc_topic_summary_df_path, index=None)
         acc_reference_df_pivot.to_csv(acc_reference_df_pivot_path, index=None)
+        acc_missing_df.to_csv(acc_missing_df_path, index=None)
+
+        acc_log_files_output_paths.append(acc_missing_df_path)
 
         # Remove the existing output file list and replace with the updated concatenated outputs
         substring_list_to_remove = ["_final_reference_table_pivot_", "_final_reference_table_", "_final_unique_topics_"]

@@ -1,11 +1,11 @@
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font
 from datetime import date, datetime
 import os
 from typing import List
-
 from tools.config import OUTPUT_FOLDER
 from tools.helper_functions import convert_reference_table_to_pivot_table, get_basic_response_data, load_in_data_file
 
@@ -30,7 +30,7 @@ def add_cover_sheet(
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
         cell = ws.cell(row=row, column=1, value=paragraph)
         cell.alignment = Alignment(wrap_text=True, vertical="top")
-        ws.row_dimensions[row].height = 50  # Adjust height as needed
+        ws.row_dimensions[row].height = 60  # Adjust height as needed
         row += 2
 
     # Add metadata
@@ -53,7 +53,7 @@ def add_cover_sheet(
         cell.alignment = Alignment(wrap_text=True)
         # Optional: Adjust column widths
         ws.column_dimensions["A"].width = 25
-        ws.column_dimensions["B"].width = 50
+        ws.column_dimensions["B"].width = 75
 
 def csvs_to_excel(
     csv_files:list[str],
@@ -77,6 +77,7 @@ def csvs_to_excel(
     for idx, csv_path in enumerate(csv_files):
         # Use provided sheet name or derive from file name
         sheet_name = sheet_names[idx] if sheet_names and idx < len(sheet_names) else os.path.splitext(os.path.basename(csv_path))[0]
+        print("csv_path:", csv_path)
         df = pd.read_csv(csv_path)
 
         ws = wb.create_sheet(title=sheet_name)
@@ -133,7 +134,6 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         raise Exception("Could not find chosen column")
 
     today_date = datetime.today().strftime('%Y-%m-%d')
-    print("in_data_files:", in_data_files)
     original_data_file_path = os.path.abspath(in_data_files[0])
     
     csv_files = []
@@ -141,6 +141,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     column_widths = {}
     wrap_text_columns = {}
     short_file_name = os.path.basename(reference_data_file_name_textbox)
+    reference_pivot_table = pd.DataFrame()
     reference_table_csv_path = ""
     reference_pivot_table_csv_path = ""
     unique_topic_table_csv_path = ""
@@ -191,7 +192,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         csv_files.append(unique_topic_table_csv_path)
         sheet_names.append("Topic summary")
         column_widths["Topic summary"] = {"A": 25, "B": 25, "C": 15, "D": 15, "F":100}
-        wrap_text_columns["Topic summary"] = ["F"]
+        wrap_text_columns["Topic summary"] = ["B", "F"]
     else:
         raise Exception("Could not find unique topic files to put into Excel format")
     if reference_table_csv_path:
@@ -206,12 +207,23 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     #if log_files_output_paths:
     #reference_table_pivot_csv_path = [x for x in file_output_list if "pivot" in x]
     if reference_pivot_table_csv_path:
-        #reference_table_pivot_csv_path = reference_table_pivot_csv_path[0]
         csv_files.append(reference_pivot_table_csv_path)
         sheet_names.append("Topic response pivot table")
-        column_widths["Topic response pivot table"] = {"A": 25, "B": 60}
+
+        if reference_pivot_table.empty:
+            reference_pivot_table = pd.read_csv(reference_pivot_table_csv_path)
+
+        # Base widths and wrap
+        column_widths["Topic response pivot table"] = {"A": 25, "B": 100}
         wrap_text_columns["Topic response pivot table"] = ["B"]
 
+        num_cols = len(reference_pivot_table.columns)
+        col_letters = [get_column_letter(i) for i in range(3, num_cols + 1)]
+
+        for col_letter in col_letters:
+            column_widths["Topic response pivot table"][col_letter] = 25
+
+        wrap_text_columns["Topic response pivot table"].extend(col_letters)
     
     if not missing_df_state.empty:
         #unique_topic_table_csv_path = [x for x in file_output_list if "unique_topic" in x]
@@ -228,7 +240,26 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         wrap_text_columns["Missing responses"] = ["C"]
 
     # Original data file
-    csv_files.append(original_data_file_path)
+    original_ext = os.path.splitext(original_data_file_path)[1].lower()
+    if original_ext == ".csv":
+        csv_files.append(original_data_file_path)
+    else:
+        # Read and convert to CSV
+        if original_ext == ".xlsx":
+            df = pd.read_excel(original_data_file_path)
+        elif original_ext == ".parquet":
+            df = pd.read_parquet(original_data_file_path)
+        else:
+            raise Exception(f"Unsupported file type for original data: {original_ext}")
+
+        # Save as CSV in output folder
+        original_data_csv_path = os.path.join(
+            output_folder, 
+            os.path.splitext(os.path.basename(original_data_file_path))[0] + "_for_xlsx.csv"
+        )
+        df.to_csv(original_data_csv_path, index=False)
+        csv_files.append(original_data_csv_path)
+
     sheet_names.append("Original data")
     column_widths["Original data"] = {"A": 20, "B": 20, "C": 100}
     wrap_text_columns["Original data"] = ["C"]

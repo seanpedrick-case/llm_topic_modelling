@@ -12,12 +12,12 @@ google-genai==1.21.1
 html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.13.0
-torch==2.7.1 --extra-index-url https://download.pytorch.org/whl/cu126
-llama-cpp-python==0.3.9 -C cmake.args="-DGGML_CUDA=on"
-# If the above doesn't work, try one of the following
-#llama-cpp-python==0.3.4 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.4-cu121/llama_cpp_python-0.3.4-cp311-cp311-linux_x86_64.whl # Specify exact llama_cpp wheel for huggingface compatibility
-#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.4-cu121/llama_cpp_python-0.3.4-cp311-cp311-win_amd64.whl # Windows
 python-dotenv==1.1.0
-#numpy==1.26.4
-#typing_extensions==4.12.2
+#
+# Torch and Llama CPP Python
+torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124
+# For Linux:
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.12-cu124/llama_cpp_python-0.3.12-cp311-cp311-linux_x86_64.whl
+# For Windows, or if above doesn't work. See 'windows_install_llama-cpp-python.txt' if you have trouble
+# llama-cpp-python==0.3.12 -C cmake.args="-DGGML_CUDA=on"
+

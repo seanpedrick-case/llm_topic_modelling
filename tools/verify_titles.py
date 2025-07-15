@@ -10,11 +10,12 @@ from gradio import Progress
 from typing import List
 GradioFileData = gr.FileData
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,add_existing_topics_system_prompt, add_existing_topics_prompt
+from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,add_existing_topics_system_prompt, add_existing_topics_prompt, initial_table_assistant_prefill, add_existing_topics_assistant_prefill
 from tools.helper_functions import put_columns_in_df, wrap_text, clean_column_name
 from tools.llm_funcs import load_model, construct_gemini_generative_model, call_llm_with_markdown_table_checks
 from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table,  convert_response_text_to_dataframe, ResponseObject
 from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_TOKENS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT
+from tools.aws_functions import connect_to_bedrock_runtime
 
 max_tokens = MAX_TOKENS
 max_time_for_loop = MAX_TIME_FOR_LOOP
@@ -237,6 +238,8 @@ def verify_titles(in_data_file,
               sentiment_checkbox:str = "Negative, Neutral, or Positive",
               force_zero_shot_radio:str = "No",
               produce_structures_summary_radio:str = "No",
+              aws_access_key_textbox:str='',
+              aws_secret_key_textbox:str='',
               in_excel_sheets:List[str] = [],
               output_folder:str=OUTPUT_FOLDER,
               max_tokens:int=max_tokens,
@@ -280,6 +283,8 @@ def verify_titles(in_data_file,
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
     - produce_structures_summary_radio (str, optional): Has the option to produce structured summaries been selected.
+    - aws_access_key_textbox (str, optional): AWS access key for account with Bedrock permissions.
+    - aws_secret_key_textbox (str, optional): AWS secret key for account with Bedrock permissions.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - output_folder (str): The output folder where files will be saved.
     - max_tokens (int): The maximum number of tokens for the model.
@@ -324,7 +329,11 @@ def verify_titles(in_data_file,
 
 
     #model_choice_clean = replace_punctuation_with_underscore(model_choice)
-    model_choice_clean = model_name_map[model_choice]    
+    print("model_name_map:", model_name_map)
+    model_choice_clean = model_name_map[model_choice]["short_name"]
+    model_source = model_name_map[model_choice]["source"]
+
+    bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)   
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
@@ -439,10 +448,10 @@ def verify_titles(in_data_file,
                     summary_conversation_history = []
                     summary_whole_conversation = []
 
-                    # Process requests to large language model
-                    # responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(summary_prompt_list, add_existing_topics_system_prompt, summary_conversation_history, summary_whole_conversation, whole_conversation_metadata, model, google_config, model_choice, temperature, reported_batch_no, local_model, master = True)
+                    # Process requests to large language model                    
+                    responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
 
-                    responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS, master = True)
+
 
                     # print("responses:", responses[-1].text)
                     # print("Whole conversation metadata:", whole_conversation_metadata)
@@ -535,7 +544,7 @@ def verify_titles(in_data_file,
                     
                     whole_conversation = [formatted_initial_table_system_prompt] 
 
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, MAX_OUTPUT_VALIDATION_ATTEMPTS)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
 
 
                     topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_file_path_details, is_error =  write_llm_output_and_logs_verify(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=True)

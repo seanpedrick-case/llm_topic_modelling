@@ -12,8 +12,7 @@ google-genai==1.21.1
 html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.13.0
+python-dotenv==1.1.0
+# Following will only work with Gemma 2
 torch==2.7.1 --extra-index-url https://download.pytorch.org/whl/cpu
 https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.2/llama_cpp_python-0.3.2-cp311-cp311-win_amd64.whl
-python-dotenv==1.1.0
-#numpy==1.26.4
-#typing_extensions==4.12.2
