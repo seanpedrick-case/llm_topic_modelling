@@ -3,12 +3,12 @@
 set PKG_CONFIG_PATH=C:\<path-to-openblas>\OpenBLAS\lib\pkgconfig # Set this in environment variables
 
 
-pip install llama-cpp-python==0.3.9 --force-reinstall --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
+pip install llama-cpp-python==0.3.12 --force-reinstall --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
 ---
 
 # With CUDA
 
-pip install llama-cpp-python==0.3.9 --force-reinstall --no-cache-dir --verbose -C cmake.args="-DGGML_CUDA=on"
+pip install llama-cpp-python==0.3.12 --force-reinstall --no-cache-dir --verbose -C cmake.args="-DGGML_CUDA=on"
 
 
 ---
@@ -103,6 +103,7 @@ pip install llama-cpp-python==0.3.9 --force-reinstall --verbose --no-cache-dir -
 
 ## With Cuda
 
+### Make sure you are using the x64 version of Developer command tools ###
 
 Use NVIDIA GPU (cuBLAS): If you have an NVIDIA GPU, using cuBLAS is often easier because the CUDA Toolkit installer handles most of the setup.
 
@@ -113,6 +114,6 @@ Run the install command specifying cuBLAS:
 
 set PKG_CONFIG_PATH=C:\<path-to-openblas>\OpenBLAS\lib\pkgconfig # Set this in environment variables
 
-pip install llama-cpp-python==0.3.9 --force-reinstall --no-cache-dir --verbose -C cmake.args="-DGGML_CUDA=on"
+pip install llama-cpp-python==0.3.12 --force-reinstall --no-cache-dir --verbose -C cmake.args="-DGGML_CUDA=on"
 
 

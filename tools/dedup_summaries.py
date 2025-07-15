@@ -6,12 +6,14 @@ import spaces
 import gradio as gr
 import time
 import markdown
+import boto3
 from tqdm import tqdm
 
-from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group
+from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group, summary_assistant_prefill
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name
 from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED
+from tools.aws_functions import connect_to_bedrock_runtime
 
 max_tokens = MAX_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -245,8 +247,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                 reference_df["Subtopic"] = reference_df["deduplicated_category"].combine_first(reference_df["Subtopic_old"])
                 reference_df["Sentiment"] = reference_df["Sentiment"].combine_first(reference_df["Sentiment_old"])
 
-            #reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")
-            #print("reference_df:", reference_df)
+            reference_df = reference_df.rename(columns={"General Topic":"General topic"}, errors="ignore")
             reference_df = reference_df[["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Group"]]
 
             if merge_general_topics == "Yes":
@@ -260,7 +261,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                 # Step 3: Map the General topic back to the original DataFrame
                 reference_df = reference_df.merge(max_general_topic[['Subtopic', 'General topic']], on='Subtopic', suffixes=('', '_max'), how='left')
 
-                reference_df['General topic'] = reference_df["General Topic_max"].combine_first(reference_df["General topic"])        
+                reference_df['General topic'] = reference_df["General topic_max"].combine_first(reference_df["General topic"])        
 
             if merge_sentiment == "Yes":
                 # Step 1: Count the number of occurrences for each General topic and Subtopic combination
@@ -315,7 +316,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
             reference_df_pivot = convert_reference_table_to_pivot_table(reference_df, basic_response_data)
 
             reference_pivot_file_path = output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
-            reference_df_pivot.to_csv(reference_pivot_file_path, index=None, encoding='utf-8')
+            reference_df_pivot.to_csv(reference_pivot_file_path, index=None, encoding='utf-8-sig')
             log_output_files.append(reference_pivot_file_path)
 
     #reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
@@ -323,8 +324,8 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
     reference_file_path = output_folder + reference_table_file_name_no_ext + "_dedup.csv"
     unique_topics_file_path = output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
-    reference_df.to_csv(reference_file_path, index = None, encoding='utf-8')
-    topic_summary_df.to_csv(unique_topics_file_path, index=None, encoding='utf-8')
+    reference_df.to_csv(reference_file_path, index = None, encoding='utf-8-sig')
+    topic_summary_df.to_csv(unique_topics_file_path, index=None, encoding='utf-8-sig')
 
     output_files.append(reference_file_path)
     output_files.append(unique_topics_file_path)
@@ -375,36 +376,38 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
             all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
     
-    summarised_references = all_summaries.groupby(["General topic", "Subtopic", "Sentiment"]).agg({
+    sampled_reference_table_df = all_summaries.groupby(["General topic", "Subtopic", "Sentiment"]).agg({
     'Response References': 'size',  # Count the number of references
     'Summary': lambda x: '\n'.join([s.split(': ', 1)[1] for s in x if ': ' in s])  # Join substrings after ': '
     }).reset_index()
 
-    summarised_references = summarised_references.loc[(summarised_references["Sentiment"] != "Not Mentioned") & (summarised_references["Response References"] > 1)]
+    sampled_reference_table_df = sampled_reference_table_df.loc[(sampled_reference_table_df["Sentiment"] != "Not Mentioned") & (sampled_reference_table_df["Response References"] > 1)]
 
-    summarised_references_markdown = summarised_references.to_markdown(index=False)
+    summarised_references_markdown = sampled_reference_table_df.to_markdown(index=False)
 
-    return summarised_references, summarised_references_markdown#, reference_df, topic_summary_df
+    return sampled_reference_table_df, summarised_references_markdown#, reference_df, topic_summary_df
 
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, local_model=[]):
+def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=[]):
     conversation_history = []
     whole_conversation_metadata = []
     google_client = []
     google_config = {}
 
     # Prepare Gemini models before query       
-    if "gemini" in model_choice:
-        print("Using Gemini model:", model_choice)
+    if "Gemini" in model_source:
+        #print("Using Gemini model:", model_choice)
         google_client, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
-    else:
-        print("Using AWS Bedrock model:", model_choice)
-        #model = model_choice
-        #config = {}
+    elif "Local" in model_source:
+        pass
+        #print("Using local model: ", model_choice)
+    elif "AWS" in model_source:
+        pass
+        #print("Using AWS Bedrock model:", model_choice)
 
     whole_conversation = [summarise_topic_descriptions_system_prompt] 
 
     # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, local_model=local_model)
+    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, assistant_prefill=summary_assistant_prefill)
 
     print("Finished summary query")
 
@@ -423,13 +426,13 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     return latest_response_text, conversation_history, whole_conversation_metadata
 
 @spaces.GPU
-def summarise_output_topics(summarised_references:pd.DataFrame,
+def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             topic_summary_df:pd.DataFrame,
                             reference_table_df:pd.DataFrame,
                             model_choice:str,
                             in_api_key:str,
                             temperature:float,
-                            table_file_name:str,
+                            reference_data_file_name:str,
                             summarised_outputs:list = [],  
                             latest_summary_completed:int = 0,
                             out_metadata_str:str = "",
@@ -439,7 +442,10 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                             log_output_files:list[str]=[],
                             summarise_format_radio:str="Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
                             output_folder:str=OUTPUT_FOLDER,
-                            context_textbox:str="",                  
+                            context_textbox:str="",    
+                            aws_access_key_textbox:str='',
+                            aws_secret_key_textbox:str='',
+                            local_model:object=[],          
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries:str="Yes",                            
                             progress=gr.Progress(track_tqdm=True)):
@@ -447,9 +453,9 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     Create better summaries of the raw batch-level summaries created in the first run of the model.
     '''
     out_metadata = []
-    local_model = []
     summarised_output_markdown = ""
-    output_files = []   
+    output_files = []
+    if log_output_files is None: log_output_files = []   
 
     # Check for data for summarisations
     if not topic_summary_df.empty and not reference_table_df.empty:
@@ -472,11 +478,13 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         print(out_message)
         raise Exception(out_message)
     
+    reference_table_df = reference_table_df.rename(columns={"General Topic":"General topic"}, errors="ignore")
+    topic_summary_df = topic_summary_df.rename(columns={"General Topic":"General topic"}, errors="ignore")
     if "Group" not in reference_table_df.columns: reference_table_df["Group"] = "All"
     if "Group" not in topic_summary_df.columns: topic_summary_df["Group"] = "All"
    
-    try: all_summaries = summarised_references["Summary"].tolist()
-    except: all_summaries = summarised_references["Revised summary"].tolist()
+    try: all_summaries = sampled_reference_table_df["Summary"].tolist()
+    except: all_summaries = sampled_reference_table_df["Revised summary"].tolist()
 
     length_all_summaries = len(all_summaries)
 
@@ -484,22 +492,22 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     if latest_summary_completed >= length_all_summaries:
         print("All summaries completed. Creating outputs.")
 
-        model_choice_clean = model_name_map[model_choice]   
-        file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', table_file_name) else table_file_name
-        latest_batch_completed = int(re.search(r'batch_(\d+)_', table_file_name).group(1)) if 'batch_' in table_file_name else ""
-        batch_size_number = int(re.search(r'size_(\d+)_', table_file_name).group(1)) if 'size_' in table_file_name else ""
-        in_column_cleaned = re.search(r'col_(.*?)_reference', table_file_name).group(1) if 'col_' in table_file_name else ""
+        model_choice_clean = model_name_map[model_choice]["short_name"]
+        file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
+        latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
+        batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
+        in_column_cleaned = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
 
         # Save outputs for each batch. If master file created, label file as master
         if latest_batch_completed: batch_file_path_details = f"{file_name}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
         else: batch_file_path_details = f"{file_name}_col_{in_column_cleaned}"
 
-        summarised_references["Revised summary"] = summarised_outputs           
+        sampled_reference_table_df["Revised summary"] = summarised_outputs           
 
         join_cols = ["General topic", "Subtopic", "Sentiment"]
         join_plus_summary_cols = ["General topic", "Subtopic", "Sentiment", "Revised summary"]
 
-        summarised_references_j = summarised_references[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
+        summarised_references_j = sampled_reference_table_df[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
 
         topic_summary_df_revised = topic_summary_df.merge(summarised_references_j, on = join_cols, how = "left")
 
@@ -526,17 +534,19 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
 
             ### Save pivot file to log area
             reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
-            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8')
+            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8-sig')
             log_output_files.append(reference_table_df_revised_pivot_path)
 
         # Save to file
-        topic_summary_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topic_table_" + model_choice_clean + ".csv"
-        topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8')
+        topic_summary_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topics_table_" + model_choice_clean + ".csv"
+        topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8-sig')
 
         reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
-        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8')
+        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8-sig')
 
-        output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])       
+        output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])
+
+        print("output_files in summarise function:", output_files) 
 
         ###
         topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
@@ -546,7 +556,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
         output_files = list(set(output_files))
         log_output_files = list(set(log_output_files))
 
-        return summarised_references, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files
+        return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files
 
     tic = time.perf_counter()
     
@@ -561,6 +571,9 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
     summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
 
     if do_summaries == "Yes":
+        model_source = model_name_map[model_choice]["source"]
+        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
+
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
 
@@ -571,7 +584,7 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
             formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
 
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, local_model)
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model)
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
                 summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
@@ -596,22 +609,85 @@ def summarise_output_topics(summarised_references:pd.DataFrame,
                 tqdm._instances.clear()
                 break
 
-    # If all summaries completeed
+    # If all summaries completed, make final outputs
     if latest_summary_completed >= length_all_summaries:
-        print("At last summary. Time taken:", time_taken)
+        print("All summaries completed. Creating outputs.")
 
-    output_files = list(set(output_files))
+        model_choice_clean = model_name_map[model_choice]["short_name"]
+        file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
+        latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
+        batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
+        in_column_cleaned = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
 
-    return summarised_references, topic_summary_df, reference_table_df, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files
+        # Save outputs for each batch. If master file created, label file as master
+        if latest_batch_completed: batch_file_path_details = f"{file_name}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
+        else: batch_file_path_details = f"{file_name}_col_{in_column_cleaned}"
+
+        sampled_reference_table_df["Revised summary"] = summarised_outputs           
+
+        join_cols = ["General topic", "Subtopic", "Sentiment"]
+        join_plus_summary_cols = ["General topic", "Subtopic", "Sentiment", "Revised summary"]
+
+        summarised_references_j = sampled_reference_table_df[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
+
+        topic_summary_df_revised = topic_summary_df.merge(summarised_references_j, on = join_cols, how = "left")
+
+        # If no new summary is available, keep the original
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
+
+        topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
+
+        # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
+
+        reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
+        # If no new summary is available, keep the original
+        reference_table_df_revised["Revised summary"] = reference_table_df_revised["Revised summary"].combine_first(reference_table_df_revised["Summary"])
+        reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1)
+
+        # Remove topics that are tagged as 'Not Mentioned'
+        topic_summary_df_revised = topic_summary_df_revised.loc[topic_summary_df_revised["Sentiment"] != "Not Mentioned", :]
+        reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]            
+
+        if not file_data.empty:
+            basic_response_data = get_basic_response_data(file_data, chosen_cols)
+            reference_table_df_revised_pivot = convert_reference_table_to_pivot_table(reference_table_df_revised, basic_response_data)
+
+            ### Save pivot file to log area
+            reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
+            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8-sig')
+            log_output_files.append(reference_table_df_revised_pivot_path)
+
+        # Save to file
+        topic_summary_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topics_table_" + model_choice_clean + ".csv"
+        topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8-sig')
+
+        reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
+        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8-sig')
+
+        output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])
+
+        ###
+        topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        summarised_output_markdown = topic_summary_df_revised_display.to_markdown(index=False)
+
+        # Ensure same file name not returned twice
+        output_files = list(set(output_files))
+        log_output_files = list(set(log_output_files))
+
+        return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files
 
 def overall_summary(topic_summary_df:pd.DataFrame,
                     model_choice:str,
                     in_api_key:str,
                     temperature:float,
-                    table_file_name:str,
+                    reference_data_file_name:str,
                     output_folder:str=OUTPUT_FOLDER,
                     chosen_cols:List[str]=[],
-                    context_textbox:str="",               
+                    context_textbox:str="",
+                    aws_access_key_textbox:str='',
+                    aws_secret_key_textbox:str='',
+                    local_model:object=[],        
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
@@ -623,21 +699,18 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     '''
 
     out_metadata = []
-    local_model = []    
     latest_summary_completed = 0
     output_files = []
     txt_summarised_outputs = []
     summarised_outputs = []
+    summarised_outputs_for_df = []
 
     if "Group" not in topic_summary_df.columns:
-        topic_summary_df["Group"] = "All"
-        
+        topic_summary_df["Group"] = "All"        
 
     topic_summary_df = topic_summary_df.sort_values(by=["Group", "Number of responses"], ascending=[True, False])
 
     unique_groups = sorted(topic_summary_df["Group"].unique())
-
-    print("unique_groups:", unique_groups)
 
     length_groups = len(unique_groups)
 
@@ -648,10 +721,10 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
     model_choice_clean = model_name_map[model_choice]
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-    file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', table_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', table_file_name) else table_file_name
-    latest_batch_completed = int(re.search(r'batch_(\d+)_', table_file_name).group(1)) if 'batch_' in table_file_name else ""
-    batch_size_number = int(re.search(r'size_(\d+)_', table_file_name).group(1)) if 'size_' in table_file_name else ""
-    in_column_cleaned = re.search(r'col_(.*?)_unique', table_file_name).group(1) if 'col_' in table_file_name else ""
+    file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
+    latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
+    batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
+    in_column_cleaned = re.search(r'col_(.*?)_unique', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
 
     # Save outputs for each batch. If master file created, label file as master
     if latest_batch_completed:
@@ -672,6 +745,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     summary_loop = tqdm(unique_groups, desc="Creating summaries for groups", unit="groups")   
 
     if do_summaries == "Yes":
+        model_source = model_name_map[model_choice]["source"]
+        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
+
         for summary_group in summary_loop:
 
             print("Creating summary for group:", summary_group)
@@ -683,15 +759,19 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             formatted_summarise_everything_system_prompt = summarise_everything_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
 
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, local_model)
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model)
+                summarised_output_for_df = response
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
                 summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
+                summarised_output = re.sub(r'\n', '<br>', summarised_output)  # Replace \n with more html friendly <br> tags
                 summarised_output = summarised_output.strip()
             except Exception as e:
                 print("Cannot create overall summary for group:", summary_group, "due to:", e)
                 summarised_output = ""
+                summarised_output_for_df = ""
 
+            summarised_outputs_for_df.append(summarised_output_for_df)
             summarised_outputs.append(summarised_output)
             txt_summarised_outputs.append(f"""Group name: {summary_group}\n""" + summarised_output)
 
@@ -707,7 +787,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
             # Write single group outputs
             try:
-                with open(overall_summary_output_path, "w", encoding='utf-8', errors='replace') as f:
+                with open(overall_summary_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
                     f.write(summarised_output)
                 # output_files.append(overall_summary_output_path)
             except Exception as e:
@@ -715,11 +795,11 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
         # Write overall outputs to csv
         overall_summary_output_csv_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
-        summarised_outputs_df = pd.DataFrame(data={"Group":unique_groups, "Summary":summarised_outputs})
+        summarised_outputs_df = pd.DataFrame(data={"Group":unique_groups, "Summary":summarised_outputs_for_df})
         summarised_outputs_df.to_csv(overall_summary_output_csv_path, index=None)
         output_files.append(overall_summary_output_csv_path)
 
-        summarised_outputs_df_for_display = summarised_outputs_df.copy()
+        summarised_outputs_df_for_display = pd.DataFrame(data={"Group":unique_groups, "Summary":summarised_outputs})
         summarised_outputs_df_for_display['Summary'] = summarised_outputs_df_for_display['Summary'].apply(
             lambda x: markdown.markdown(x) if isinstance(x, str) else x
         ).str.replace(r"\n", "<br>", regex=False)
@@ -730,7 +810,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         overall_summary_output_txt_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"     
 
         try:
-            with open(overall_summary_output_txt_path, "w", encoding='utf-8', errors='replace') as f:
+            with open(overall_summary_output_txt_path, "w", encoding='utf-8-sig', errors='replace') as f:
                 f.write(summarised_outputs_join)
             output_files.append(overall_summary_output_txt_path)
         except Exception as e:
@@ -744,4 +824,4 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
         print("All group summaries created. Time taken:", time_taken)
 
-    return output_files, html_output_table
+    return output_files, html_output_table, summarised_outputs_df

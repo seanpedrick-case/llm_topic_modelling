@@ -100,10 +100,13 @@ AWS_CLIENT_SECRET = get_or_create_env_var('AWS_CLIENT_SECRET', '')
 AWS_USER_POOL_ID = get_or_create_env_var('AWS_USER_POOL_ID', '')
 
 AWS_ACCESS_KEY = get_or_create_env_var('AWS_ACCESS_KEY', '')
-if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
+#if AWS_ACCESS_KEY: print(f'AWS_ACCESS_KEY found in environment variables')
 
 AWS_SECRET_KEY = get_or_create_env_var('AWS_SECRET_KEY', '')
-if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
+#if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
+
+# Should the app prioritise using AWS SSO over using API keys stored in environment variables/secrets (defaults to yes)
+PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS = get_or_create_env_var('PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS', '1')
 
 S3_LOG_BUCKET = get_or_create_env_var('S3_LOG_BUCKET', '')
 
@@ -226,25 +229,34 @@ GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
 model_full_names = []
 model_short_names = []
+model_source = []
 
-CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 2b") # Gemma 3 1B #  "Gemma 2b"
+CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 3 4B") # Gemma 3 1B #  "Gemma 2b"
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
     model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
+    model_source.append("Local")
 
 if RUN_AWS_FUNCTIONS == "1":
     model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
     model_short_names.extend(["haiku", "sonnet"])
+    model_source.extend(["AWS", "AWS"])
 
 if RUN_GEMINI_MODELS == "1":
     model_full_names.extend(["gemini-2.5-flash-lite-preview-06-17", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-exp-05-06" ]) # , # Gemini pro No longer available on free tier
     model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
+    model_source.extend(["Gemini", "Gemini"])
 
 print("model_short_names:", model_short_names)
 print("model_full_names:", model_full_names)
 
-model_name_map = {short: full for short, full in zip(model_full_names, model_short_names)}
+model_name_map = {
+    full: {"short_name": short, "source": source}
+    for full, short, source in zip(model_full_names, model_short_names, model_source)
+}
+
+print("model_name_map:", model_name_map)
 
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
@@ -261,12 +273,12 @@ GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "ggml-org/gemma-3
 GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-Q4_K_M.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
-
 if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 2b":
     LOCAL_REPO_ID = GEMMA2_REPO_ID
     LOCAL_MODEL_FILE = GEMMA2_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA2_MODEL_FOLDER
 
+# WARNING: In my testing, Gemma 3 1B was not capable enough of giving consistent output tables. I would strongly advise sticking with Gemma 3 4B
 elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 1B":
     LOCAL_REPO_ID = GEMMA3_REPO_ID
     LOCAL_MODEL_FILE = GEMMA3_MODEL_FILE

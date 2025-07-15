@@ -82,6 +82,8 @@ New table:"""
 # SUMMARISE TOPICS PROMPT
 ###
 
+summary_assistant_prefill = ""
+
 summarise_topic_descriptions_system_prompt = system_prompt
 
 summarise_topic_descriptions_prompt = """Below is a table with number of paragraphs related to the data from the open text column:
@@ -120,6 +122,8 @@ comprehensive_summary_format_prompt_by_group = "Return a comprehensive summary t
 ###
 # VERIFY EXISTING DESCRIPTIONS/TITLES
 ###
+
+verify_assistant_prefill = "|"
 
 verify_titles_system_prompt = system_prompt
 
