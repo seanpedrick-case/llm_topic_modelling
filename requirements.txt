@@ -18,7 +18,10 @@ python-dotenv==1.1.0
 # torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124 # Latest compatible with CUDA 12.4
 # https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl # Specify exact llama_cpp for cuda compatibility on Hugging Face
 #
-# CPU only: 
+# CPU only (for e.g. Hugging Face CPU instances): 
 torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cpu
-llama-cpp-python==0.3.16 # will work on Hugging Face spaces, but only CPU
+# llama-cpp-python==0.3.16 # should work on local Linux systems, but will be extremely slow on Hugging Face and will most likely time out
+# For Hugging Face can only specify the latest non-CUDA wheel for Python 3.10, currently only llama-cpp-python v0.3.2 that can only be used with Gemma 2 2b for local inference
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.2/llama_cpp_python-0.3.2-cp310-cp310-linux_x86_64.whl
+
 
