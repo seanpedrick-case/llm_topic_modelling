@@ -143,7 +143,7 @@ class CSVLogger_custom(FlaggingCallback):
     replacement_headers: list[str] | None = None
 ) -> int:
         if self.first_time:
-            print("First time creating file")
+            # print("First time creating log file")
             additional_headers = []
             if flag_option is not None:
                 additional_headers.append("flag")
@@ -208,7 +208,11 @@ class CSVLogger_custom(FlaggingCallback):
                 with open(self.dataset_filepath, encoding="utf-8") as csvfile:
                     line_count = len(list(csv.reader(csvfile))) - 1
 
+        
+        print("save_to_dynamodb:", save_to_dynamodb)
+        print("save_to_dynamodb == True:", save_to_dynamodb == True)
         if save_to_dynamodb == True:
+            print("Saving to DynamoDB")
 
             if RUN_AWS_FUNCTIONS == "1":
                 try:

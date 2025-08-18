@@ -1,5 +1,6 @@
 import torch.cuda
 import os
+import re
 import time
 import boto3
 import pandas as pd
@@ -354,7 +355,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
                 },
                 {
                     "role": "assistant",
-                    # Pre-filling with just '|' is a great general-purpose start
+                    # Pre-filling with '|'
                     "content": [{"text": assistant_prefill}]
                 }
             ]
@@ -696,3 +697,44 @@ def create_missing_references_df(basic_response_df: pd.DataFrame, existing_refer
     missing_df = missing_df.reset_index(drop=True)
 
     return missing_df
+
+def calculate_tokens_from_metadata(metadata_string:str, model_choice:str, model_name_map:dict):
+    '''
+    Calculate the number of input and output tokens for given queries based on metadata strings.
+
+    Args:
+        metadata_string (str): A string containing all relevant metadata from the string.
+        model_choice (str): A string describing the model name
+        model_name_map (dict): A dictionary mapping model name to source
+    '''
+
+    model_source = model_name_map[model_choice]["source"]
+
+    # Regex to find the numbers following the keys in the "Query summary metadata" section
+    # This ensures we get the final, aggregated totals for the whole query.
+    if "Gemini" in model_source:
+        input_regex = r"prompt_token_count=(\d+)"
+        output_regex = r"candidates_token_count=(\d+)"
+    elif "AWS" in model_source:
+        input_regex = r"inputTokens: (\d+)"
+        output_regex = r"outputTokens: (\d+)"
+    elif "Local" in model_source:
+        input_regex = r"\'prompt_tokens\': (\d+)"
+        output_regex = r"\'completion_tokens\': (\d+)"
+
+    # re.findall returns a list of all matching strings (the captured groups).
+    input_token_strings = re.findall(input_regex, metadata_string)
+    output_token_strings = re.findall(output_regex, metadata_string)
+
+    # Convert the lists of strings to lists of integers and sum them up
+    total_input_tokens = sum([int(token) for token in input_token_strings])
+    total_output_tokens = sum([int(token) for token in output_token_strings])
+
+    number_of_calls = len(input_token_strings)
+
+    print(f"Found {number_of_calls} LLM call entries in metadata.")
+    print("-" * 20)
+    print(f"Total Input Tokens: {total_input_tokens}")
+    print(f"Total Output Tokens: {total_output_tokens}")
+
+    return total_input_tokens, total_output_tokens, number_of_calls

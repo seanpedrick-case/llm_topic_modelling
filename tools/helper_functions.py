@@ -41,10 +41,9 @@ def empty_output_vars_summarise():
     summary_output_files = []
     summarised_outputs_list = []
     latest_summary_completed_num = 0
-    conversation_metadata_textbox = ""
     overall_summarisation_input_files = []
 
-    return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, overall_summarisation_input_files
+    return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, overall_summarisation_input_files
 
 def get_or_create_env_var(var_name:str, default_value:str):
     # Get the environment variable if it exists
@@ -117,9 +116,6 @@ def load_in_file(file_path: str, colnames:List[str]="", excel_sheet:str=""):
     - colnames (List[str], optional): list of colnames to load in
     """
 
-    #file_type = detect_file_type(file_path)
-    #print("File type is:", file_type)
-
     file_name = get_file_name_no_ext(file_path)
     file_data = read_file(file_path, excel_sheet)
 
@@ -141,7 +137,7 @@ def load_in_file(file_path: str, colnames:List[str]="", excel_sheet:str=""):
 
     return file_data, file_name
 
-def load_in_data_file(file_paths:List[str], in_colnames:List[str], batch_size:int=50, in_excel_sheets:str=""):
+def load_in_data_file(file_paths:List[str], in_colnames:List[str], batch_size:int=5, in_excel_sheets:str=""):
     '''Load in data table, work out how many batches needed.'''
 
     if not isinstance(in_colnames, list):
@@ -309,19 +305,26 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
 
     if not isinstance(chosen_cols, list):
         chosen_cols = [chosen_cols]
-    else:
-        chosen_cols = chosen_cols
 
-    basic_response_data = file_data[chosen_cols].reset_index(names="Original Reference")#.reset_index(drop=True) #
-    basic_response_data["Original Reference"] = basic_response_data["Original Reference"] + 1
-    basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1 # basic_response_data["Reference"].astype(int) + 1
+    if chosen_cols[0] not in file_data.columns:
+        print("Column:", chosen_cols[0], "not found in file_data columns:", file_data.columns)
+
+    basic_response_data = file_data[[chosen_cols[0]]]
+    basic_response_data.rename(columns={basic_response_data.columns[0]:"Response"}, inplace=True)
+    basic_response_data = basic_response_data.reset_index(names="Original Reference")#.reset_index(drop=True) #
+    # Try to convert to int, if it fails, return a range of 1 to last row + 1
+    try:
+        basic_response_data["Original Reference"] = basic_response_data["Original Reference"].astype(int) + 1
+    except (ValueError, TypeError):
+            basic_response_data["Original Reference"] = range(1, len(basic_response_data) + 1)
+
+    basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1
 
     if verify_titles == True:
-        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response", chosen_cols[1]: "Title"})
+        basic_response_data = basic_response_data.rename(columns={chosen_cols[1]: "Title"})
         basic_response_data["Title"] = basic_response_data["Title"].str.strip()
         basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
-        basic_response_data = basic_response_data.rename(columns={chosen_cols[0]: "Response"})
         basic_response_data = basic_response_data[['Reference', 'Response', 'Original Reference']]
 
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
@@ -643,7 +646,7 @@ async def get_connection_params(request: gr.Request,
     else:
         out_session_hash = request.session_hash
 
-    if session_output_folder == 'True':
+    if session_output_folder == 'True' or session_output_folder == True:
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
     else:
@@ -654,3 +657,89 @@ async def get_connection_params(request: gr.Request,
     if not os.path.exists(input_folder): os.mkdir(input_folder)
 
     return out_session_hash, output_folder, out_session_hash, input_folder
+
+def load_in_default_cost_codes(cost_codes_path:str, default_cost_code:str=""):
+    '''
+    Load in the cost codes list from file.
+    '''
+    cost_codes_df = pd.read_csv(cost_codes_path)
+    dropdown_choices = cost_codes_df.iloc[:, 0].astype(str).tolist()
+
+    # Avoid inserting duplicate or empty cost code values
+    if default_cost_code and default_cost_code not in dropdown_choices:
+        dropdown_choices.insert(0, default_cost_code)
+
+    # Always have a blank option at the top
+    if "" not in dropdown_choices:
+        dropdown_choices.insert(0, "")
+
+    out_dropdown = gr.Dropdown(
+        value=default_cost_code if default_cost_code in dropdown_choices else "",
+        label="Choose cost code for analysis",
+        choices=dropdown_choices,
+        allow_custom_value=False
+    )
+    
+    return cost_codes_df, cost_codes_df, out_dropdown
+
+def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost_code_df:pd.DataFrame, verify_cost_codes:bool=True):
+    '''
+    Check if the enforce cost codes variable is set to true, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
+    '''
+
+    if enforce_cost_code_textbox == "True":
+        if not cost_code_choice:
+            raise Exception("Please choose a cost code before continuing")
+        
+        if verify_cost_codes == True:
+            if cost_code_df.empty:
+                raise Exception("No cost codes present in dataframe for verification")
+            else:
+                valid_cost_codes_list = list(cost_code_df.iloc[:,0].unique())
+
+                if not cost_code_choice in valid_cost_codes_list:
+                    raise Exception("Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions.")
+    return
+
+def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str, cost_code_df:pd.DataFrame):
+    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :]
+    return cost_code_df
+
+def df_select_callback_cost(df: pd.DataFrame, evt: gr.SelectData):
+    row_value_code = evt.row_value[0] # This is the value for cost code
+
+    return row_value_code
+
+def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str, cost_code_df:pd.DataFrame):
+    cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :]
+    return cost_code_df
+
+def reset_base_dataframe(df:pd.DataFrame):
+    return df
+
+def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost_code_df:pd.DataFrame, verify_cost_codes:bool=True):
+    '''
+    Check if the enforce cost codes variable is set to true, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
+    '''
+
+    if enforce_cost_code_textbox == "True":
+        if not cost_code_choice:
+            raise Exception("Please choose a cost code before continuing")
+        
+        if verify_cost_codes == True:
+            if cost_code_df.empty:
+                raise Exception("No cost codes present in dataframe for verification")
+            else:
+                valid_cost_codes_list = list(cost_code_df.iloc[:,0].unique())
+
+                if not cost_code_choice in valid_cost_codes_list:
+                    raise Exception("Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions.")
+    return
+
+def _get_env_list(env_var_name: str) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    return [s.strip() for s in value.split(',') if s.strip()]

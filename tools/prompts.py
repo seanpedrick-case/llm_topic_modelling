@@ -34,10 +34,10 @@ add_existing_topics_system_prompt = system_prompt + markdown_additional_prompt
 add_existing_topics_assistant_prefill = "|"
 
 force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response References', and 'Summary'.
-In the first column, write 'Not assessed'. In the second column, assign Subtopics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
+In the first column, write 'Not assessed'. In the second column, assign Topics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
 
 allow_new_topics_prompt = """Create a new markdown table with the headings 'General topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
-In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic and Sentiment for the Subtopic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
+In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic, Subtopic, or Sentiment for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
 
 #force_single_topic_prompt = """ Wherever possible, assign a response to one single topic, unless there are multiple topics that are equally relevant."""
 

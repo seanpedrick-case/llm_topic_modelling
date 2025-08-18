@@ -3,15 +3,49 @@ import os
 import gradio as gr
 import pandas as pd
 from datetime import datetime
-from tools.helper_functions import put_columns_in_df, get_connection_params, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file
-from tools.aws_functions import upload_file_to_s3
+from tools.helper_functions import put_columns_in_df, get_connection_params, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, _get_env_list
+from tools.aws_functions import upload_file_to_s3, download_file_from_s3
 from tools.llm_api_call import modify_existing_output_tables, wrapper_extract_topics_per_column_value
 from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
+from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, verify_titles_prompt, verify_titles_system_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
 from tools.verify_titles import verify_titles
-from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET
+from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, model_name_map, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS
+
+def ensure_folder_exists(output_folder:str):
+    """Checks if the specified folder exists, creates it if not."""   
+
+    if not os.path.exists(output_folder):
+        # Create the folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        print(f"The {output_folder} folder already exists.")
+
+ensure_folder_exists(CONFIG_FOLDER)
+ensure_folder_exists(OUTPUT_FOLDER)
+ensure_folder_exists(INPUT_FOLDER)
+ensure_folder_exists(GRADIO_TEMP_DIR)
+ensure_folder_exists(MPLCONFIGDIR)
+ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
+ensure_folder_exists(ACCESS_LOGS_FOLDER)
+ensure_folder_exists(USAGE_LOGS_FOLDER)
+
+# Convert string environment variables to string or list
+if SAVE_LOGS_TO_CSV == "True": SAVE_LOGS_TO_CSV = True 
+else: SAVE_LOGS_TO_CSV = False
+if SAVE_LOGS_TO_DYNAMODB == "True": SAVE_LOGS_TO_DYNAMODB = True 
+else: SAVE_LOGS_TO_DYNAMODB = False
+
+if CSV_ACCESS_LOG_HEADERS: CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
+if CSV_FEEDBACK_LOG_HEADERS: CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
+if CSV_USAGE_LOG_HEADERS: CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
+
+if DYNAMODB_ACCESS_LOG_HEADERS: DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
+if DYNAMODB_FEEDBACK_LOG_HEADERS: DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+if DYNAMODB_USAGE_LOG_HEADERS: DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
 
 today_rev = datetime.now().strftime("%Y%m%d")
 
@@ -20,7 +54,7 @@ if RUN_LOCAL_MODEL == "1":
 elif RUN_AWS_FUNCTIONS == "1":
     default_model_choice = "anthropic.claude-3-haiku-20240307-v1:0"
 else:
-    default_model_choice = "gemini-2.0-flash-001"
+    default_model_choice = "gemini-2.5-flash"
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)
@@ -52,6 +86,7 @@ with app:
     input_folder_state = gr.Textbox(visible=False, value=INPUT_FOLDER)
 
     # s3 bucket name
+    s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=S3_LOG_BUCKET, visible=False)
     s3_log_bucket_name = gr.Textbox(visible=False, value=S3_LOG_BUCKET)
 
     # Logging state
@@ -64,6 +99,10 @@ with app:
     feedback_logs_state = gr.Textbox(FEEDBACK_LOGS_FOLDER + log_file_name, visible=False)
     feedback_s3_logs_loc_state = gr.Textbox(FEEDBACK_LOGS_FOLDER, visible=False)
 
+    input_tokens_num = gr.Textbox('0', visible=False, label="Total input tokens")
+    output_tokens_num = gr.Textbox('0', visible=False, label="Total output tokens")
+    number_of_calls_num = gr.Textbox('0', visible=False, label="Total LLM calls")
+
     # Summary state objects
     summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="summary_reference_table_sample_state", visible=False, type="pandas")
     master_reference_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_reference_df_revised_summaries_state", visible=False, type="pandas")
@@ -74,7 +113,21 @@ with app:
     latest_summary_completed_num = gr.Number(0, visible=False)
 
     original_data_file_name_textbox = gr.Textbox(label = "Reference data file name", value="", visible=False)
+    working_data_file_name_textbox = gr.Textbox(label = "Working data file name", value="", visible=False)
     unique_topics_table_file_name_textbox = gr.Textbox(label="Unique topics data file name textbox", visible=False)
+
+    model_name_map_state = gr.JSON(model_name_map, visible=False, label="model_name_map_state")
+
+    # Cost code elements
+    s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible=False)
+    default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible=False)
+    enforce_cost_code_textbox = gr.Textbox(label = "Enforce cost code textbox", value=ENFORCE_COST_CODES, visible=False)
+    default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible=False)
+
+    # Placeholders for elements that may be made visible later below depending on environment variables
+    cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', wrap=True, max_height=200, visible=False)
+    cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(), type="pandas", visible=False, wrap=True)
+    cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=False)
 
     ###
     # UI LAYOUT
@@ -93,7 +146,7 @@ with app:
     with gr.Tab(label="Extract topics"):
         gr.Markdown("""### Choose a tabular data file (xlsx or csv) of open text to extract topics from.""")
         with gr.Row():
-            model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
+            model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
             in_api_key = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
@@ -115,6 +168,15 @@ with app:
         context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
 
         sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
+
+        if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
+            with gr.Accordion("Assign task to cost code", open = True, visible=True):
+                gr.Markdown("Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost.")
+                with gr.Row():
+                    cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Existing cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', visible=True, wrap=True, max_height=200)
+                    with gr.Column():
+                        reset_cost_code_dataframe_button = gr.Button(value="Reset code code table filter")
+                        cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=True)
 
         extract_topics_btn = gr.Button("Extract topics", variant="primary")
         
@@ -193,7 +255,7 @@ with app:
     with gr.Tab(label="Verify descriptions"):
         gr.Markdown("""### Choose a tabular data file (xlsx or csv) with titles and original text to verify descriptions for.""")
         with gr.Row():
-            verify_model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model to use", multiselect=False)
+            verify_model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
             verify_in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
@@ -278,9 +340,20 @@ with app:
     # Tabular data upload
     in_data_files.upload(fn=put_columns_in_df, inputs=[in_data_files], outputs=[in_colnames, in_excel_sheets, original_data_file_name_textbox, join_colnames, in_group_col])
 
-    extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, original_data_file_name_textbox, display_topic_table_markdown, summary_output_files, summarisation_input_files, overall_summarisation_input_files, overall_summary_output_files]).\
+    # Click on cost code dataframe/dropdown fills in cost code textbox
+    # Allow user to select items from cost code dataframe for cost code
+    if SHOW_COSTS=="True" and (GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True"):
+        cost_code_dataframe.select(df_select_callback_cost, inputs=[cost_code_dataframe], outputs=[cost_code_choice_drop])
+        reset_cost_code_dataframe_button.click(reset_base_dataframe, inputs=[cost_code_dataframe_base], outputs=[cost_code_dataframe])
+
+        cost_code_choice_drop.select(update_cost_code_dataframe_from_dropdown_select, inputs=[cost_code_choice_drop, cost_code_dataframe_base], outputs=[cost_code_dataframe])
+
+    
+    # Extract topics
+    extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, working_data_file_name_textbox, display_topic_table_markdown, summary_output_files, summarisation_input_files, overall_summarisation_input_files, overall_summary_output_files]).\
+    success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
     success(load_in_data_file,                           
-        inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, original_data_file_name_textbox, total_number_of_batches], api_name="load_data").\
+        inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches], api_name="load_data").\
     success(fn=wrapper_extract_topics_per_column_value,                           
         inputs=[in_group_col,
                 in_data_files,
@@ -318,55 +391,53 @@ with app:
                 aws_secret_key_textbox,
                 output_folder_state],
         outputs=[display_topic_table_markdown,
-                 master_topic_df_state,
-                 master_unique_topics_df_state,
-                 master_reference_df_state,
-                 topic_extraction_output_files,
-                 text_output_file_list_state,
-                 latest_batch_completed,
-                 log_files_output,
-                 log_files_output_list_state,
-                 conversation_metadata_textbox,
-                 estimated_time_taken_number,
-                 deduplication_input_files,
-                 summarisation_input_files,
-                 modifiable_unique_topics_df_state,
-                 modification_input_files,
-                 in_join_files,
-                 missing_df_state],
-                 api_name="extract_topics")
+                master_topic_df_state,
+                master_unique_topics_df_state,
+                master_reference_df_state,
+                topic_extraction_output_files,
+                text_output_file_list_state,
+                latest_batch_completed,
+                log_files_output,
+                log_files_output_list_state,
+                conversation_metadata_textbox,
+                estimated_time_taken_number,
+                deduplication_input_files,
+                summarisation_input_files,
+                modifiable_unique_topics_df_state,
+                modification_input_files,
+                in_join_files,
+                missing_df_state,
+                input_tokens_num,
+                output_tokens_num,
+                number_of_calls_num],
+                api_name="extract_topics")
     
-    # extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, original_data_file_name_textbox, display_topic_table_markdown]).\
-    # success(load_in_data_file,                           
-    #     inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, original_data_file_name_textbox, total_number_of_batches], api_name="load_data").\
-    # success(fn=extract_topics,                           
-    #     inputs=[in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, original_data_file_name_textbox, total_number_of_batches, in_api_key, temperature_slide, in_colnames, model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, initial_table_prompt_textbox, prompt_2_textbox, prompt_3_textbox, system_prompt_textbox, add_to_existing_topics_system_prompt_textbox, add_to_existing_topics_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, in_excel_sheets, force_single_topic_radio, output_folder_state],        
-    #     outputs=[display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, modification_input_files, in_join_files], api_name="extract_topics")
-
     ###
     # DEDUPLICATION AND SUMMARISATION FUNCTIONS
     ###
     # If you upload data into the deduplication input box, the modifiable topic dataframe box is updated
-    modification_input_files.change(fn=load_in_previous_data_files, inputs=[modification_input_files, modified_unique_table_change_bool], outputs=[modifiable_unique_topics_df_state, master_modify_reference_df_state, master_modify_unique_topics_df_state, original_data_file_name_textbox, unique_topics_table_file_name_textbox, text_output_modify_file_list_state])
+    modification_input_files.change(fn=load_in_previous_data_files, inputs=[modification_input_files, modified_unique_table_change_bool], outputs=[modifiable_unique_topics_df_state, master_modify_reference_df_state, master_modify_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, text_output_modify_file_list_state])
 
     # Modify output table with custom topic names
-    save_modified_files_button.click(fn=modify_existing_output_tables, inputs=[master_modify_unique_topics_df_state, modifiable_unique_topics_df_state, master_modify_reference_df_state, text_output_modify_file_list_state, output_folder_state], outputs=[master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, deduplication_input_files, summarisation_input_files, original_data_file_name_textbox, unique_topics_table_file_name_textbox, summarised_output_markdown])
+    save_modified_files_button.click(fn=modify_existing_output_tables, inputs=[master_modify_unique_topics_df_state, modifiable_unique_topics_df_state, master_modify_reference_df_state, text_output_modify_file_list_state, output_folder_state], outputs=[master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, deduplication_input_files, summarisation_input_files, working_data_file_name_textbox, unique_topics_table_file_name_textbox, summarised_output_markdown])
     
     # When button pressed, deduplicate data
-    deduplicate_previous_data_btn.click(load_in_previous_data_files, inputs=[deduplication_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, original_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-        success(deduplicate_topics, inputs=[master_reference_df_state, master_unique_topics_df_state, original_data_file_name_textbox, unique_topics_table_file_name_textbox, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, deduplicate_score_threshold, in_data_files, in_colnames, output_folder_state], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown], scroll_to_output=True, api_name="deduplicate_topics")
+    deduplicate_previous_data_btn.click(load_in_previous_data_files, inputs=[deduplication_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
+        success(deduplicate_topics, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, deduplicate_score_threshold, in_data_files, in_colnames, output_folder_state], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown], scroll_to_output=True, api_name="deduplicate_topics")
     
     # When button pressed, summarise previous data
-    summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, overall_summarisation_input_files]).\
-        success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, original_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
+    summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, overall_summarisation_input_files]).\
+    success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
+        success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
             success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
-                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, original_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files], api_name="summarise_topics")
+                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], api_name="summarise_topics")
 
-    latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, original_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files], scroll_to_output=True)
+    # latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num], scroll_to_output=True)
 
     # SUMMARISE WHOLE TABLE PAGE
-    overall_summarise_previous_data_btn.click(load_in_previous_data_files, inputs=[overall_summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, original_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, in_api_key, temperature_slide, unique_topics_table_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df], scroll_to_output=True, api_name="overall_summary")
+    overall_summarise_previous_data_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
+            success(load_in_previous_data_files, inputs=[overall_summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
+            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, in_api_key, temperature_slide, unique_topics_table_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="overall_summary")
 
     ###
     # CONTINUE PREVIOUS TOPIC EXTRACTION PAGE
@@ -374,8 +445,8 @@ with app:
 
     # If uploaded partially completed consultation files do this. This should then start up the 'latest_batch_completed' change action above to continue extracting topics.
     continue_previous_data_files_btn.click(
-        load_in_data_file, inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, original_data_file_name_textbox, total_number_of_batches]).\
-        success(load_in_previous_data_files, inputs=[in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed, in_previous_data_files_status, original_data_file_name_textbox, unique_topics_table_file_name_textbox])
+        load_in_data_file, inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches]).\
+        success(load_in_previous_data_files, inputs=[in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed, in_previous_data_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox])
     
     ###
     # VERIFY TEXT TITLES/DESCRIPTIONS
@@ -384,12 +455,18 @@ with app:
     # Tabular data upload
     verify_in_data_files.upload(fn=put_columns_in_df, inputs=[verify_in_data_files], outputs=[verify_in_colnames, verify_in_excel_sheets, original_data_file_name_textbox, join_colnames])
 
-    verify_titles_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, original_data_file_name_textbox, display_topic_table_markdown]).\
+    verify_titles_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, working_data_file_name_textbox, display_topic_table_markdown]).\
     success(load_in_data_file,
-        inputs = [verify_in_data_files, verify_in_colnames, batch_size_number, verify_in_excel_sheets], outputs = [file_data_state, original_data_file_name_textbox, total_number_of_batches], api_name="verify_load_data").\
+        inputs = [verify_in_data_files, verify_in_colnames, batch_size_number, verify_in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches], api_name="verify_load_data").\
     success(fn=verify_titles,
-        inputs=[verify_in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, original_data_file_name_textbox, total_number_of_batches, verify_in_api_key, temperature_slide, verify_in_colnames, verify_model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, verify_titles_prompt_textbox, prompt_2_textbox, prompt_3_textbox, verify_titles_system_prompt_textbox, verify_titles_system_prompt_textbox, verify_titles_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, produce_structures_summary_radio, aws_access_key_textbox, aws_secret_key_textbox, in_excel_sheets, output_folder_state],        
+        inputs=[verify_in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, original_data_file_name_textbox, total_number_of_batches, verify_in_api_key, temperature_slide, verify_in_colnames, verify_model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, verify_titles_prompt_textbox, prompt_2_textbox, prompt_3_textbox, verify_titles_system_prompt_textbox, verify_titles_system_prompt_textbox, verify_titles_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, produce_structures_summary_radio, aws_access_key_textbox, aws_secret_key_textbox, in_excel_sheets, output_folder_state],
         outputs=[verify_display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, verify_titles_file_output, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, verify_modification_input_files_placeholder], api_name="verify_descriptions")
+    
+    ###
+    # VIEW TABLE PAGE
+    ###
+
+    in_view_table.upload(view_table, inputs=[in_view_table], outputs=[view_table_markdown])
     
     ###
     # LLM SETTINGS PAGE
@@ -400,11 +477,23 @@ with app:
 
     join_cols_btn.click(fn=load_in_previous_reference_file, inputs=[in_join_files], outputs=[master_reference_df_state, reference_df_data_file_name_textbox]).\
     success(load_in_data_file,                           
-        inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, original_data_file_name_textbox, total_number_of_batches]).\
+        inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches]).\
     success(fn=join_cols_onto_reference_df, inputs=[master_reference_df_state, file_data_state, join_colnames, reference_df_data_file_name_textbox], outputs=[master_reference_df_state_joined, out_join_files])
 
     # Export to xlsx file
-    export_xlsx_btn.click(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, output_folder_state], outputs=[out_xlsx_files], api_name="export_xlsx")
+    export_xlsx_btn.click(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[out_xlsx_files], api_name="export_xlsx")
+
+    # If relevant environment variable is set, load in the default cost code file from S3 or locally
+    if GET_COST_CODES == "True" and (COST_CODES_PATH or S3_COST_CODES_PATH):
+        if not os.path.exists(COST_CODES_PATH) and S3_COST_CODES_PATH and RUN_AWS_FUNCTIONS == "1":
+            print("Downloading cost codes from S3")
+            app.load(download_file_from_s3, inputs=[s3_default_bucket, s3_default_cost_codes_file, default_cost_codes_output_folder_location]).\
+            success(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
+            print("Successfully loaded cost codes from S3")
+        elif os.path.exists(COST_CODES_PATH):
+            print("Loading cost codes from default cost codes path location:", COST_CODES_PATH)
+            app.load(load_in_default_cost_codes, inputs = [default_cost_codes_output_folder_location, default_cost_code_textbox], outputs=[cost_code_dataframe, cost_code_dataframe_base, cost_code_choice_drop])
+        else: print("Could not load in cost code data")
 
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS
@@ -412,26 +501,26 @@ with app:
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, output_folder_state, session_hash_textbox, input_folder_state])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
-    access_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    access_callback = CSVLogger_custom(dataset_file_name=LOG_FILE_NAME)
     access_callback.setup([session_hash_textbox], ACCESS_LOGS_FOLDER)
-    session_hash_textbox.change(lambda *args: access_callback.flag(list(args)), [session_hash_textbox], None, preprocess=False).\
+    
+    session_hash_textbox.change(lambda *args: access_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS, replacement_headers=CSV_ACCESS_LOG_HEADERS), [session_hash_textbox], None, preprocess=False).\
         success(fn = upload_file_to_s3, inputs=[access_logs_state, access_s3_logs_loc_state, s3_log_bucket_name, aws_access_key_textbox, aws_secret_key_textbox], outputs=[s3_logs_output_textbox])
 
     # Log usage when making a query
-    usage_callback = gr.CSVLogger(dataset_file_name=log_file_name)
-    usage_callback.setup([session_hash_textbox, original_data_file_name_textbox, model_choice, conversation_metadata_textbox, estimated_time_taken_number], USAGE_LOGS_FOLDER)
+    usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
+    usage_callback.setup([session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num,
+                output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], USAGE_LOGS_FOLDER)
 
-    conversation_metadata_textbox.change(lambda *args: usage_callback.flag(list(args)), [session_hash_textbox, original_data_file_name_textbox, model_choice, conversation_metadata_textbox, estimated_time_taken_number], None, preprocess=False).\
+    conversation_metadata_textbox.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
         success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state, s3_log_bucket_name, aws_access_key_textbox, aws_secret_key_textbox], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback
-    feedback_callback = gr.CSVLogger(dataset_file_name=log_file_name)
+    feedback_callback = CSVLogger_custom(dataset_file_name=FEEDBACK_LOG_FILE_NAME)
     feedback_callback.setup([data_feedback_radio, data_further_details_text, original_data_file_name_textbox, model_choice, temperature_slide, display_topic_table_markdown, conversation_metadata_textbox], FEEDBACK_LOGS_FOLDER)
 
-    data_submit_feedback_btn.click(lambda *args: feedback_callback.flag(list(args)), [data_feedback_radio, data_further_details_text, original_data_file_name_textbox, model_choice, temperature_slide, display_topic_table_markdown, conversation_metadata_textbox], None, preprocess=False).\
+    data_submit_feedback_btn.click(lambda *args: feedback_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=FEEDBACK_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_FEEDBACK_LOG_HEADERS, replacement_headers=CSV_FEEDBACK_LOG_HEADERS), [data_feedback_radio, data_further_details_text, original_data_file_name_textbox, model_choice, temperature_slide, display_topic_table_markdown, conversation_metadata_textbox], None, preprocess=False).\
         success(fn = upload_file_to_s3, inputs=[feedback_logs_state, feedback_s3_logs_loc_state, s3_log_bucket_name, aws_access_key_textbox, aws_secret_key_textbox], outputs=[data_further_details_text])
-
-    in_view_table.upload(view_table, inputs=[in_view_table], outputs=[view_table_markdown])
 
 ###
 # APP RUN
@@ -439,6 +528,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
     else:
         app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
