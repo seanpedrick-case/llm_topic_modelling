@@ -7,7 +7,7 @@ from datetime import date, datetime
 import os
 from typing import List
 from tools.config import OUTPUT_FOLDER
-from tools.helper_functions import convert_reference_table_to_pivot_table, get_basic_response_data, load_in_data_file
+from tools.helper_functions import convert_reference_table_to_pivot_table, get_basic_response_data, load_in_data_file, clean_column_name
 
 def add_cover_sheet(
     wb:Workbook,
@@ -15,7 +15,15 @@ def add_cover_sheet(
     model_name:str,
     analysis_date:str,
     analysis_cost:str,
+    number_of_responses:int,
+    number_of_responses_with_text:int,
+    number_of_responses_with_text_five_plus_words:int,
+    llm_call_number:int,
+    input_tokens:int,
+    output_tokens:int,
     file_name:str,
+    column_name:str,
+    number_of_responses_with_topic_assignment:int,
     custom_title:str="Cover Sheet"
 ):
     ws = wb.create_sheet(title=custom_title, index=0)
@@ -36,11 +44,19 @@ def add_cover_sheet(
     # Add metadata
     meta_start = row + 1
     metadata = {
-        "Date Generated": date.today().strftime("%Y-%m-%d"),
+        "Date Excel file created": date.today().strftime("%Y-%m-%d"),
         "File name": file_name,
+        "Column name": column_name,
         "Model name": model_name,
         "Analysis date": analysis_date,
-        "Analysis cost": analysis_cost
+        #"Analysis cost": analysis_cost,
+        "Number of responses": number_of_responses,
+        "Number of responses with text": number_of_responses_with_text,
+        "Number of responses with text five plus words": number_of_responses_with_text_five_plus_words,
+        "Number of responses with at least one assigned topic": number_of_responses_with_topic_assignment,
+        "Number of LLM calls": llm_call_number,
+        "Total number of input tokens from LLM calls": input_tokens,
+        "Total number of output tokens from LLM calls": output_tokens,
     }
 
     for i, (label, value) in enumerate(metadata.items()):
@@ -65,7 +81,16 @@ def csvs_to_excel(
     model_name:str="",
     analysis_date:str="",
     analysis_cost:str="",
-    file_name:str=""
+    llm_call_number:int=0,
+    input_tokens:int=0,
+    output_tokens:int=0,
+    number_of_responses:int=0,
+    number_of_responses_with_text:int=0,
+    number_of_responses_with_text_five_plus_words:int=0,
+    column_name:str="",
+    number_of_responses_with_topic_assignment:int=0,
+    file_name:str="",
+    unique_reference_numbers:list=[]
 ):
     if intro_text is None:
         intro_text = []
@@ -79,6 +104,16 @@ def csvs_to_excel(
         sheet_name = sheet_names[idx] if sheet_names and idx < len(sheet_names) else os.path.splitext(os.path.basename(csv_path))[0]
         print("csv_path:", csv_path)
         df = pd.read_csv(csv_path)
+
+        if sheet_name == "Original data":
+            try:
+                # Create a copy to avoid modifying the original
+                df_copy = df.copy()
+                # Insert the Reference column at position 0 (first column)
+                df_copy.insert(0, "Reference", unique_reference_numbers)
+                df = df_copy
+            except Exception as e:
+                print("Could not add reference number to original data due to:", e)
 
         ws = wb.create_sheet(title=sheet_name)
 
@@ -99,7 +134,7 @@ def csvs_to_excel(
             if wrap_text_columns and sheet_name in wrap_text_columns:
                 for col_letter in wrap_text_columns[sheet_name]:
                     cell = ws[f"{col_letter}{r_idx}"]
-                    cell.alignment = Alignment(wrap_text=True)
+                    cell.alignment = Alignment(vertical="center", wrap_text=True)
 
         # Set column widths
         if column_widths and sheet_name in column_widths:
@@ -112,7 +147,15 @@ def csvs_to_excel(
         model_name=model_name,
         analysis_date=analysis_date,
         analysis_cost=analysis_cost,
-        file_name=file_name
+        number_of_responses=number_of_responses,
+        number_of_responses_with_text=number_of_responses_with_text,
+        number_of_responses_with_text_five_plus_words=number_of_responses_with_text_five_plus_words,
+        llm_call_number = llm_call_number,
+        input_tokens = input_tokens,
+        output_tokens = output_tokens,
+        file_name=file_name,
+        column_name=column_name,
+        number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment
     )
 
     wb.save(output_filename)
@@ -124,11 +167,10 @@ def csvs_to_excel(
 ###
 # Run the functions
 ###
-def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:list[str], reference_data_file_name_textbox:str, in_group_col:str, model_choice:str, master_reference_df_state:pd.DataFrame, master_unique_topics_df_state:pd.DataFrame, summarised_output_df:pd.DataFrame, missing_df_state:pd.DataFrame, output_folder:str=OUTPUT_FOLDER):
+def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:list[str], reference_data_file_name_textbox:str, in_group_col:str, model_choice:str, master_reference_df_state:pd.DataFrame, master_unique_topics_df_state:pd.DataFrame, summarised_output_df:pd.DataFrame, missing_df_state:pd.DataFrame, excel_sheets:str, usage_logs_location:str="", model_name_map:dict={}, output_folder:str=OUTPUT_FOLDER):
     '''
     Collect together output csvs from various output boxes and combine into a single output Excel file.
     '''
-    print("Inside xlsx function")
 
     if not chosen_cols:
         raise Exception("Could not find chosen column")
@@ -147,11 +189,10 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     unique_topic_table_csv_path = ""
     missing_df_state_csv_path = ""
     overall_summary_csv_path = ""
+    number_of_responses_with_topic_assignment = 0
 
     if in_group_col: group = in_group_col
     else: group = "All"
-
-    print("Creating sheet list")
 
     if not summarised_output_df.empty:
 
@@ -168,9 +209,18 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
 
     if not master_reference_df_state.empty:
         # Simplify table to just responses column and the Response reference number
-        file_data, file_name, num_batches = load_in_data_file(in_data_files, chosen_cols, 1, "")
+        file_data, file_name, num_batches = load_in_data_file(in_data_files, chosen_cols, 1, in_excel_sheets=excel_sheets)
         basic_response_data = get_basic_response_data(file_data, chosen_cols, verify_titles="No")
         reference_pivot_table = convert_reference_table_to_pivot_table(master_reference_df_state, basic_response_data)
+
+        unique_reference_numbers = basic_response_data["Reference"].tolist()
+
+        try:
+            master_reference_df_state.rename(columns={"Topic_number":"Topic number"}, inplace=True, errors="ignore")
+        except Exception as e:
+            print("Could not rename Topic_number due to", e)
+
+        number_of_responses_with_topic_assignment = len(master_reference_df_state["Response References"].unique())
         
         reference_table_csv_path = output_folder + "reference_df_for_xlsx.csv"
         master_reference_df_state.to_csv(reference_table_csv_path, index = None)
@@ -181,9 +231,6 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         short_file_name = os.path.basename(file_name)
 
     if not master_unique_topics_df_state.empty:
-        #unique_topic_table_csv_path = [x for x in file_output_list if "unique_topic" in x]
-        #reference_table_csv_path = [x for x in file_output_list if "reference_table" in x]
-
         unique_topic_table_csv_path = output_folder + "unique_topic_table_df_for_xlsx.csv"
         master_unique_topics_df_state.to_csv(unique_topic_table_csv_path, index = None)
 
@@ -199,13 +246,11 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         #reference_table_csv_path = reference_table_csv_path[0]
         csv_files.append(reference_table_csv_path)
         sheet_names.append("Response level data")
-        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "G":100}
+        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "H":100}
         wrap_text_columns["Response level data"] = ["C", "G"]        
     else:
         raise Exception("Could not find any reference files to put into Excel format")
 
-    #if log_files_output_paths:
-    #reference_table_pivot_csv_path = [x for x in file_output_list if "pivot" in x]
     if reference_pivot_table_csv_path:
         csv_files.append(reference_pivot_table_csv_path)
         sheet_names.append("Topic response pivot table")
@@ -226,9 +271,6 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         wrap_text_columns["Topic response pivot table"].extend(col_letters)
     
     if not missing_df_state.empty:
-        #unique_topic_table_csv_path = [x for x in file_output_list if "unique_topic" in x]
-        #reference_table_csv_path = [x for x in file_output_list if "reference_table" in x]
-
         missing_df_state_csv_path = output_folder + "missing_df_state_df_for_xlsx.csv"
         missing_df_state.to_csv(missing_df_state_csv_path, index = None)
 
@@ -246,12 +288,15 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     else:
         # Read and convert to CSV
         if original_ext == ".xlsx":
-            df = pd.read_excel(original_data_file_path)
+            if excel_sheets:
+                df = pd.read_excel(original_data_file_path, sheet_name=excel_sheets)
+            else:
+                df = pd.read_excel(original_data_file_path)
         elif original_ext == ".parquet":
             df = pd.read_parquet(original_data_file_path)
         else:
             raise Exception(f"Unsupported file type for original data: {original_ext}")
-
+        
         # Save as CSV in output folder
         original_data_csv_path = os.path.join(
             output_folder, 
@@ -272,19 +317,66 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         f"The file analysed was {short_file_name}, the column analysed was '{chosen_cols}' and the data was grouped by column '{group}'."
         "Please contact the LLM Topic Modelling app administrator if you need any explanation on how to use the results."
         "Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this analysis **need to be checked by a human** to check for harmful outputs, false information, and bias."
-    ]    
+    ]
+
+    # Get values for number of rows, number of responses, and number of responses longer than five words
+    number_of_responses = basic_response_data.shape[0]
+    #number_of_responses_with_text = basic_response_data["Response"].str.strip().notnull().sum()
+    number_of_responses_with_text = (
+    basic_response_data["Response"].str.strip().notnull() & (basic_response_data["Response"].str.split().str.len() >= 1)).sum()
+    number_of_responses_with_text_five_plus_words = (
+    basic_response_data["Response"].str.strip().notnull() & (basic_response_data["Response"].str.split().str.len() >= 5)).sum()
+
+    # Get number of LLM calls, input and output tokens
+    if usage_logs_location:
+        try:
+            usage_logs = pd.read_csv(usage_logs_location)
+            relevant_logs = usage_logs.loc[(usage_logs["Reference data file name"] == reference_data_file_name_textbox) & (usage_logs["LLM model"]==model_choice) & (usage_logs["Select the open text column of interest. In an Excel file, this shows columns across all sheets."]==chosen_cols),:]
+            llm_call_number = sum(relevant_logs["Total LLM calls"].astype(int))
+            input_tokens = sum(relevant_logs["Total input tokens"].astype(int))
+            output_tokens = sum(relevant_logs["Total output tokens"].astype(int))
+        except Exception as e:
+            print("Could not obtain usage logs due to:", e)
+            usage_logs = pd.DataFrame()
+            llm_call_number = 0
+            input_tokens = 0
+            output_tokens = 0
+    else:
+        print("LLM call logs location not provided")
+        usage_logs = pd.DataFrame()
+        llm_call_number = 0
+        input_tokens = 0
+        output_tokens = 0
+
+    # Create short filename:
+    model_choice_clean_short = clean_column_name(model_name_map[model_choice]["short_name"], max_length=20, front_characters=False)
+    in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
+    file_name_cleaned = clean_column_name(file_name, max_length=20, front_characters=True)    
+
+    # Save outputs for each batch. If master file created, label file as master
+    file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}_{model_choice_clean_short}"
+    output_xlsx_filename = output_folder + file_path_details + "_topic_analysis.xlsx"
 
     xlsx_output_filename = csvs_to_excel(
         csv_files = csv_files,
-        output_filename = output_folder + short_file_name + "_topic_analysis_report.xlsx",
+        output_filename = output_xlsx_filename,
         sheet_names = sheet_names,
         column_widths = column_widths,
         wrap_text_columns = wrap_text_columns,
         intro_text = intro_text,
         model_name = model_choice,
         analysis_date = today_date,
-        analysis_cost = "Unknown",
-        file_name = short_file_name
+        analysis_cost = "",
+        llm_call_number = llm_call_number,
+        input_tokens = input_tokens,
+        output_tokens = output_tokens,
+        number_of_responses = number_of_responses,
+        number_of_responses_with_text = number_of_responses_with_text,
+        number_of_responses_with_text_five_plus_words = number_of_responses_with_text_five_plus_words,
+        column_name=chosen_cols,
+        number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment,
+        file_name = short_file_name,
+        unique_reference_numbers=unique_reference_numbers
     )
 
     xlsx_output_filenames = [xlsx_output_filename]

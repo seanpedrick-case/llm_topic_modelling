@@ -27,16 +27,6 @@ def get_or_create_env_var(var_name:str, default_value:str, print_val:bool=False)
     
     return value
 
-def ensure_folder_exists(output_folder:str):
-    """Checks if the specified folder exists, creates it if not."""   
-
-    if not os.path.exists(output_folder):
-        # Create the folder if it doesn't exist
-        os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
-    else:
-        print(f"The {output_folder} folder already exists.")
-
 def add_folder_to_path(folder_path: str):
     '''
     Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
@@ -64,8 +54,6 @@ def add_folder_to_path(folder_path: str):
 ###
 
 CONFIG_FOLDER = get_or_create_env_var('CONFIG_FOLDER', 'config/')
-
-ensure_folder_exists(CONFIG_FOLDER)
 
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var('APP_CONFIG_PATH', CONFIG_FOLDER + 'app_config.env') # e.g. config/app_config.env
@@ -125,8 +113,7 @@ SESSION_OUTPUT_FOLDER = get_or_create_env_var('SESSION_OUTPUT_FOLDER', 'False') 
 OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'output/'
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
 
-ensure_folder_exists(OUTPUT_FOLDER)
-ensure_folder_exists(INPUT_FOLDER)
+
 
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP": 
@@ -141,8 +128,7 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
 GRADIO_TEMP_DIR = get_or_create_env_var('GRADIO_TEMP_DIR', 'tmp/gradio_tmp/') # Default Gradio temp folder
 MPLCONFIGDIR = get_or_create_env_var('MPLCONFIGDIR', 'tmp/matplotlib_cache/') # Matplotlib cache folder
 
-ensure_folder_exists(GRADIO_TEMP_DIR)
-ensure_folder_exists(MPLCONFIGDIR)
+
 
 # TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tmp/tld/')
 # try:
@@ -161,20 +147,26 @@ SAVE_LOGS_TO_CSV = get_or_create_env_var('SAVE_LOGS_TO_CSV', 'True')
 
 USE_LOG_SUBFOLDERS = get_or_create_env_var('USE_LOG_SUBFOLDERS', 'True')
 
+FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/')
+ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/')
+USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/')
+
 if USE_LOG_SUBFOLDERS == "True":
     day_log_subfolder = today_rev + '/'
     host_name_subfolder = HOST_NAME + '/'
     full_log_subfolder = day_log_subfolder + host_name_subfolder
-else:
-    full_log_subfolder = ""
 
-FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
-ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
-USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/' + full_log_subfolder)
+    FEEDBACK_LOGS_FOLDER = FEEDBACK_LOGS_FOLDER + full_log_subfolder
+    ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
+    USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
 
-ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
-ensure_folder_exists(ACCESS_LOGS_FOLDER)
-ensure_folder_exists(USAGE_LOGS_FOLDER)
+S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
+S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
+S3_USAGE_LOGS_FOLDER = get_or_create_env_var('S3_USAGE_LOGS_FOLDER', 'usage/' + full_log_subfolder)
+
+LOG_FILE_NAME = get_or_create_env_var('LOG_FILE_NAME', 'log.csv')
+USAGE_LOG_FILE_NAME = get_or_create_env_var('USAGE_LOG_FILE_NAME', LOG_FILE_NAME)
+FEEDBACK_LOG_FILE_NAME = get_or_create_env_var('FEEDBACK_LOG_FILE_NAME', LOG_FILE_NAME)
 
 # Should the redacted file name be included in the logs? In some instances, the names of the files themselves could be sensitive, and should not be disclosed beyond the app. So, by default this is false.
 DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS', 'False')
@@ -183,19 +175,18 @@ DISPLAY_FILE_NAMES_IN_LOGS = get_or_create_env_var('DISPLAY_FILE_NAMES_IN_LOGS',
 
 CSV_ACCESS_LOG_HEADERS = get_or_create_env_var('CSV_ACCESS_LOG_HEADERS', '') # If blank, uses component labels
 CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var('CSV_FEEDBACK_LOG_HEADERS', '') # If blank, uses component labels
-CSV_USAGE_LOG_HEADERS = get_or_create_env_var('CSV_USAGE_LOG_HEADERS', '["session_hash_textbox", "doc_full_file_name_textbox", "data_full_file_name_textbox", "actual_time_taken_number",	"total_page_count",	"textract_query_number", "pii_detection_method", "comprehend_query_number",  "cost_code", "textract_handwriting_signature", "host_name_textbox", "text_extraction_method", "is_this_a_textract_api_call"]') # If blank, uses component labels
+CSV_USAGE_LOG_HEADERS = get_or_create_env_var('CSV_USAGE_LOG_HEADERS', '') # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
-
 SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var('SAVE_LOGS_TO_DYNAMODB', 'False')
 
-ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('ACCESS_LOG_DYNAMODB_TABLE_NAME', 'redaction_access_log')
+ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('ACCESS_LOG_DYNAMODB_TABLE_NAME', 'llm_topic_model_access_log')
 DYNAMODB_ACCESS_LOG_HEADERS = get_or_create_env_var('DYNAMODB_ACCESS_LOG_HEADERS', '')
 
-FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('FEEDBACK_LOG_DYNAMODB_TABLE_NAME', 'redaction_feedback')
+FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('FEEDBACK_LOG_DYNAMODB_TABLE_NAME', 'llm_topic_model_feedback')
 DYNAMODB_FEEDBACK_LOG_HEADERS = get_or_create_env_var('DYNAMODB_FEEDBACK_LOG_HEADERS', '')
 
-USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('USAGE_LOG_DYNAMODB_TABLE_NAME', 'redaction_usage')
+USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var('USAGE_LOG_DYNAMODB_TABLE_NAME', 'llm_topic_model_usage')
 DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var('DYNAMODB_USAGE_LOG_HEADERS', '')
 
 # Report logging to console?
@@ -244,9 +235,9 @@ if RUN_AWS_FUNCTIONS == "1":
     model_source.extend(["AWS", "AWS"])
 
 if RUN_GEMINI_MODELS == "1":
-    model_full_names.extend(["gemini-2.5-flash-lite-preview-06-17", "gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-exp-05-06" ]) # , # Gemini pro No longer available on free tier
+    model_full_names.extend(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]) # , # Gemini pro No longer available on free tier
     model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
-    model_source.extend(["Gemini", "Gemini"])
+    model_source.extend(["Gemini", "Gemini", "Gemini"])
 
 print("model_short_names:", model_short_names)
 print("model_full_names:", model_full_names)
@@ -256,7 +247,7 @@ model_name_map = {
     for full, short, source in zip(model_full_names, model_short_names, model_source)
 }
 
-print("model_name_map:", model_name_map)
+#print("model_name_map:", model_name_map)
 
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
@@ -340,3 +331,25 @@ if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
 FILE_INPUT_HEIGHT = get_or_create_env_var('FILE_INPUT_HEIGHT', '200')
+
+###
+# COST CODE OPTIONS
+###
+
+SHOW_COSTS = get_or_create_env_var('SHOW_COSTS', 'False')
+
+GET_COST_CODES = get_or_create_env_var('GET_COST_CODES', 'False')
+
+DEFAULT_COST_CODE = get_or_create_env_var('DEFAULT_COST_CODE', '')
+
+COST_CODES_PATH = get_or_create_env_var('COST_CODES_PATH', '') # 'config/COST_CENTRES.csv' # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
+
+S3_COST_CODES_PATH = get_or_create_env_var('S3_COST_CODES_PATH', '') # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET  
+    
+# A default path in case s3 cost code location is provided but no local cost code location given
+if COST_CODES_PATH: OUTPUT_COST_CODES_PATH = COST_CODES_PATH
+else: OUTPUT_COST_CODES_PATH = 'config/cost_codes.csv'
+
+ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
+
+if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
