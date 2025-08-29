@@ -386,13 +386,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
             # Sample n of the unique topic summaries. To limit the length of the text going into the summarisation tool
             filtered_reference_df_unique_sampled = filtered_reference_df_unique.sample(min(no_of_sampled_summaries, len(filtered_reference_df_unique)), random_state=random_seed)
 
-            #topic_summary_table_markdown = filtered_reference_df_unique_sampled.to_markdown(index=False)
-
-            #print(filtered_reference_df_unique_sampled)
-
             all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
-
-        print("all_summaries:", all_summaries)
 
     # If no responses/topics qualify, just go ahead with the original reference dataframe
     if all_summaries.empty:
@@ -516,84 +510,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     try: all_summaries = sampled_reference_table_df["Summary"].tolist()
     except: all_summaries = sampled_reference_table_df["Revised summary"].tolist()
 
-    length_all_summaries = len(all_summaries)
-
-    # If all summaries completed, make final outputs
-    # if latest_summary_completed >= length_all_summaries:
-    #     print("All summaries completed. Creating outputs.")
-
-    #     model_choice_clean = model_name_map[model_choice]["short_name"]
-    #     file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
-    #     latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
-    #     batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
-    #     in_column = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
-
-    #     file_name_cleaned = clean_column_name(file_name, max_length=20)
-    #     in_column_cleaned = clean_column_name(in_column, max_length=20)
-
-    #     # Save outputs for each batch. If master file created, label file as master
-    #     if latest_batch_completed: batch_file_path_details = f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
-    #     else: batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
-
-    #     sampled_reference_table_df["Revised summary"] = summarised_outputs           
-
-    #     join_cols = ["General topic", "Subtopic", "Sentiment"]
-    #     join_plus_summary_cols = ["General topic", "Subtopic", "Sentiment", "Revised summary"]
-
-    #     summarised_references_j = sampled_reference_table_df[join_plus_summary_cols].drop_duplicates(join_plus_summary_cols)
-
-    #     topic_summary_df_revised = topic_summary_df.merge(summarised_references_j, on = join_cols, how = "left")
-
-    #     # If no new summary is available, keep the original
-    #     topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
-
-    #     topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
-
-    #     # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
-    #     topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
-
-    #     reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
-    #     # If no new summary is available, keep the original
-    #     reference_table_df_revised["Revised summary"] = reference_table_df_revised["Revised summary"].combine_first(reference_table_df_revised["Summary"])
-    #     reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1)
-
-    #     # Remove topics that are tagged as 'Not Mentioned'
-    #     topic_summary_df_revised = topic_summary_df_revised.loc[topic_summary_df_revised["Sentiment"] != "Not Mentioned", :]
-    #     reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]            
-
-    #     if not file_data.empty:
-    #         basic_response_data = get_basic_response_data(file_data, chosen_cols)
-    #         reference_table_df_revised_pivot = convert_reference_table_to_pivot_table(reference_table_df_revised, basic_response_data)
-
-    #         ### Save pivot file to log area
-    #         reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
-    #         reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8-sig')
-    #         log_output_files.append(reference_table_df_revised_pivot_path)
-
-    #     # Save to file
-    #     topic_summary_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topics_table_" + model_choice_clean + ".csv"
-    #     topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8-sig')
-
-    #     reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
-    #     reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8-sig')
-
-    #     output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])
-
-    #     print("output_files in summarise function:", output_files) 
-
-    #     ###
-    #     topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-    #     summarised_output_markdown = topic_summary_df_revised_display.to_markdown(index=False)
-
-    #     # Ensure same file name not returned twice
-    #     output_files = list(set(output_files))
-    #     log_output_files = list(set(log_output_files))
-
-    #     acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(out_metadata_str, model_choice, model_name_map)
-
-    #     return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls
-
-    
+    length_all_summaries = len(all_summaries)    
 
     if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
         progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
@@ -762,7 +679,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     else:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
-    model_choice_clean = model_name_map[model_choice]
+    model_choice_clean = model_name_map[model_choice]["short_name"]
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
     latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""

@@ -196,8 +196,6 @@ if LOGGING == 'True':
     # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-LOG_FILE_NAME = get_or_create_env_var('LOG_FILE_NAME', 'log.csv')
-
 ###
 # LLM variables
 ###
@@ -287,9 +285,9 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1'))
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
-LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','3'))
-LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '1'))
-LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1.2')) # Mild repetition penalty to prevent repeating table rows
+LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1')) #https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
 LLM_LAST_N_TOKENS = int(get_or_create_env_var('LLM_LAST_N_TOKENS', '512'))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
 LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
