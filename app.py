@@ -302,7 +302,7 @@ with app:
 
         with gr.Accordion("Logging outputs", open = False):
             log_files_output = gr.File(height=FILE_INPUT_HEIGHT, label="Log file output", interactive=False)
-            conversation_metadata_textbox = gr.Textbox(label="Query metadata - usage counts and other parameters", interactive=False, lines=8)
+            conversation_metadata_textbox = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", interactive=False, lines=8)
 
         with gr.Accordion("Enter AWS API keys", open = False):
             aws_access_key_textbox = gr.Textbox(label="AWS access key", interactive=False, lines=1, type="password")
@@ -502,9 +502,6 @@ with app:
     usage_callback.setup([session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num,
                 output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], USAGE_LOGS_FOLDER)
 
-    def conversation_metadata_textbox_change(textbox_value):
-        print("conversation_metadata_textbox_change:", textbox_value)
-        return textbox_value
 
     number_of_calls_num.change(conversation_metadata_textbox_change, inputs=[conversation_metadata_textbox], outputs=[conversation_metadata_textbox])
 

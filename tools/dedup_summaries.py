@@ -387,13 +387,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
             # Sample n of the unique topic summaries. To limit the length of the text going into the summarisation tool
             filtered_reference_df_unique_sampled = filtered_reference_df_unique.sample(min(no_of_sampled_summaries, len(filtered_reference_df_unique)), random_state=random_seed)
 
-            #topic_summary_table_markdown = filtered_reference_df_unique_sampled.to_markdown(index=False)
-
-            #print(filtered_reference_df_unique_sampled)
-
             all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
-
-        print("all_summaries:", all_summaries)
 
     # If no responses/topics qualify, just go ahead with the original reference dataframe
     if all_summaries.empty:
@@ -765,6 +759,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     # latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
     # batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
     # in_column = re.search(r'col_(.*?)_unique', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
+
 
     # file_name_cleaned = clean_column_name(file_name, max_length=20)
     # in_column_cleaned = clean_column_name(in_column, max_length=20)

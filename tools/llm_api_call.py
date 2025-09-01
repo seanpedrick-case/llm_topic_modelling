@@ -589,6 +589,12 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
             print("Found General topic and Subtopic in zero shot topics")
             zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
             zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
+        # If subtopic and description are specified
+        elif set(["Subtopic", "Description"]).issubset(zero_shot_topics.columns):
+            print("Found Subtopic and Description in zero shot topics")
+            zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
+            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
+            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
 
         # If number of columns is at least 2, keep general topics and subtopics
         elif zero_shot_topics.shape[1] >= 2 and "Description" not in zero_shot_topics.columns: 
@@ -599,15 +605,15 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
             zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
             zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])
 
-        # Add a description if column is present
-        # print("zero_shot_topics.shape[1]:", zero_shot_topics.shape[1])                         
-        if "Description" in zero_shot_topics.columns:
-            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
-            #print("Description found in topic title. List is:", zero_shot_topics_description_list)        
-        elif zero_shot_topics.shape[1] >= 3:
-            zero_shot_topics_description_list = list(zero_shot_topics.iloc[:, 2]) # Assume the third column is description
-        else:
-            zero_shot_topics_description_list = [""] * zero_shot_topics.shape[0]
+        # Add a description if column is present 
+        if not zero_shot_topics_description_list:
+            if "Description" in zero_shot_topics.columns:
+                zero_shot_topics_description_list = list(zero_shot_topics["Description"])
+                #print("Description found in topic title. List is:", zero_shot_topics_description_list)        
+            elif zero_shot_topics.shape[1] >= 3:
+                zero_shot_topics_description_list = list(zero_shot_topics.iloc[:, 2]) # Assume the third column is description
+            else:
+                zero_shot_topics_description_list = [""] * zero_shot_topics.shape[0]
 
         # If the responses are being forced into zero shot topics, allow an option for nothing relevant
         if force_zero_shot_radio == "Yes":
