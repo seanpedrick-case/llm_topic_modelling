@@ -1,6 +1,6 @@
 import pandas as pd
 from rapidfuzz import process, fuzz
-from typing import List
+from typing import List, Tuple
 import re
 import spaces
 import gradio as gr
@@ -11,8 +11,8 @@ from tqdm import tqdm
 
 from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group, summary_assistant_prefill
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata
-from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED
+from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX
 from tools.aws_functions import connect_to_bedrock_runtime
 
 max_tokens = MAX_TOKENS
@@ -22,6 +22,7 @@ max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
+reasoning_suffix = REASONING_SUFFIX
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:
@@ -126,7 +127,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                        merge_sentiment:str= "No",
                        merge_general_topics:str="No",
                        score_threshold:int=90,
-                       in_data_files:List[str]=[],
+                       in_data_files:List[str]=list(),
                        chosen_cols:List[str]="",
                        output_folder:str=OUTPUT_FOLDER,
                        deduplicate_topics:str="Yes"                       
@@ -134,8 +135,8 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     '''
     Deduplicate topics based on a reference and unique topics table
     '''
-    output_files = []
-    log_output_files = []
+    output_files = list()
+    log_output_files = list()
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
 
@@ -361,7 +362,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
     '''
     
     all_summaries = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment", "Group", "Response References", "Summary"])
-    output_files = []
+    output_files = list()
 
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
@@ -403,10 +404,29 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     return sampled_reference_table_df, summarised_references_markdown#, reference_df, topic_summary_df
 
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=[]):
-    conversation_history = []
-    whole_conversation_metadata = []
-    google_client = []
+def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list()):
+    """
+    Query an LLM to generate a summary of topics based on the provided prompts.
+
+    Args:
+        model_choice (str): The name/type of model to use for generation
+        in_api_key (str): API key for accessing the model service
+        temperature (float): Temperature parameter for controlling randomness in generation
+        formatted_summary_prompt (str): The formatted prompt containing topics to summarize
+        summarise_topic_descriptions_system_prompt (str): System prompt providing context and instructions
+        model_source (str): Source of the model (e.g. "AWS", "Gemini", "Local")
+        bedrock_runtime (boto3.Session.client): AWS Bedrock runtime client for AWS models
+        local_model (object, optional): Local model object if using local inference. Defaults to empty list.
+
+    Returns:
+        tuple: Contains:
+            - response_text (str): The generated summary text
+            - conversation_history (list): History of the conversation with the model
+            - whole_conversation_metadata (list): Metadata about the conversation
+    """
+    conversation_history = list()
+    whole_conversation_metadata = list()
+    google_client = list()
     google_config = {}
 
     # Prepare Gemini models before query       
@@ -427,19 +447,9 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
     print("Finished summary query")
 
-    if isinstance(responses[-1], ResponseObject):
-        response_texts = [resp.text for resp in responses]
-    elif "choices" in responses[-1]:
-        response_texts = [resp["choices"][0]['text'] for resp in responses]
-    else:
-        response_texts = [resp.text for resp in responses]
+    return response_text, conversation_history, whole_conversation_metadata
 
-    latest_response_text = response_texts[-1]
 
-    #print("latest_response_text:", latest_response_text)
-    #print("Whole conversation metadata:", whole_conversation_metadata)
-
-    return latest_response_text, conversation_history, whole_conversation_metadata
 
 @spaces.GPU
 def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
@@ -449,28 +459,62 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             in_api_key:str,
                             temperature:float,
                             reference_data_file_name:str,
-                            summarised_outputs:list = [],  
+                            summarised_outputs:list = list(),  
                             latest_summary_completed:int = 0,
                             out_metadata_str:str = "",
-                            in_data_files:List[str]=[],
+                            in_data_files:List[str]=list(),
                             in_excel_sheets:str="",
-                            chosen_cols:List[str]=[],
-                            log_output_files:list[str]=[],
+                            chosen_cols:List[str]=list(),
+                            log_output_files:list[str]=list(),
                             summarise_format_radio:str="Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
                             output_folder:str=OUTPUT_FOLDER,
                             context_textbox:str="",    
                             aws_access_key_textbox:str='',
                             aws_secret_key_textbox:str='',
-                            local_model:object=[],          
-                            summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
+                            model_name_map:dict=model_name_map,
+                            reasoning_suffix:str=reasoning_suffix,
+                            local_model:object=list(),          
+                            summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, 
+                            summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries:str="Yes",                            
                             progress=gr.Progress(track_tqdm=True)):
     '''
-    Create better summaries of the raw batch-level summaries created in the first run of the model.
+    Create improved summaries of topics by consolidating raw batch-level summaries from the initial model run.
+
+    Args:
+        sampled_reference_table_df (pd.DataFrame): DataFrame containing sampled reference data with summaries
+        topic_summary_df (pd.DataFrame): DataFrame containing topic summary information
+        reference_table_df (pd.DataFrame): DataFrame mapping response references to topics
+        model_choice (str): Name of the LLM model to use
+        in_api_key (str): API key for model access
+        temperature (float): Temperature parameter for model generation
+        reference_data_file_name (str): Name of the reference data file
+        summarised_outputs (list, optional): List to store generated summaries. Defaults to empty list.
+        latest_summary_completed (int, optional): Index of last completed summary. Defaults to 0.
+        out_metadata_str (str, optional): String for metadata output. Defaults to empty string.
+        in_data_files (List[str], optional): List of input data file paths. Defaults to empty list.
+        in_excel_sheets (str, optional): Excel sheet names if using Excel files. Defaults to empty string.
+        chosen_cols (List[str], optional): List of columns selected for analysis. Defaults to empty list.
+        log_output_files (list[str], optional): List of log file paths. Defaults to empty list.
+        summarise_format_radio (str, optional): Format instructions for summary generation. Defaults to two paragraph format.
+        output_folder (str, optional): Folder path for outputs. Defaults to OUTPUT_FOLDER.
+        context_textbox (str, optional): Additional context for summarization. Defaults to empty string.
+        aws_access_key_textbox (str, optional): AWS access key. Defaults to empty string.
+        aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
+        model_name_map (dict, optional): Dictionary mapping model choices to their properties. Defaults to model_name_map.
+        reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
+        local_model (object, optional): Local model object if using local inference. Defaults to empty list.
+        summarise_topic_descriptions_prompt (str, optional): Prompt template for topic summarization
+        summarise_topic_descriptions_system_prompt (str, optional): System prompt for topic summarization
+        do_summaries (str, optional): Flag to control summary generation. Defaults to "Yes".
+        progress (gr.Progress, optional): Gradio progress tracker. Defaults to track_tqdm=True.
+
+    Returns:
+        Multiple outputs including summarized content, metadata, and file paths
     '''
-    out_metadata = []
+    out_metadata = list()
     summarised_output_markdown = ""
-    output_files = []
+    output_files = list()
     acc_input_tokens = 0
     acc_output_tokens = 0
     acc_number_of_calls = 0
@@ -479,7 +523,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     tic = time.perf_counter()
 
-    if log_output_files is None: log_output_files = []   
+    if log_output_files is None: log_output_files = list()   
 
     # Check for data for summarisations
     if not topic_summary_df.empty and not reference_table_df.empty:
@@ -510,9 +554,11 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     try: all_summaries = sampled_reference_table_df["Summary"].tolist()
     except: all_summaries = sampled_reference_table_df["Revised summary"].tolist()
 
-    length_all_summaries = len(all_summaries)    
+    length_all_summaries = len(all_summaries)
 
-    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+    model_source = model_name_map[model_choice]["source"]
+
+    if (model_source == "Local") & (RUN_LOCAL_MODEL == "1"):
         progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
         local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
 
@@ -520,8 +566,9 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
 
     if do_summaries == "Yes":
-        model_source = model_name_map[model_choice]["source"]
+        
         bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
+        model_source = model_name_map[model_choice]["source"]
 
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
@@ -530,6 +577,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
             formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
 
             formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
+
+            if "Local" in model_source and reasoning_suffix: formatted_summarise_topic_descriptions_system_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + reasoning_suffix
 
             try:
                 response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model)
@@ -558,20 +607,9 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     # If all summaries completed, make final outputs
     if latest_summary_completed >= length_all_summaries:
-        print("All summaries completed. Creating outputs.")
+        print("All summaries completed. Creating outputs.")        
 
-        model_choice_clean = model_name_map[model_choice]["short_name"]
-        file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
-        latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
-        batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
-        in_column = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
-
-        file_name_cleaned = clean_column_name(file_name, max_length=20)
-        in_column_cleaned = clean_column_name(in_column, max_length=20)
-
-        # Save outputs for each batch. If master file created, label file as master
-        if latest_batch_completed: batch_file_path_details = f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
-        else: batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
+        batch_file_path_details = create_batch_file_path_details(reference_data_file_name, model_name_map, model_choice)
 
         sampled_reference_table_df["Revised summary"] = summarised_outputs           
 
@@ -637,27 +675,63 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     temperature:float,
                     reference_data_file_name:str,
                     output_folder:str=OUTPUT_FOLDER,
-                    chosen_cols:List[str]=[],
+                    chosen_cols:List[str]=list(),
                     context_textbox:str="",
                     aws_access_key_textbox:str='',
                     aws_secret_key_textbox:str='',
-                    local_model:object=[],        
+                    model_name_map:dict=model_name_map,
+                    reasoning_suffix:str=reasoning_suffix,
+                    local_model:object=list(),        
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
                     summarise_everything_system_prompt:str=summarise_everything_system_prompt,
                     do_summaries:str="Yes",                            
-                    progress=gr.Progress(track_tqdm=True)):
+                    progress=gr.Progress(track_tqdm=True)) -> Tuple[List[str], List[str], int, str, List[str], List[str], int, int, int, float]:
     '''
     Create an overall summary of all responses based on a topic summary table.
+
+    Args:
+        topic_summary_df (pd.DataFrame): DataFrame containing topic summaries
+        model_choice (str): Name of the LLM model to use
+        in_api_key (str): API key for model access
+        temperature (float): Temperature parameter for model generation
+        reference_data_file_name (str): Name of reference data file
+        output_folder (str, optional): Folder to save outputs. Defaults to OUTPUT_FOLDER.
+        chosen_cols (List[str], optional): Columns to analyze. Defaults to empty list.
+        context_textbox (str, optional): Additional context. Defaults to empty string.
+        aws_access_key_textbox (str, optional): AWS access key. Defaults to empty string.
+        aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
+        model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
+        reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
+        local_model (object, optional): Local model object. Defaults to empty list.
+        summarise_everything_prompt (str, optional): Prompt for overall summary
+        comprehensive_summary_format_prompt (str, optional): Prompt for comprehensive summary format
+        comprehensive_summary_format_prompt_by_group (str, optional): Prompt for group summary format
+        summarise_everything_system_prompt (str, optional): System prompt for overall summary
+        do_summaries (str, optional): Whether to generate summaries. Defaults to "Yes".
+        progress (gr.Progress, optional): Progress tracker. Defaults to gr.Progress(track_tqdm=True).
+
+    Returns:
+        Tuple containing:
+            List[str]: Output files
+            List[str]: Text summarized outputs 
+            int: Latest summary completed
+            str: Output metadata
+            List[str]: Summarized outputs
+            List[str]: Summarized outputs for DataFrame
+            int: Number of input tokens
+            int: Number of output tokens  
+            int: Number of API calls
+            float: Time taken
     '''
 
-    out_metadata = []
+    out_metadata = list()
     latest_summary_completed = 0
-    output_files = []
-    txt_summarised_outputs = []
-    summarised_outputs = []
-    summarised_outputs_for_df = []
+    output_files = list()
+    txt_summarised_outputs = list()
+    summarised_outputs = list()
+    summarised_outputs_for_df = list()
     input_tokens_num = 0
     output_tokens_num = 0
     number_of_calls_num = 0
@@ -679,21 +753,24 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     else:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
-    model_choice_clean = model_name_map[model_choice]["short_name"]
-    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-    file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
-    latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
-    batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
-    in_column = re.search(r'col_(.*?)_unique', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
+    # model_choice_clean = model_name_map[model_choice]
+    # model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+    # file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
+    # latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
+    # batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
+    # in_column = re.search(r'col_(.*?)_unique', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
 
-    file_name_cleaned = clean_column_name(file_name, max_length=20)
-    in_column_cleaned = clean_column_name(in_column, max_length=20)
 
-    # Save outputs for each batch. If master file created, label file as master
-    if latest_batch_completed:
-        batch_file_path_details = f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
-    else:
-        batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
+    # file_name_cleaned = clean_column_name(file_name, max_length=20)
+    # in_column_cleaned = clean_column_name(in_column, max_length=20)
+
+    # # Save outputs for each batch. If master file created, label file as master
+    # if latest_batch_completed:
+    #     batch_file_path_details = f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
+    # else:
+    #     batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
+
+    batch_file_path_details = create_batch_file_path_details(reference_data_file_name, model_name_map, model_choice)
 
     tic = time.perf_counter()
 
@@ -718,6 +795,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
             formatted_summarise_everything_system_prompt = summarise_everything_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
 
+            if "Local" in model_source and reasoning_suffix: formatted_summarise_everything_system_prompt = formatted_summarise_everything_system_prompt + "\n" + reasoning_suffix
+            
             try:
                 response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model)
                 summarised_output_for_df = response
@@ -740,10 +819,13 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
             latest_summary_completed += 1
 
-            summary_group_short = clean_column_name(summary_group)            
+            model_choice_clean = model_name_map[model_choice]["short_name"]
+
+            summary_group_short = clean_column_name(summary_group)
+            model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
 
             # Write outputs
-            overall_summary_output_path = output_folder + batch_file_path_details + "_overall_summary_grp_" + summary_group_short + "_" + model_choice_clean_short + ".txt"
+            overall_summary_output_path = output_folder + batch_file_path_details + "_overall_summary_grp_" + summary_group + "_" + model_choice_clean_short + ".txt"
 
             # Write single group outputs
             try:

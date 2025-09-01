@@ -106,7 +106,7 @@ class CSVLogger_custom(FlaggingCallback):
                 )
                 latest_num = int(re.findall(r"\d+", latest_file.stem)[0])
 
-                with open(latest_file, newline="", encoding="utf-8") as csvfile:
+                with open(latest_file, newline="", encoding="utf-8-sig") as csvfile:
                     reader = csv.reader(csvfile)
                     existing_headers = next(reader, None)
 
@@ -122,7 +122,7 @@ class CSVLogger_custom(FlaggingCallback):
 
         if not Path(self.dataset_filepath).exists():
             with open(
-                self.dataset_filepath, "w", newline="", encoding="utf-8"
+                self.dataset_filepath, "w", newline="", encoding="utf-8-sig"
             ) as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(utils.sanitize_list_for_csv(headers))
@@ -205,7 +205,7 @@ class CSVLogger_custom(FlaggingCallback):
                 with open(self.dataset_filepath, "a", newline="", encoding="utf-8-sig") as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow(utils.sanitize_list_for_csv(csv_data))
-                with open(self.dataset_filepath, encoding="utf-8") as csvfile:
+                with open(self.dataset_filepath, encoding="utf-8-sig") as csvfile:
                     line_count = len(list(csv.reader(csvfile))) - 1
 
         if save_to_dynamodb == True:

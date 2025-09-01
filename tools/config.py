@@ -114,7 +114,6 @@ OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'outp
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
 
 
-
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP": 
     # Create a temporary directory
@@ -127,14 +126,6 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
 
 GRADIO_TEMP_DIR = get_or_create_env_var('GRADIO_TEMP_DIR', 'tmp/gradio_tmp/') # Default Gradio temp folder
 MPLCONFIGDIR = get_or_create_env_var('MPLCONFIGDIR', 'tmp/matplotlib_cache/') # Matplotlib cache folder
-
-
-
-# TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tmp/tld/')
-# try:
-#     extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
-# except:
-#     extract = TLDExtract(cache_dir=None)
 
 ###
 # LOGGING OPTIONS
@@ -216,11 +207,11 @@ GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
 # Build up options for models
 
-model_full_names = []
-model_short_names = []
-model_source = []
+model_full_names = list()
+model_short_names = list()
+model_source = list()
 
-CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 3 4B") # Gemma 3 1B #  "Gemma 2b"
+CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "gpt-oss-20b") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
@@ -250,17 +241,27 @@ model_name_map = {
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
 
-GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
-GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
-GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma") #"model/phi"  # Assuming this is your intended directory
+GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")
+GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf")
+GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
-GEMMA3_REPO_ID = get_or_create_env_var("GEMMA3_REPO_ID", "ggml-org/gemma-3-1b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
-GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-1b-it-Q8_0.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
+GEMMA3_REPO_ID = get_or_create_env_var("GEMMA3_REPO_ID", "unsloth/gemma-3-270m-it-qat-GGUF")
+GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-qat-F16.gguf")
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
-GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "ggml-org/gemma-3-4b-it-GGUF")# "bartowski/Llama-3.2-3B-Instruct-GGUF") # "lmstudio-community/gemma-2-2b-it-GGUF")#"QuantFactory/Phi-3-mini-128k-instruct-GGUF")
-GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-Q4_K_M.gguf") # )"Llama-3.2-3B-Instruct-Q5_K_M.gguf") #"gemma-2-2b-it-Q8_0.gguf") #"Phi-3-mini-128k-instruct.Q4_K_M.gguf")
+GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
+GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-Q4_K_M.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
+
+GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
+GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
+GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
+
+USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
+
+GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
+
+GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
 
 if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 2b":
     LOCAL_REPO_ID = GEMMA2_REPO_ID
@@ -278,25 +279,35 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
 
+elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
+    LOCAL_REPO_ID = GPT_OSS_REPO_ID
+    LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
+
     print("CHOSEN_LOCAL_MODEL_TYPE:", CHOSEN_LOCAL_MODEL_TYPE)
     print("LOCAL_REPO_ID:", LOCAL_REPO_ID)
     print("LOCAL_MODEL_FILE:", LOCAL_MODEL_FILE)
     print("LOCAL_MODEL_FOLDER:", LOCAL_MODEL_FOLDER)
 
-LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1'))
+LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
-LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
-LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
-LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1')) #https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','96')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_MIN_P = float(get_or_create_env_var('LLM_MIN_P', '0'))
+LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95'))
+LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1.0'))
+
 LLM_LAST_N_TOKENS = int(get_or_create_env_var('LLM_LAST_N_TOKENS', '512'))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
 LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
 LLM_RESET = get_or_create_env_var('LLM_RESET', 'True')
 LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'False')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '4'))
-LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '256'))
+LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '128'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
+SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
+NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
+REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
 
 MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
 

@@ -7,6 +7,7 @@ import pandas as pd
 import json
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
+from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 from typing import List, Tuple, TypeVar
 from google import genai as ai
 from google.genai import types
@@ -17,11 +18,17 @@ torch.cuda.empty_cache()
 
 model_type = None # global variable setup
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
-model = [] # Define empty list for model functions to run
-tokenizer = [] #[] # Define empty list for model functions to run
+model = list() # Define empty list for model functions to run
+tokenizer = list() #[] # Define empty list for model functions to run
 
-from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS
+from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS
 from tools.prompts import initial_table_assistant_prefill
+
+if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
+else: SPECULATIVE_DECODING = False
+
+if isinstance(NUM_PRED_TOKENS, str): NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
+else: NUM_PRED_TOKENS = NUM_PRED_TOKENS
 
 # Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
 # Check for torch cuda
@@ -54,13 +61,9 @@ batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 
-# if RUN_AWS_FUNCTIONS == '1':
-#     bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
-# else:
-#     bedrock_runtime = []
 
 if not LLM_THREADS:
-    threads = torch.get_num_threads() # 8
+    threads = torch.get_num_threads()
 else: threads = LLM_THREADS
 print("CPU threads:", threads)
 
@@ -76,7 +79,8 @@ else: sample = False
 temperature = LLM_TEMPERATURE
 top_k = LLM_TOP_K
 top_p = LLM_TOP_P
-repetition_penalty = LLM_REPETITION_PENALTY # Mild repetition penalty to prevent repeating table rows
+min_p = LLM_MIN_P
+repetition_penalty = LLM_REPETITION_PENALTY
 last_n_tokens = LLM_LAST_N_TOKENS
 max_new_tokens: int = LLM_MAX_NEW_TOKENS
 seed: int = LLM_SEED
@@ -86,6 +90,7 @@ threads: int = threads
 batch_size:int = LLM_BATCH_SIZE
 context_length:int = LLM_CONTEXT_LENGTH
 sample = LLM_SAMPLE
+speculative_decoding = SPECULATIVE_DECODING
 
 class llama_cpp_init_config_gpu:
     def __init__(self,
@@ -122,6 +127,7 @@ cpu_config = llama_cpp_init_config_cpu()
 class LlamaCPPGenerationConfig:
     def __init__(self, temperature=temperature,
                  top_k=top_k,
+                 min_p=min_p,
                  top_p=top_p,
                  repeat_penalty=repetition_penalty,
                  seed=seed,
@@ -155,18 +161,28 @@ def get_model_path(repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model
 
     print("local path for model load:", local_path)
 
-    if os.path.exists(local_path):
-        print(f"Model already exists at: {local_path}")
+    try:
+        if os.path.exists(local_path):
+            print(f"Model already exists at: {local_path}")
 
-        return local_path
-    else:
-        print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
-        if hf_token:
-            downloaded_model_path = hf_hub_download(repo_id=repo_id, token=hf_token, filename=model_filename)
-        else:
-            downloaded_model_path = hf_hub_download(repo_id=repo_id, filename=model_filename)
+            return local_path
+        else:            
+            if hf_token:
+                print("Downloading model from Hugging Face Hub with HF token")
+                downloaded_model_path = hf_hub_download(repo_id=repo_id, token=hf_token, filename=model_filename)
 
-        return downloaded_model_path
+                return downloaded_model_path
+            else:
+                print("No HF token found, downloading model from Hugging Face Hub without token")
+                downloaded_model_path = hf_hub_download(repo_id=repo_id, filename=model_filename)
+
+                return downloaded_model_path
+
+    except Exception as e:
+        print("Error loading model:", e)
+        raise Warning("Error loading model:", e)
+        #return None
+    
 
 def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_layers, max_context_length:int=context_length, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER):
     '''
@@ -185,13 +201,16 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
 
         try:
             print("GPU load variables:" , vars(gpu_config))
-            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config)) #  type_k=8, type_v = 8, flash_attn=True, 
-    
+            if speculative_decoding:
+                llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
+            else:
+                llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config))    
+
         except Exception as e:
             print("GPU load failed due to:", e)
-            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) # type_v = 8, flash_attn=True, 
+            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) 
         
-        print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU. And a maximum context length of ", gpu_config.n_ctx)
+        print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
     # CPU mode
     else:
@@ -202,11 +221,14 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
         gpu_config.update_context(max_context_length)
         cpu_config.update_context(max_context_length)
 
-        llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) # type_v = 8, flash_attn=True, 
+        if speculative_decoding:
+            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config))
+        else:
+            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) 
 
-        print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU. And a maximum context length of ", gpu_config.n_ctx)
+        print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
-    tokenizer = []
+    tokenizer = list()
 
     print("Finished loading model:", local_model_type)
     print("GPU layers assigned to cuda:", gpu_layers)
@@ -239,6 +261,47 @@ def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
         seed=seed,
         max_tokens=max_tokens,
         stream=stream#,
+        #stop=["<|eot_id|>", "\n\n"]
+    )
+
+    return output
+
+def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config:LlamaCPPGenerationConfig, model=model):
+    """
+    Calls your Llama.cpp chat model with a formatted user message and system prompt,
+    using generation parameters from the LlamaCPPGenerationConfig object.
+
+    Args:
+        formatted_string (str): The formatted input text for the user's message.
+        system_prompt (str): The system-level instructions for the model.
+        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
+        model (Llama): The Llama.cpp model instance to use for chat completion.
+    """
+    # Extracting parameters from the gen_config object
+    temperature = gen_config.temperature
+    top_k = gen_config.top_k
+    top_p = gen_config.top_p
+    repeat_penalty = gen_config.repeat_penalty
+    seed = gen_config.seed
+    max_tokens = gen_config.max_tokens
+    stream = gen_config.stream
+
+    # Now you can call your model directly, passing the parameters:
+    output = model.create_chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": formatted_string
+            }
+        ],
+        temperature=temperature, 
+        top_k=top_k, 
+        top_p=top_p, 
+        repeat_penalty=repeat_penalty, 
+        seed=seed,
+        max_tokens=max_tokens,
+        stream=stream
         #stop=["<|eot_id|>", "\n\n"]
     )
 
@@ -392,7 +455,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     return response
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model=[], assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -421,15 +484,8 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
         for i in progress_bar:
             try:
                 print("Calling Gemini model, attempt", i + 1)
-                #print("google_client:", google_client)
-                #print("model_choice:", model_choice)
-                #print("full_prompt:", full_prompt)
-                #print("generation_config:", config)
 
                 response = google_client.models.generate_content(model=model_choice, contents=full_prompt, config=config)
-
-                #progress_bar.close()
-                #tqdm._instances.clear()
 
                 print("Successful call to Gemini model.")
                 break
@@ -446,9 +502,6 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
             try:
                 print("Calling AWS Claude model, attempt", i + 1)
                 response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime, assistant_prefill=assistant_prefill)
-
-                #progress_bar.close()
-                #tqdm._instances.clear()
 
                 print("Successful call to Claude model.")
                 break
@@ -468,12 +521,9 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 gen_config = LlamaCPPGenerationConfig()
                 gen_config.update_temp(temperature)
 
-                response = call_llama_cpp_model(prompt, gen_config, model=local_model)
+                response = call_llama_cpp_chatmodel(prompt, system_prompt, gen_config, model=local_model)
 
-                #progress_bar.close()
-                #tqdm._instances.clear()
-
-                print("Successful call to local model. Response:", response)
+                print("Successful call to local model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
@@ -488,20 +538,29 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     conversation_history.append({'role': 'user', 'parts': [prompt]})
 
     # Check if is a LLama.cpp model response
-        # Check if the response is a ResponseObject
     if isinstance(response, ResponseObject):
-        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
+        response_text = response.text
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     elif 'choices' in response:
-        conversation_history.append({'role': 'assistant', 'parts': [response['choices'][0]['text']]})
+        if "gpt-oss" in model_choice:
+            response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
+        else:
+            response_text = response['choices'][0]['message']['content']
+        response_text = response_text.strip()
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]}) #response['choices'][0]['text']]})
     else:
-        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
+        response_text = response.text
+        response_text = response_text.strip()
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     
     # Print the updated conversation history
     #print("conversation_history:", conversation_history)
-    
-    return response, conversation_history
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = [], master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+    print("response_text:", response_text)
+    
+    return response, conversation_history, response_text
+
+def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -525,23 +584,14 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
     Returns:
         Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
     """
-    responses = []
+    responses = list()
 
     # Clear any existing progress bars
     tqdm._instances.clear()
 
     for prompt in prompts:
 
-        #print("prompt to LLM:", prompt)
-
-        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
-
-        if isinstance(response, ResponseObject):
-            response_text = response.text
-        elif 'choices' in response:
-            response_text = response['choices'][0]['text']
-        else:
-            response_text = response.text
+        response, conversation_history, response_text = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
 
         responses.append(response)
         whole_conversation.append(system_prompt)
@@ -550,13 +600,14 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         # Create conversation metadata
         if master == False:
-            whole_conversation_metadata.append(f"Query batch {batch_no} prompt {len(responses)} metadata:")
+            whole_conversation_metadata.append(f"Batch {batch_no}:")
         else:
-            whole_conversation_metadata.append(f"Query summary metadata:")
+            #whole_conversation_metadata.append(f"Query summary metadata:")
+            whole_conversation_metadata.append(f"Batch {batch_no}:")
 
         if not isinstance(response, str):
             try:
-                if "claude" in model_choice:
+                if "AWS" in model_source:
                     #print("Extracting usage metadata from Converse API response...")
                        
                     # Using .get() is safer than direct access, in case a key is missing.
@@ -568,9 +619,13 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
                     # Append the clean, standardised data
                     whole_conversation_metadata.append('outputTokens: ' + str(output_tokens) + ' inputTokens: ' + str(input_tokens))
 
-                elif "gemini" in model_choice:
+                elif "Gemini" in model_source:
                     whole_conversation_metadata.append(str(response.usage_metadata))
-                else:
+
+                elif "Local" in model_source:
+                    #print("Adding usage metadata to whole conversation metadata:", response['usage'])
+                    output_tokens = response['usage'].get('completion_tokens', 0)
+                    input_tokens = response['usage'].get('prompt_tokens', 0)
                     whole_conversation_metadata.append(str(response['usage']))
             except KeyError as e:
                 print(f"Key error: {e} - Check the structure of response.usage_metadata")
@@ -638,10 +693,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
             call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, master=master, assistant_prefill=assistant_prefill
         )
 
-        if model_choice != CHOSEN_LOCAL_MODEL_TYPE:
-            stripped_response = responses[-1].text.strip()
-        else:
-            stripped_response = responses[-1]['choices'][0]['text'].strip()
+        stripped_response = response_text.strip()
 
         # Check if response meets our criteria (length and contains table)
         if len(stripped_response) > 120 and '|' in stripped_response:
@@ -656,7 +708,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     else:  # This runs if no break occurred (all attempts failed)
         print(f"Failed to get valid response after {MAX_OUTPUT_VALIDATION_ATTEMPTS} attempts")
 
-    return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
+    return responses, conversation_history, whole_conversation, whole_conversation_metadata, stripped_response
 
 def create_missing_references_df(basic_response_df: pd.DataFrame, existing_reference_df: pd.DataFrame) -> pd.DataFrame:
     """

@@ -310,7 +310,7 @@ def get_basic_response_data(file_data:pd.DataFrame, chosen_cols:List[str], verif
         print("Column:", chosen_cols[0], "not found in file_data columns:", file_data.columns)
 
     basic_response_data = file_data[[chosen_cols[0]]]
-    basic_response_data.rename(columns={basic_response_data.columns[0]:"Response"}, inplace=True)
+    basic_response_data = basic_response_data.rename(columns={basic_response_data.columns[0]:"Response"})
     basic_response_data = basic_response_data.reset_index(names="Original Reference")#.reset_index(drop=True) #
     # Try to convert to int, if it fails, return a range of 1 to last row + 1
     try:
@@ -743,3 +743,32 @@ def _get_env_list(env_var_name: str) -> List[str]:
         return []
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(',') if s.strip()]
+
+def create_batch_file_path_details(reference_data_file_name: str, model_name_map: dict, model_choice: str) -> str:
+            """
+            Creates a standardized batch file path detail string from a reference data filename.
+            
+            Args:
+                reference_data_file_name (str): Name of the reference data file
+                model_name_map (dict): Dictionary mapping model choices to their properties
+                model_choice (str): The chosen model name
+            
+            Returns:
+                str: Formatted batch file path detail string
+            """
+            model_choice_clean = model_name_map[model_choice]["short_name"]
+            
+            # Extract components from filename using regex
+            file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
+            latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
+            batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
+            in_column = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
+
+            # Clean the extracted names
+            file_name_cleaned = clean_column_name(file_name, max_length=20)
+            in_column_cleaned = clean_column_name(in_column, max_length=20)
+
+            # Create batch file path details string
+            if latest_batch_completed:
+                return f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
+            return f"{file_name_cleaned}_col_{in_column_cleaned}"
