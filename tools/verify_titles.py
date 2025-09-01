@@ -101,7 +101,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     log_files_output_paths.append(whole_conversation_path_meta)
     
     if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
-    elif "choices" in responses[-1]: response_text =  responses[-1]["choices"][0]['text']
+    elif "choices" in responses[-1]: response_text =  responses[-1]['choices'][0]['message']['content'] #responses[-1]["choices"][0]['text']
     else: response_text =  responses[-1].text
 
     # Convert response text to a markdown table
@@ -464,13 +464,16 @@ def verify_titles(in_data_file,
 
                         if isinstance(responses[-1], ResponseObject):
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                                #f.write(responses[-1].text)
+                                f.write(response_text)
                         elif "choices" in responses[-1]:
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1]["choices"][0]['text'])
+                                #f.write(responses[-1]["choices"][0]['text'])
+                                f.write(response_text)
                         else:
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                                #f.write(responses[-1].text)
+                                f.write(response_text)
 
                     except Exception as e:
                         print("Error in returning model response:", e)                    
@@ -581,15 +584,18 @@ def verify_titles(in_data_file,
 
                         if isinstance(responses[-1], ResponseObject):
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                                #f.write(responses[-1].text)
+                                f.write(response_text)
                             unique_table_df_display_table_markdown = responses[-1].text
                         elif "choices" in responses[-1]:
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1]["choices"][0]['text'])
-                            unique_table_df_display_table_markdown =responses[-1]["choices"][0]['text']
+                                #f.write(responses[-1]["choices"][0]['text'])
+                                f.write(response_text)
+                            unique_table_df_display_table_markdown =responses[-1]["choices"][0]['message']['content'] #responses[-1]["choices"][0]['text']
                         else:
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                                #f.write(responses[-1].text)
+                                f.write(response_text)
                             unique_table_df_display_table_markdown = responses[-1].text
 
                         log_files_output_paths.append(final_table_output_path)

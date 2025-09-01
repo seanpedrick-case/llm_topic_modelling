@@ -109,7 +109,7 @@ with app:
     master_unique_topics_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_unique_topics_df_revised_summaries_state", visible=False, type="pandas")
     summarised_output_df = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="summarised_output_df", visible=False, type="pandas")
     summarised_references_markdown = gr.Markdown("", visible=False)
-    summarised_outputs_list = gr.Dropdown(value=[], choices=[], visible=False, label="List of summarised outputs", allow_custom_value=True)
+    summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of summarised outputs", allow_custom_value=True)
     latest_summary_completed_num = gr.Number(0, visible=False)
 
     original_data_file_name_textbox = gr.Textbox(label = "Reference data file name", value="", visible=False)
@@ -147,7 +147,7 @@ with app:
         gr.Markdown("""### Choose a tabular data file (xlsx or csv) of open text to extract topics from.""")
         with gr.Row():
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
-            in_api_key = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
+
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
             in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
@@ -308,6 +308,9 @@ with app:
             aws_access_key_textbox = gr.Textbox(label="AWS access key", interactive=False, lines=1, type="password")
             aws_secret_key_textbox = gr.Textbox(label="AWS secret key", interactive=False, lines=1, type="password")
 
+        with gr.Accordion("Enter Gemini API keys", open = False):
+            google_api_key_textbox = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
+
         # Invisible text box to hold the session hash/username just for logging purposes
         session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible=False) 
         
@@ -315,19 +318,6 @@ with app:
         total_number_of_batches = gr.Number(label = "Current batch number", value = 1, precision=0, visible=False)
         
         text_output_logs = gr.Textbox(label = "Output summary logs", visible=False)
-            
-    # AWS options - not yet implemented
-    # with gr.Tab(label="Advanced options"):
-    #     with gr.Accordion(label = "AWS data access", open = True):
-    #         aws_password_box = gr.Textbox(label="Password for AWS data access (ask the Data team if you don't have this)")
-    #         with gr.Row():
-    #             in_aws_file = gr.Dropdown(label="Choose file to load from AWS (only valid for API Gateway app)", choices=["None", "Lambeth borough plan"])
-    #             load_aws_data_button = gr.Button(value="Load data from AWS", variant="secondary")
-                
-    #         aws_log_box = gr.Textbox(label="AWS data load status")
-    
-    # ### Loading AWS data ###
-    # load_aws_data_button.click(fn=load_data_from_aws, inputs=[in_aws_file, aws_password_box], outputs=[in_file, aws_log_box])
    
     ###
     # INTERACTIVE ELEMENT FUNCTIONS
@@ -364,7 +354,7 @@ with app:
                 display_topic_table_markdown,
                 original_data_file_name_textbox,
                 total_number_of_batches,
-                in_api_key,
+                google_api_key_textbox,
                 temperature_slide,
                 in_colnames,
                 model_choice,
@@ -411,7 +401,7 @@ with app:
                 output_tokens_num,
                 number_of_calls_num],
                 api_name="extract_topics")
-    
+
     ###
     # DEDUPLICATION AND SUMMARISATION FUNCTIONS
     ###
@@ -430,14 +420,14 @@ with app:
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
         success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
             success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
-                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], api_name="summarise_topics")
+                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], api_name="summarise_topics")
 
-    # latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, in_api_key, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num], scroll_to_output=True)
+    # latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num], scroll_to_output=True)
 
     # SUMMARISE WHOLE TABLE PAGE
     overall_summarise_previous_data_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
             success(load_in_previous_data_files, inputs=[overall_summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, in_api_key, temperature_slide, unique_topics_table_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="overall_summary")
+            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, google_api_key_textbox, temperature_slide, unique_topics_table_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="overall_summary")
 
     ###
     # CONTINUE PREVIOUS TOPIC EXTRACTION PAGE
@@ -512,7 +502,13 @@ with app:
     usage_callback.setup([session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num,
                 output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], USAGE_LOGS_FOLDER)
 
-    conversation_metadata_textbox.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
+    def conversation_metadata_textbox_change(textbox_value):
+        print("conversation_metadata_textbox_change:", textbox_value)
+        return textbox_value
+
+    number_of_calls_num.change(conversation_metadata_textbox_change, inputs=[conversation_metadata_textbox], outputs=[conversation_metadata_textbox])
+
+    number_of_calls_num.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
         success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state, s3_log_bucket_name, aws_access_key_textbox, aws_secret_key_textbox], outputs=[s3_logs_output_textbox])
 
     # User submitted feedback

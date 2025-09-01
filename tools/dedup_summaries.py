@@ -436,7 +436,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     if isinstance(responses[-1], ResponseObject):
         response_texts = [resp.text for resp in responses]
     elif "choices" in responses[-1]:
-        response_texts = [resp["choices"][0]['text'] for resp in responses]
+        response_texts = [resp["choices"][0]['message']['content'] for resp in responses] #resp["choices"][0]['text'] for resp in responses]
     else:
         response_texts = [resp.text for resp in responses]
 
