@@ -161,19 +161,28 @@ def get_model_path(repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model
 
     print("local path for model load:", local_path)
 
-    if os.path.exists(local_path):
-        print(f"Model already exists at: {local_path}")
+    try:
+        if os.path.exists(local_path):
+            print(f"Model already exists at: {local_path}")
 
-        return local_path
-    else:
-        print(f"Checking default Hugging Face folder. Downloading model from Hugging Face Hub if not found")
-        if hf_token:
-            downloaded_model_path = hf_hub_download(repo_id=repo_id, token=hf_token, filename=model_filename)
-        else:
-            print("No HF token found, downloading model from Hugging Face Hub without token")
-            downloaded_model_path = hf_hub_download(repo_id=repo_id, filename=model_filename)
+            return local_path
+        else:            
+            if hf_token:
+                print("Downloading model from Hugging Face Hub with HF token")
+                downloaded_model_path = hf_hub_download(repo_id=repo_id, token=hf_token, filename=model_filename)
 
-        return downloaded_model_path
+                return downloaded_model_path
+            else:
+                print("No HF token found, downloading model from Hugging Face Hub without token")
+                downloaded_model_path = hf_hub_download(repo_id=repo_id, filename=model_filename)
+
+                return downloaded_model_path
+
+    except Exception as e:
+        print("Error loading model:", e)
+        raise Warning("Error loading model:", e)
+        #return None
+    
 
 def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_layers, max_context_length:int=context_length, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER):
     '''
@@ -514,7 +523,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 
                 response = call_llama_cpp_chatmodel(prompt, system_prompt, gen_config, model=local_model)
 
-                print("Successful call to local model. Response:", response)
+                print("Successful call to local model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
@@ -529,18 +538,27 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     conversation_history.append({'role': 'user', 'parts': [prompt]})
 
     # Check if is a LLama.cpp model response
-        # Check if the response is a ResponseObject
     if isinstance(response, ResponseObject):
-        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
+        response_text = response.text
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     elif 'choices' in response:
-        conversation_history.append({'role': 'assistant', 'parts': [response['choices'][0]['message']['content']]}) #response['choices'][0]['text']]})
+        if "gpt-oss" in model_choice:
+            response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
+        else:
+            response_text = response['choices'][0]['message']['content']
+        response_text = response_text.strip()
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]}) #response['choices'][0]['text']]})
     else:
-        conversation_history.append({'role': 'assistant', 'parts': [response.text]})
+        response_text = response.text
+        response_text = response_text.strip()
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     
     # Print the updated conversation history
     #print("conversation_history:", conversation_history)
+
+    print("response_text:", response_text)
     
-    return response, conversation_history
+    return response, conversation_history, response_text
 
 def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
@@ -573,14 +591,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
     for prompt in prompts:
 
-        response, conversation_history = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
-
-        if isinstance(response, ResponseObject):
-            response_text = response.text
-        elif 'choices' in response:
-            response_text = response['choices'][0]['message']['content'] # response['choices'][0]['text']
-        else:
-            response_text = response.text
+        response, conversation_history, response_text = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
 
         responses.append(response)
         whole_conversation.append(system_prompt)
@@ -596,7 +607,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
         if not isinstance(response, str):
             try:
-                if "claude" in model_choice:
+                if "AWS" in model_source:
                     #print("Extracting usage metadata from Converse API response...")
                        
                     # Using .get() is safer than direct access, in case a key is missing.
@@ -608,10 +619,11 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
                     # Append the clean, standardised data
                     whole_conversation_metadata.append('outputTokens: ' + str(output_tokens) + ' inputTokens: ' + str(input_tokens))
 
-                elif "gemini" in model_choice:
+                elif "Gemini" in model_source:
                     whole_conversation_metadata.append(str(response.usage_metadata))
-                else:
-                    print("Adding usage metadata to whole conversation metadata:", response['usage'])
+
+                elif "Local" in model_source:
+                    #print("Adding usage metadata to whole conversation metadata:", response['usage'])
                     output_tokens = response['usage'].get('completion_tokens', 0)
                     input_tokens = response['usage'].get('prompt_tokens', 0)
                     whole_conversation_metadata.append(str(response['usage']))
@@ -680,13 +692,6 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
             whole_conversation_metadata, google_client, google_config, model_choice, 
             call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, master=master, assistant_prefill=assistant_prefill
         )
-
-        #if model_source != "Local":
-            #stripped_response = responses[-1].text.strip()
-            #stripped_response = response_text.strip()
-        #else:
-            #stripped_response = response['choices'][0]['message']['content'].strip()
-            #stripped_response = response_text.strip()
 
         stripped_response = response_text.strip()
 

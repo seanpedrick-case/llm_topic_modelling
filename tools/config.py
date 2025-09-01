@@ -114,7 +114,6 @@ OUTPUT_FOLDER = get_or_create_env_var('GRADIO_OUTPUT_FOLDER', 'output/') # 'outp
 INPUT_FOLDER = get_or_create_env_var('GRADIO_INPUT_FOLDER', 'input/') # 'input/'
 
 
-
 # Allow for files to be saved in a temporary folder for increased security in some instances
 if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP": 
     # Create a temporary directory
@@ -127,14 +126,6 @@ if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
 
 GRADIO_TEMP_DIR = get_or_create_env_var('GRADIO_TEMP_DIR', 'tmp/gradio_tmp/') # Default Gradio temp folder
 MPLCONFIGDIR = get_or_create_env_var('MPLCONFIGDIR', 'tmp/matplotlib_cache/') # Matplotlib cache folder
-
-
-
-# TLDEXTRACT_CACHE = get_or_create_env_var('TLDEXTRACT_CACHE', 'tmp/tld/')
-# try:
-#     extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
-# except:
-#     extract = TLDExtract(cache_dir=None)
 
 ###
 # LOGGING OPTIONS
@@ -218,9 +209,9 @@ GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
 # Build up options for models
 
-model_full_names = []
-model_short_names = []
-model_source = []
+model_full_names = list()
+model_short_names = list()
+model_source = list()
 
 CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "gpt-oss-20b") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
 

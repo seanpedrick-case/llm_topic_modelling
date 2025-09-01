@@ -15,7 +15,7 @@ from io import StringIO
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
-from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX
 from tools.aws_functions import connect_to_bedrock_runtime
@@ -32,13 +32,6 @@ deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 random_seed = LLM_SEED
 reasoning_suffix = REASONING_SUFFIX
-
-# if RUN_AWS_FUNCTIONS == '1':    
-#     bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
-# else:
-#     bedrock_runtime = list()
-
-
 
 ### HELPER FUNCTIONS
 
@@ -312,7 +305,7 @@ def convert_response_text_to_dataframe(response_text:str, table_type:str = "Main
     
     #print("out_df in convert function:", out_df)
 
-def write_llm_output_and_logs(responses: List[ResponseObject],
+def write_llm_output_and_logs(response_text: str,
                               whole_conversation: List[str],
                               whole_conversation_metadata: List[str],
                               file_name: str,
@@ -327,6 +320,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
                               batch_size_number:int,
                               in_column:str,
                               batch_basic_response_df:pd.DataFrame,
+                              model_name_map:dict,
                               group_name:str = "All",
                               produce_structures_summary_radio:str = "No",                      
                               first_run: bool = False,
@@ -335,7 +329,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     Writes the output of the large language model requests and logs to files.
 
     Parameters:
-    - responses (List[ResponseObject]): A list of ResponseObject instances containing the text and usage metadata of the responses.
+    - response_text (str): The text of the response from the model.
     - whole_conversation (List[str]): A list of strings representing the complete conversation including prompts and responses.
     - whole_conversation_metadata (List[str]): A list of strings representing metadata about the whole conversation.
     - file_name (str): The base part of the output file name.
@@ -350,6 +344,7 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     - batch_size_number (int): The size of batches in terms of number of responses.
     - in_column (str): The name of the open text column that is being analysed.
     - batch_basic_response_df (pd.DataFrame): The dataframe that contains the response data.
+    - model_name_map (dict): The dictionary that maps the model choice to the model name.
     - group_name (str, optional): The name of the current group.
     - produce_structures_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
     - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
@@ -368,36 +363,39 @@ def write_llm_output_and_logs(responses: List[ResponseObject],
     whole_conversation_metadata_str = '\n'.join(whole_conversation_metadata)
     start_row_reported = start_row + 1
 
+    batch_file_path_details = create_batch_file_path_details(file_name, model_name_map, model_choice_clean)
+
     # Need to reduce output file names as full length files may be too long
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-    in_column_cleaned = clean_column_name(in_column, max_length=20)    
-    file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)    
+    # in_column_cleaned = clean_column_name(in_column, max_length=20)    
+    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)    
 
-    # Save outputs for each batch. If master file created, label file as master
-    batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
+    # # Save outputs for each batch. If master file created, label file as master
+    # batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
     row_number_string_start = f"Rows {start_row_reported} to {end_row + 1}: "
 
     whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + ".txt"
 
     whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + ".txt"
 
-    with open(whole_conversation_path, "w", encoding='utf-8-sig', errors='replace') as f:
-        f.write(whole_conversation_str)
+    with open(whole_conversation_path, "w", encoding='utf-8-sig', errors='replace') as f: f.write(whole_conversation_str)
 
-    with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f:
-        f.write(whole_conversation_metadata_str)
+    with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f: f.write(whole_conversation_metadata_str)
 
-    #log_files_output_paths.append(whole_conversation_path)
     log_files_output_paths.append(whole_conversation_path_meta)
     
-    if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
-    elif "choices" in responses[-1]: response_text =  responses[-1]['choices'][0]['message']['content'] #responses[-1]["choices"][0]['text']
-    else: response_text =  responses[-1].text
+    # if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
+    # elif "choices" in responses[-1]:
+    #     full_response_text = responses[-1]['choices'][0]['message']['content']
+    #     if "gpt-oss" in model_choice_clean:
+    #         response_text = full_response_text.split('<|start|>assistant<|channel|>final<|message|>')[1]
+    #     else:
+    #         response_text = full_response_text
+    # else: response_text =  responses[-1].text
 
     # Convert response text to a markdown table
     try:
         topic_with_response_df, is_error = convert_response_text_to_dataframe(response_text)
-        #print("topic_with_response_df:", topic_with_response_df)
     except Exception as e:
         print("Error in parsing markdown table from response text:", e)
         return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
@@ -738,6 +736,12 @@ def extract_topics(in_data_file: GradioFileData,
     new_topic_summary_df = pd.DataFrame(columns=["General topic","Subtopic","Sentiment","Group","Number of responses","Summary"])
     new_topic_df = pd.DataFrame()
 
+    # Need to reduce output file names as full length files may be too long
+    model_choice_clean = model_name_map[model_choice]["short_name"]
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+    in_column_cleaned = clean_column_name(chosen_cols, max_length=20)    
+    file_name_clean = clean_column_name(file_name, max_length=20, front_characters=False)  
+
     # For Gemma models
     #llama_cpp_prefix = "<start_of_turn>user\n"
     #llama_cpp_suffix = "<end_of_turn>\n<start_of_turn>model\n"
@@ -910,16 +914,13 @@ def extract_topics(in_data_file: GradioFileData,
                         formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
                                                                                     topics=unique_topics_markdown)
                     
-                    if "gemma" in model_choice:
-                        formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
-                        full_prompt = formatted_summary_prompt
-                    else:
-                        full_prompt = formatted_system_prompt + formatted_summary_prompt
+                    # if "gemma" in model_choice:
+                    #     formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
+                    #     full_prompt = formatted_summary_prompt
+                    # else:
+                    #     full_prompt = formatted_system_prompt + formatted_summary_prompt
 
-                    # Need to reduce output file names as full length files may be too long
-                    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-                    in_column_cleaned = clean_column_name(chosen_cols, max_length=20)    
-                    file_name_clean = clean_column_name(file_name, max_length=20, front_characters=False)    
+                    #  
 
                     # Save outputs for each batch. If master file created, label file as master
                     batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"        
@@ -948,7 +949,7 @@ def extract_topics(in_data_file: GradioFileData,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
                     
                     # Write final output to text file for logging purposes
                     try:
@@ -1039,7 +1040,7 @@ def extract_topics(in_data_file: GradioFileData,
 
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_initial_table_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
                     
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, group_name, produce_structures_summary_radio, first_run=True, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=True, output_folder=output_folder)
 
                     # If error in table parsing, leave function
                     if is_error == True: raise Exception("Error in output table parsing")                    
@@ -1057,8 +1058,7 @@ def extract_topics(in_data_file: GradioFileData,
                     new_topic_summary_df["Group"] = group_name
 
                     new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
-                    out_file_paths.append(topic_summary_df_out_path)
-                    
+                    out_file_paths.append(topic_summary_df_out_path)                    
 
                     whole_conversation_metadata.append(whole_conversation_metadata_str)
                     whole_conversation_metadata_str = '. '.join(whole_conversation_metadata)
@@ -1067,18 +1067,21 @@ def extract_topics(in_data_file: GradioFileData,
                     try:
                         final_table_output_path = output_folder + batch_file_path_details + "_full_response_" + model_choice_clean + ".txt"
 
-                        if isinstance(responses[-1], ResponseObject):
-                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                #f.write(responses[-1].text)
-                                f.write(response_text)
-                        elif "choices" in responses[-1]:
-                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                #f.write(responses[-1]["choices"][0]['text'])
-                                f.write(response_text)
-                        else:
-                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                #f.write(responses[-1].text)
-                                f.write(response_text)
+                        with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                            f.write(response_text)
+
+                        # if isinstance(responses[-1], ResponseObject):
+                        #     with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                        #         #f.write(responses[-1].text)
+                        #         f.write(response_text)
+                        # elif "choices" in responses[-1]:
+                        #     with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                        #         #f.write(responses[-1]["choices"][0]['text'])
+                        #         f.write(response_text)
+                        # else:
+                        #     with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                        #         #f.write(responses[-1].text)
+                        #         f.write(response_text)
 
                     except Exception as e: print("Error in returning model response:", e)
                     
@@ -1132,14 +1135,16 @@ def extract_topics(in_data_file: GradioFileData,
         out_time = f"Everything finished in {round(final_time,1)} seconds."
         print(out_time)
 
-        print("All summaries completed. Creating outputs.")
+        print("All batches completed. Exporting outputs.")
 
-        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-        in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
-        file_name_cleaned = clean_column_name(file_name, max_length=20, front_characters=True)    
+        # model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+        # in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
+        # file_name_cleaned = clean_column_name(file_name, max_length=20, front_characters=True)    
 
-        # Save outputs for each batch. If master file created, label file as master
-        file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
+        # # Save outputs for each batch. If master file created, label file as master
+        # file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
+
+        file_path_details = create_batch_file_path_details(file_name, model_name_map, model_choice_clean)
 
         # Create a pivoted reference table
         existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)        
@@ -1457,11 +1462,7 @@ def wrapper_extract_topics_per_column_value(
         unique_table_df_display_table = acc_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
         acc_markdown_output = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
 
-    print("acc_whole_conversation_metadata at end of wrapper is", acc_whole_conversation_metadata)
-
     acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(acc_whole_conversation_metadata, model_choice, model_name_map)
-            
-    print("acc_input_tokens, acc_output_tokens, acc_number_of_calls at end of wrapper is", acc_input_tokens, acc_output_tokens, acc_number_of_calls)
 
     print(f"\nWrapper finished processing all segments. Total time: {acc_total_time_taken:.2f}s")
 
