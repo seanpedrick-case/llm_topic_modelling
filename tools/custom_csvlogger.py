@@ -106,7 +106,7 @@ class CSVLogger_custom(FlaggingCallback):
                 )
                 latest_num = int(re.findall(r"\d+", latest_file.stem)[0])
 
-                with open(latest_file, newline="", encoding="utf-8") as csvfile:
+                with open(latest_file, newline="", encoding="utf-8-sig") as csvfile:
                     reader = csv.reader(csvfile)
                     existing_headers = next(reader, None)
 
@@ -122,7 +122,7 @@ class CSVLogger_custom(FlaggingCallback):
 
         if not Path(self.dataset_filepath).exists():
             with open(
-                self.dataset_filepath, "w", newline="", encoding="utf-8"
+                self.dataset_filepath, "w", newline="", encoding="utf-8-sig"
             ) as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(utils.sanitize_list_for_csv(headers))
@@ -202,15 +202,12 @@ class CSVLogger_custom(FlaggingCallback):
 
         if save_to_csv:
             with self.lock:
-                with open(self.dataset_filepath, "a", newline="", encoding="utf-8") as csvfile:
+                with open(self.dataset_filepath, "a", newline="", encoding="utf-8-sig") as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow(utils.sanitize_list_for_csv(csv_data))
-                with open(self.dataset_filepath, encoding="utf-8") as csvfile:
+                with open(self.dataset_filepath, encoding="utf-8-sig") as csvfile:
                     line_count = len(list(csv.reader(csvfile))) - 1
 
-        
-        print("save_to_dynamodb:", save_to_dynamodb)
-        print("save_to_dynamodb == True:", save_to_dynamodb == True)
         if save_to_dynamodb == True:
             print("Saving to DynamoDB")
 
@@ -265,9 +262,6 @@ class CSVLogger_custom(FlaggingCallback):
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == 'ResourceNotFoundException':
                     
-                    #print(f"Creating DynamoDB table '{dynamodb_table_name}'...")
-                    #print("dynamodb_headers:", dynamodb_headers)
-                    
                     attribute_definitions = [
                         {'AttributeName': 'id', 'AttributeType': 'S'}  # Only define key attributes here
                     ]
@@ -279,7 +273,7 @@ class CSVLogger_custom(FlaggingCallback):
                         ],
                         AttributeDefinitions=attribute_definitions,
                         BillingMode='PAY_PER_REQUEST'
-)
+                    )
                     # Wait until the table exists
                     table.meta.client.get_waiter('table_exists').wait(TableName=dynamodb_table_name)
                     time.sleep(5)
@@ -288,7 +282,6 @@ class CSVLogger_custom(FlaggingCallback):
                     raise
 
             # Prepare the DynamoDB item to upload
-
             try:
                 item = {
                     'id': str(generated_id),  # UUID primary key
@@ -296,13 +289,8 @@ class CSVLogger_custom(FlaggingCallback):
                     'timestamp': timestamp,
                 }
 
-                #print("dynamodb_headers:", dynamodb_headers)
-                #print("csv_data:", csv_data)
-
                 # Map the headers to values
                 item.update({header: str(value) for header, value in zip(dynamodb_headers, csv_data)})
-
-                #print("item:", item)
 
                 table.put_item(Item=item)
 

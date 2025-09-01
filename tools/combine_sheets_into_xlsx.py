@@ -246,7 +246,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         #reference_table_csv_path = reference_table_csv_path[0]
         csv_files.append(reference_table_csv_path)
         sheet_names.append("Response level data")
-        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "H":100}
+        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "G":100, "H":100}
         wrap_text_columns["Response level data"] = ["C", "G"]        
     else:
         raise Exception("Could not find any reference files to put into Excel format")
@@ -306,7 +306,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         csv_files.append(original_data_csv_path)
 
     sheet_names.append("Original data")
-    column_widths["Original data"] = {"A": 20, "B": 20, "C": 100}
+    column_widths["Original data"] = {"A": 20, "B": 20, "C": 20}
     wrap_text_columns["Original data"] = ["C"]
 
     print("Creating intro page and text")

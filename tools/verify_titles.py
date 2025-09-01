@@ -11,7 +11,7 @@ from typing import List
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,add_existing_topics_system_prompt, add_existing_topics_prompt, initial_table_assistant_prefill, add_existing_topics_assistant_prefill
-from tools.helper_functions import put_columns_in_df, wrap_text, clean_column_name
+from tools.helper_functions import put_columns_in_df, wrap_text, clean_column_name, create_batch_file_path_details
 from tools.llm_funcs import load_model, construct_gemini_generative_model, call_llm_with_markdown_table_checks
 from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table,  convert_response_text_to_dataframe, ResponseObject
 from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_TOKENS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT
@@ -22,7 +22,7 @@ max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
 random_seed = LLM_SEED
 
-def write_llm_output_and_logs_verify(responses: List[ResponseObject],
+def write_llm_output_and_logs_verify(response_text: str,
                               whole_conversation: List[str],
                               whole_conversation_metadata: List[str],
                               file_name: str,
@@ -34,6 +34,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
                               log_files_output_paths: List[str],
                               existing_reference_df:pd.DataFrame,
                               existing_topics_df:pd.DataFrame,
+                              model_name_map:dict,
                               batch_size_number:int,
                               in_column:str,                              
                               first_run: bool = False,
@@ -42,7 +43,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     Writes the output of the large language model requests and logs to files.
 
     Parameters:
-    - responses (List[ResponseObject]): A list of ResponseObject instances containing the text and usage metadata of the responses.
+    - response_text (str): The text of the response from the model.
     - whole_conversation (List[str]): A list of strings representing the complete conversation including prompts and responses.
     - whole_conversation_metadata (List[str]): A list of strings representing metadata about the whole conversation.
     - file_name (str): The base part of the output file name.
@@ -54,10 +55,11 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     - log_files_output_paths (List[str]): A list of paths to the log files.
     - existing_reference_df (pd.DataFrame): The existing reference dataframe mapping response numbers to topics.
     - existing_topics_df (pd.DataFrame): The existing unique topics dataframe 
+    - model_name_map (dict): The dictionary that maps the model choice to the model name.
     - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
     - output_folder (str): A string indicating the folder to output to
     """
-    unique_topics_df_out_path = []
+    unique_topics_df_out_path = list()
     topic_table_out_path = "topic_table_error.csv"
     reference_table_out_path = "reference_table_error.csv"
     unique_topics_df_out_path = "unique_topic_table_error.csv"
@@ -85,7 +87,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     file_name = clean_column_name(file_name, max_length=30)    
 
     # Save outputs for each batch. If master file created, label file as master
-    batch_file_path_details = f"{file_name}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
+    batch_file_path_details = create_batch_file_path_details(file_name, model_name_map, model_choice_clean)
     row_number_string_start = f"Rows {start_row_reported} to {end_row}: "
 
     whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"
@@ -100,9 +102,9 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
     #log_files_output_paths.append(whole_conversation_path)
     log_files_output_paths.append(whole_conversation_path_meta)
     
-    if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
-    elif "choices" in responses[-1]: response_text =  responses[-1]["choices"][0]['text']
-    else: response_text =  responses[-1].text
+    # if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
+    # elif "choices" in responses[-1]: response_text =  responses[-1]['choices'][0]['message']['content'] #responses[-1]["choices"][0]['text']
+    # else: response_text =  responses[-1].text
 
     # Convert response text to a markdown table
     try:
@@ -116,7 +118,7 @@ def write_llm_output_and_logs_verify(responses: List[ResponseObject],
 
 
     # # Table to map references to topics
-    reference_data = []
+    reference_data = list()
 
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
@@ -220,9 +222,9 @@ def verify_titles(in_data_file,
               model_choice:str,
               candidate_topics: GradioFileData = None,
               latest_batch_completed:int=0,
-              out_message:List=[],
-              out_file_paths:List = [],
-              log_files_output_paths:List = [],
+              out_message:List=list(),
+              out_file_paths:List = list(),
+              log_files_output_paths:List = list(),
               first_loop_state:bool=False,
               whole_conversation_metadata_str:str="",
               initial_table_prompt:str=initial_table_prompt,
@@ -240,7 +242,7 @@ def verify_titles(in_data_file,
               produce_structures_summary_radio:str = "No",
               aws_access_key_textbox:str='',
               aws_secret_key_textbox:str='',
-              in_excel_sheets:List[str] = [],
+              in_excel_sheets:List[str] = list(),
               output_folder:str=OUTPUT_FOLDER,
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
@@ -294,14 +296,14 @@ def verify_titles(in_data_file,
     '''
 
     tic = time.perf_counter()
-    google_client = []
+    google_client = list()
     google_config = {}
     final_time = 0.0
-    whole_conversation_metadata = []
+    whole_conversation_metadata = list()
     is_error = False
     create_revised_general_topics = False
-    local_model = []
-    tokenizer = []
+    local_model = list()
+    tokenizer = list()
     zero_shot_topics_df = pd.DataFrame()
     #llama_system_prefix = "<|start_header_id|>system<|end_header_id|>\n" #"<start_of_turn>user\n"
     #llama_system_suffix = "<|eot_id|>" #"<end_of_turn>\n<start_of_turn>model\n"
@@ -340,8 +342,8 @@ def verify_titles(in_data_file,
         print("This is the first time through the loop, resetting latest_batch_completed to 0")
         if (latest_batch_completed == 999) | (latest_batch_completed == 0):
             latest_batch_completed = 0
-            out_message = []
-            out_file_paths = []
+            out_message = list()
+            out_file_paths = list()
             #print("model_choice_clean:", model_choice_clean)
 
             if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
@@ -363,7 +365,7 @@ def verify_titles(in_data_file,
             out_message = [out_message]
 
         if not out_file_paths:
-            out_file_paths = []
+            out_file_paths = list()
     
         
         if model_choice == "anthropic.claude-3-sonnet-20240229-v1:0" and file_data.shape[1] > 300:
@@ -392,7 +394,7 @@ def verify_titles(in_data_file,
             #log_files_output_paths.append(simplified_csv_table_path)
 
             # Conversation history
-            conversation_history = []
+            conversation_history = list()
 
             print("normalised_simple_markdown_table:", normalised_simple_markdown_table)
 
@@ -445,8 +447,8 @@ def verify_titles(in_data_file,
 
                     # print("master_summary_prompt_list:", summary_prompt_list[0])
 
-                    summary_conversation_history = []
-                    summary_whole_conversation = []
+                    summary_conversation_history = list()
+                    summary_whole_conversation = list()
 
                     # Process requests to large language model                    
                     responses, summary_conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
@@ -456,21 +458,27 @@ def verify_titles(in_data_file,
                     # print("responses:", responses[-1].text)
                     # print("Whole conversation metadata:", whole_conversation_metadata)
 
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs_verify(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, produce_structures_summary_radio=produce_structures_summary_radio, first_run=False)
+                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, new_topic_df, new_markdown_table, new_reference_df, new_unique_topics_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs_verify(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, model_name_map, batch_size, chosen_cols, produce_structures_summary_radio=produce_structures_summary_radio, first_run=False)
 
                     # Write final output to text file for logging purposes
                     try:
                         final_table_output_path = output_folder + master_batch_out_file_part + "_full_final_response_" + model_choice_clean + "_temp_" + str(temperature) + ".txt"
 
-                        if isinstance(responses[-1], ResponseObject):
-                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
-                        elif "choices" in responses[-1]:
-                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1]["choices"][0]['text'])
-                        else:
-                            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                        with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                            f.write(response_text)
+
+                        # if isinstance(responses[-1], ResponseObject):
+                        #     with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                        #         #f.write(responses[-1].text)
+                        #         f.write(response_text)
+                        # elif "choices" in responses[-1]:
+                        #     with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                        #         #f.write(responses[-1]["choices"][0]['text'])
+                        #         f.write(response_text)
+                        # else:
+                        #     with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                        #         #f.write(responses[-1].text)
+                        #         f.write(response_text)
 
                     except Exception as e:
                         print("Error in returning model response:", e)                    
@@ -547,15 +555,10 @@ def verify_titles(in_data_file,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
 
 
-                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_file_path_details, is_error =  write_llm_output_and_logs_verify(responses, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, first_run=True)
+                    topic_table_out_path, reference_table_out_path, unique_topics_df_out_path, topic_table_df, markdown_table, reference_df, new_unique_topics_df, batch_file_path_details, is_error =  write_llm_output_and_logs_verify(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_unique_topics_df, batch_size, chosen_cols, model_name_map=model_name_map, first_run=True)
 
                     # If error in table parsing, leave function
-                    if is_error == True:
-                        raise Exception("Error in output table parsing")
-                        # unique_table_df_display_table_markdown, new_topic_df, new_unique_topics_df, new_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths#, final_message_out
-                    
-                    
-                    #all_topic_tables_df.append(topic_table_df)
+                    if is_error == True: raise Exception("Error in output table parsing")
 
                     topic_table_df.to_csv(topic_table_out_path, index=None)
                     out_file_paths.append(topic_table_out_path)
@@ -564,13 +567,10 @@ def verify_titles(in_data_file,
                     out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
-
                     new_unique_topics_df = pd.concat([new_unique_topics_df, existing_unique_topics_df])
 
                     new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
-                    out_file_paths.append(unique_topics_df_out_path)
-                    
-                    #all_markdown_topic_tables.append(markdown_table)
+                    out_file_paths.append(unique_topics_df_out_path)                    
 
                     whole_conversation_metadata.append(whole_conversation_metadata_str)
                     whole_conversation_metadata_str = '. '.join(whole_conversation_metadata)
@@ -581,15 +581,18 @@ def verify_titles(in_data_file,
 
                         if isinstance(responses[-1], ResponseObject):
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                                #f.write(responses[-1].text)
+                                f.write(response_text)
                             unique_table_df_display_table_markdown = responses[-1].text
                         elif "choices" in responses[-1]:
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1]["choices"][0]['text'])
-                            unique_table_df_display_table_markdown =responses[-1]["choices"][0]['text']
+                                #f.write(responses[-1]["choices"][0]['text'])
+                                f.write(response_text)
+                            unique_table_df_display_table_markdown =responses[-1]["choices"][0]['message']['content'] #responses[-1]["choices"][0]['text']
                         else:
                             with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                                f.write(responses[-1].text)
+                                #f.write(responses[-1].text)
+                                f.write(response_text)
                             unique_table_df_display_table_markdown = responses[-1].text
 
                         log_files_output_paths.append(final_table_output_path)

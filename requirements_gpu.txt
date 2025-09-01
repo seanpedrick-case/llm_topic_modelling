@@ -1,5 +1,5 @@
 pandas==2.3.1
-gradio==5.42.0
+gradio==5.44.1
 transformers==4.55.2
 spaces==0.40.0
 boto3==1.40.11
@@ -8,7 +8,7 @@ openpyxl==3.1.5
 markdown==3.7
 tabulate==0.9.0
 lxml==5.3.0
-google-genai==1.30.0
+google-genai==1.32.0
 html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.13.0
@@ -17,7 +17,7 @@ python-dotenv==1.1.0
 # Torch and Llama CPP Python
 torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124 # Latest compatible with CUDA 12.4
 # For Linux:
-#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
 # For Windows:
 #llama-cpp-python==0.3.16 -C cmake.args="-DGGML_CUDA=on" --verbose
 # If above doesn't work for Windows, try looking at'windows_install_llama-cpp-python.txt'
