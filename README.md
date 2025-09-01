@@ -3,7 +3,7 @@ title: Large language model topic modelling
 emoji: 📝
 colorFrom: purple
 colorTo: yellow
-sdk: gradio
+sdk: docker
 app_file: app.py
 pinned: true
 license: agpl-3.0

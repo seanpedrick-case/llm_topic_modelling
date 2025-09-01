@@ -1,5 +1,5 @@
 pandas==2.3.1
-gradio==5.42.0
+gradio==5.44.1
 transformers==4.55.2
 spaces==0.40.0
 boto3==1.40.11
@@ -8,19 +8,19 @@ openpyxl==3.1.5
 markdown==3.7
 tabulate==0.9.0
 lxml==5.3.0
-google-genai==1.30.0
+google-genai==1.32.0
 html5lib==1.1
 beautifulsoup4==4.12.3
 rapidfuzz==3.13.0
 python-dotenv==1.1.0
 # Torch and Llama CPP Python
 # GPU
-torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124 # Latest compatible with CUDA 12.4
-https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl # Specify exact llama_cpp for cuda compatibility on Hugging Face
+#torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124 # Latest compatible with CUDA 12.4
+#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl # Specify exact llama_cpp for cuda compatibility on Hugging Face
 #
 # CPU only (for e.g. Hugging Face CPU instances): 
-# torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cpu
-# llama-cpp-python==0.3.16 # should work on local Linux systems, but will be extremely slow on Hugging Face and will most likely time out
+torch==2.7.1 --extra-index-url https://download.pytorch.org/whl/cpu
+llama-cpp-python==0.3.16 # should work on local Linux systems, but will be extremely slow on Hugging Face and will most likely time out
 # For Hugging Face can only specify the latest non-CUDA wheel for Python 3.10, currently only llama-cpp-python v0.3.2 that can only be used with Gemma 2 2b for local inference
 #https://github.com/abetlen/llama-cpp-#python/releases/download/v0.3.2/llama_cpp_python-0.3.2-cp310-cp310-linux_x86_64.whl
 
