@@ -80,14 +80,11 @@ def write_llm_output_and_logs_verify(response_text: str,
 
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
 
-    # Example usage
-    in_column_cleaned = clean_column_name(in_column, max_length=20)
-
     # Need to reduce output file names as full length files may be too long
-    file_name = clean_column_name(file_name, max_length=30)    
+    file_name = clean_column_name(file_name, max_length=20)    
 
     # Save outputs for each batch. If master file created, label file as master
-    batch_file_path_details = create_batch_file_path_details(file_name, model_name_map, model_choice_clean)
+    batch_file_path_details = create_batch_file_path_details(file_name)
     row_number_string_start = f"Rows {start_row_reported} to {end_row}: "
 
     whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_temp_" + str(temperature) + ".txt"

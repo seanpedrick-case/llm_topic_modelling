@@ -363,12 +363,17 @@ def write_llm_output_and_logs(response_text: str,
     whole_conversation_metadata_str = '\n'.join(whole_conversation_metadata)
     start_row_reported = start_row + 1
 
-    batch_file_path_details = create_batch_file_path_details(file_name, model_name_map, model_choice_clean)
+    print("model_choice_clean in write_llm_output_and_logs:", model_choice_clean)
+
+    batch_file_path_details = create_batch_file_path_details(file_name)
 
     # Need to reduce output file names as full length files may be too long
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     # in_column_cleaned = clean_column_name(in_column, max_length=20)    
-    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)    
+    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)   
+    # 
+
+    print("model_choice_clean_short in write_llm_output_and_logs:", model_choice_clean_short)
 
     # # Save outputs for each batch. If master file created, label file as master
     # batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
@@ -383,15 +388,6 @@ def write_llm_output_and_logs(response_text: str,
     with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f: f.write(whole_conversation_metadata_str)
 
     log_files_output_paths.append(whole_conversation_path_meta)
-    
-    # if isinstance(responses[-1], ResponseObject): response_text =  responses[-1].text
-    # elif "choices" in responses[-1]:
-    #     full_response_text = responses[-1]['choices'][0]['message']['content']
-    #     if "gpt-oss" in model_choice_clean:
-    #         response_text = full_response_text.split('<|start|>assistant<|channel|>final<|message|>')[1]
-    #     else:
-    #         response_text = full_response_text
-    # else: response_text =  responses[-1].text
 
     # Convert response text to a markdown table
     try:
@@ -422,7 +418,7 @@ def write_llm_output_and_logs(response_text: str,
     topic_with_response_df["Subtopic"] = topic_with_response_df["Subtopic"].astype(str).str.strip().str.lower().str.capitalize()
     topic_with_response_df["Sentiment"] = topic_with_response_df["Sentiment"].astype(str).str.strip().str.lower().str.capitalize()
     
-    topic_table_out_path = output_folder + batch_file_path_details + "_topic_table_" + model_choice_clean  + ".csv"
+    topic_table_out_path = output_folder + batch_file_path_details + "_topic_table_" + model_choice_clean_short  + ".csv"
 
     # Table to map references to topics
     reference_data = list()
@@ -431,7 +427,6 @@ def write_llm_output_and_logs(response_text: str,
 
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
-        #references = re.split(r',\s*|\s+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
         references = re.findall(r'\d+', str(row.iloc[3])) if pd.notna(row.iloc[3]) else []
         # If no numbers found in the Response References column, check the Summary column in case reference numbers were put there by mistake
         if not references:
@@ -456,8 +451,7 @@ def write_llm_output_and_logs(response_text: str,
         if not summary and (len(str(row.iloc[3])) > 30):
             summary = row.iloc[3]        
 
-        if produce_structures_summary_radio != "Yes":
-            summary = row_number_string_start + summary
+        if produce_structures_summary_radio != "Yes": summary = row_number_string_start + summary
 
         # Create a new entry for each reference number
         for ref in references:
@@ -515,7 +509,7 @@ def write_llm_output_and_logs(response_text: str,
     out_reference_df["Group"] = group_name
 
     # Save the new DataFrame to CSV
-    reference_table_out_path = output_folder + batch_file_path_details + "_reference_table_" + model_choice_clean + ".csv"    
+    reference_table_out_path = output_folder + batch_file_path_details + "_reference_table_" + model_choice_clean_short + ".csv"    
 
     # Table of all unique topics with descriptions
     new_topic_summary_df = topic_with_response_df[["General topic", "Subtopic", "Sentiment"]]
@@ -545,7 +539,7 @@ def write_llm_output_and_logs(response_text: str,
 
     out_topic_summary_df["Group"] = group_name
 
-    topic_summary_df_out_path = output_folder + batch_file_path_details + "_unique_topics_" + model_choice_clean + ".csv"
+    topic_summary_df_out_path = output_folder + batch_file_path_details + "_unique_topics_" + model_choice_clean_short + ".csv"
 
     return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
@@ -955,7 +949,7 @@ def extract_topics(in_data_file: GradioFileData,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error = write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
                     
                     # Write final output to text file for logging purposes
                     try:
@@ -1150,7 +1144,7 @@ def extract_topics(in_data_file: GradioFileData,
         # # Save outputs for each batch. If master file created, label file as master
         # file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
 
-        file_path_details = create_batch_file_path_details(file_name, model_name_map, model_choice_clean)
+        file_path_details = create_batch_file_path_details(file_name)
 
         # Create a pivoted reference table
         existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)        

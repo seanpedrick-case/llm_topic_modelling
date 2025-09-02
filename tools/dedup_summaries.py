@@ -523,6 +523,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     tic = time.perf_counter()
 
+    model_choice_clean = clean_column_name(model_name_map[model_choice]["short_name"], max_length=20, front_characters=False)
+
     if log_output_files is None: log_output_files = list()   
 
     # Check for data for summarisations
@@ -568,7 +570,6 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     if do_summaries == "Yes":
         
         bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
-        model_source = model_name_map[model_choice]["source"]
 
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
@@ -609,7 +610,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     if latest_summary_completed >= length_all_summaries:
         print("All summaries completed. Creating outputs.")        
 
-        batch_file_path_details = create_batch_file_path_details(reference_data_file_name, model_name_map, model_choice)
+        batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
 
         sampled_reference_table_df["Revised summary"] = summarised_outputs           
 
@@ -770,7 +771,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     # else:
     #     batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
 
-    batch_file_path_details = create_batch_file_path_details(reference_data_file_name, model_name_map, model_choice)
+    print("reference_data_file_name:", reference_data_file_name)
+
+    batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
 
     tic = time.perf_counter()
 
