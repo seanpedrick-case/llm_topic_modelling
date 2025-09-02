@@ -207,8 +207,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
                 llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config))    
 
         except Exception as e:
-            print("GPU load failed due to:", e)
-            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, **vars(cpu_config)) 
+            print("GPU load failed due to:", e, "Loading model in CPU mode")
+            # If fails, go to CPU mode
+            llama_model = Llama(model_path=model_path, **vars(cpu_config)) 
         
         print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
@@ -222,9 +223,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
         cpu_config.update_context(max_context_length)
 
         if speculative_decoding:
-            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config))
+            llama_model = Llama(model_path=model_path, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config))
         else:
-            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, **vars(cpu_config)) 
+            llama_model = Llama(model_path=model_path, **vars(cpu_config)) 
 
         print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
