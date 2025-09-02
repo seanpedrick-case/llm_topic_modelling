@@ -21,11 +21,6 @@ tokenizer = list() #[] # Define empty list for model functions to run
 from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, RUN_LOCAL_MODEL, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS
 from tools.prompts import initial_table_assistant_prefill
 
-if RUN_LOCAL_MODEL == "1":
-    print("Running local model - importing llama-cpp-python")
-    from llama_cpp import Llama
-    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
-
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
 else: SPECULATIVE_DECODING = False
 
@@ -225,6 +220,10 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     # Verify the device and cuda settings
     # Check if CUDA is enabled
     import torch
+    #if RUN_LOCAL_MODEL == "1":
+    #print("Running local model - importing llama-cpp-python")
+    from llama_cpp import Llama
+    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 
     torch.cuda.empty_cache()
     print("Is CUDA enabled? ", torch.cuda.is_available())
