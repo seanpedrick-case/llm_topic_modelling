@@ -4,8 +4,6 @@ import boto3
 import os
 from tools.config import RUN_AWS_FUNCTIONS, AWS_REGION, S3_LOG_BUCKET, AWS_ACCESS_KEY, AWS_SECRET_KEY, PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS
 
-print("S3_LOG_BUCKET:", S3_LOG_BUCKET)
-
 # Empty bucket name in case authentication fails
 bucket_name=S3_LOG_BUCKET
 

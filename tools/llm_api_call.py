@@ -302,8 +302,6 @@ def convert_response_text_to_dataframe(response_text:str, table_type:str = "Main
         out_df = pd.DataFrame()
 
     return out_df, is_error
-    
-    #print("out_df in convert function:", out_df)
 
 def write_llm_output_and_logs(response_text: str,
                               whole_conversation: List[str],
@@ -363,17 +361,13 @@ def write_llm_output_and_logs(response_text: str,
     whole_conversation_metadata_str = '\n'.join(whole_conversation_metadata)
     start_row_reported = start_row + 1
 
-    print("model_choice_clean in write_llm_output_and_logs:", model_choice_clean)
-
     batch_file_path_details = create_batch_file_path_details(file_name)
 
     # Need to reduce output file names as full length files may be too long
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     # in_column_cleaned = clean_column_name(in_column, max_length=20)    
-    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)   
-    # 
+    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)
 
-    print("model_choice_clean_short in write_llm_output_and_logs:", model_choice_clean_short)
 
     # # Save outputs for each batch. If master file created, label file as master
     # batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
@@ -547,6 +541,36 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                                  force_zero_shot_radio:str="No",
                                  create_revised_general_topics:bool=False,
                                  max_topic_no:int=120):
+    """
+    Preprocesses a DataFrame of zero-shot topics, cleaning and formatting them
+    for use with a large language model. It handles different column configurations
+    (e.g., only subtopics, general topics and subtopics, or subtopics with descriptions)
+    and enforces a maximum number of topics.
+
+    Args:
+        zero_shot_topics (pd.DataFrame): A DataFrame containing the initial zero-shot topics.
+                                         Expected columns can vary, but typically include
+                                         "General topic", "Subtopic", and/or "Description".
+        force_zero_shot_radio (str, optional): A string indicating whether to force
+                                               the use of zero-shot topics. Defaults to "No".
+                                               (Currently not used in the function logic, but kept for signature consistency).
+        create_revised_general_topics (bool, optional): A boolean indicating whether to
+                                                        create revised general topics. Defaults to False.
+                                                        (Currently not used in the function logic, but kept for signature consistency).
+        max_topic_no (int, optional): The maximum number of topics allowed to fit within
+                                      LLM context limits. If `zero_shot_topics` exceeds this,
+                                      it will be truncated. Defaults to 120.
+
+    Returns:
+        tuple: A tuple containing:
+            - zero_shot_topics_gen_topics_list (list): A list of cleaned general topics.
+            - zero_shot_topics_subtopics_list (list): A list of cleaned subtopics.
+            - zero_shot_topics_description_list (list): A list of cleaned topic descriptions.
+    """
+
+    zero_shot_topics_gen_topics_list = list()
+    zero_shot_topics_subtopics_list = list()
+    zero_shot_topics_description_list = list()
 
     # Max 120 topics allowed
     if zero_shot_topics.shape[0] > max_topic_no:
@@ -651,7 +675,7 @@ def extract_topics(in_data_file: GradioFileData,
               add_existing_topics_system_prompt:str=add_existing_topics_system_prompt,
               add_existing_topics_prompt:str=add_existing_topics_prompt,
               number_of_prompts_used:int=1,
-              batch_size:int=50,
+              batch_size:int=5,
               context_textbox:str="",
               time_taken:float = 0,
               sentiment_checkbox:str = "Negative, Neutral, or Positive",
@@ -782,7 +806,7 @@ def extract_topics(in_data_file: GradioFileData,
             out_file_paths = list()
             final_time = 0
 
-            if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+            if (model_source == "Local") & (RUN_LOCAL_MODEL == "1"):
                 progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
                 local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
 
@@ -1204,20 +1228,13 @@ def extract_topics(in_data_file: GradioFileData,
         # The topic table that can be modified does not need the summary column
         modifiable_topic_summary_df = final_out_topic_summary_df.drop("Summary", axis=1)
 
-        print("latest_batch_completed at end of batch iterations to return is", latest_batch_completed)
-
-        print("whole_conversation_metadata_str at end of batch iterations to return is", whole_conversation_metadata_str)
-
         return unique_table_df_display_table_markdown, existing_topics_table, final_out_topic_summary_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, modifiable_topic_summary_df, final_out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df
 
-    print("whole_conversation_metadata_str at end of batch iterations to return is", whole_conversation_metadata_str)
-
-    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df # gr.Dataframe(value=modifiable_topic_summary_df, headers=None, col_count=(modifiable_topic_summary_df.shape[1], "fixed"), row_count = (modifiable_topic_summary_df.shape[0], "fixed"), visible=True, type="pandas"),
+    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df 
 
 def wrapper_extract_topics_per_column_value(
     grouping_col: str,
-    # Parameters for extract_topics that the wrapper will manage/modify significantly
-    in_data_file: Any, # Pass through, extract_topics might need it if file_data is empty initially
+    in_data_file: Any,
     file_data: pd.DataFrame,
     initial_existing_topics_table: pd.DataFrame,
     initial_existing_reference_df: pd.DataFrame,

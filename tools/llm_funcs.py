@@ -1,4 +1,4 @@
-import torch.cuda
+
 import os
 import re
 import time
@@ -13,8 +13,6 @@ from google.genai import types
 import gradio as gr
 from gradio import Progress
 
-torch.cuda.empty_cache()
-
 model_type = None # global variable setup
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
 model = list() # Define empty list for model functions to run
@@ -27,45 +25,8 @@ if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True
 else: SPECULATIVE_DECODING = False
 
 if isinstance(NUM_PRED_TOKENS, str): NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
-else: NUM_PRED_TOKENS = NUM_PRED_TOKENS
-
-# Both models are loaded on app initialisation so that users don't have to wait for the models to be downloaded
-# Check for torch cuda
-print("Is CUDA enabled? ", torch.cuda.is_available())
-print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
-if torch.cuda.is_available():
-    torch_device = "cuda"
-    gpu_layers = int(LLM_MAX_GPU_LAYERS)
-    print("CUDA version:", torch.version.cuda)
-    try:
-        os.system("nvidia-smi")
-    except Exception as e:
-        print("Could not print nvidia-smi settings due to:", e)
-else: 
-    torch_device =  "cpu"
-    gpu_layers = 0
-
-print("Running on device:", torch_device)
-print("GPU layers assigned to cuda:", gpu_layers)
-
-if RUN_LOCAL_MODEL == "1":
-    print("Running local model - importing llama-cpp-python")
-    from llama_cpp import Llama
-    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
-
-max_tokens = MAX_TOKENS
-timeout_wait = TIMEOUT_WAIT
-number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
-max_time_for_loop = MAX_TIME_FOR_LOOP
-batch_size_default = BATCH_SIZE_DEFAULT
-deduplication_threshold = DEDUPLICATION_THRESHOLD
-max_comment_character_length = MAX_COMMENT_CHARS
-
-
-if not LLM_THREADS:
-    threads = torch.get_num_threads()
-else: threads = LLM_THREADS
-print("CPU threads:", threads)
+if isinstance(LLM_MAX_GPU_LAYERS, str): LLM_MAX_GPU_LAYERS = int(LLM_MAX_GPU_LAYERS)
+if isinstance(LLM_THREADS, str): LLM_THREADS = int(LLM_THREADS)
 
 if LLM_RESET == 'True': reset = True
 else: reset = False
@@ -75,6 +36,14 @@ else: stream = False
 
 if LLM_SAMPLE == 'True': sample = True
 else: sample = False
+
+max_tokens = MAX_TOKENS
+timeout_wait = TIMEOUT_WAIT
+number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
+max_time_for_loop = MAX_TIME_FOR_LOOP
+batch_size_default = BATCH_SIZE_DEFAULT
+deduplication_threshold = DEDUPLICATION_THRESHOLD
+max_comment_character_length = MAX_COMMENT_CHARS
 
 temperature = LLM_TEMPERATURE
 top_k = LLM_TOP_K
@@ -86,11 +55,43 @@ max_new_tokens: int = LLM_MAX_NEW_TOKENS
 seed: int = LLM_SEED
 reset: bool = reset
 stream: bool = stream
-threads: int = threads
 batch_size:int = LLM_BATCH_SIZE
 context_length:int = LLM_CONTEXT_LENGTH
 sample = LLM_SAMPLE
 speculative_decoding = SPECULATIVE_DECODING
+if LLM_MAX_GPU_LAYERS != 0:
+    gpu_layers = int(LLM_MAX_GPU_LAYERS)
+    torch_device =  "cuda"
+else:
+    gpu_layers = 0
+    torch_device =  "cpu"
+
+if not LLM_THREADS: threads = 1
+else: threads = LLM_THREADS
+
+# Check if CUDA is enabled
+# torch.cuda.empty_cache()
+# print("Is CUDA enabled? ", torch.cuda.is_available())
+# print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
+# if torch.cuda.is_available():
+#     torch_device = "cuda"
+#     gpu_layers = int(LLM_MAX_GPU_LAYERS)
+#     print("CUDA version:", torch.version.cuda)
+#     #try:
+#     #    os.system("nvidia-smi")
+#     #except Exception as e:
+#     #    print("Could not print nvidia-smi settings due to:", e)
+# else: 
+#     torch_device =  "cpu"
+#     gpu_layers = 0
+
+# print("Running on device:", torch_device)
+# print("GPU layers assigned to cuda:", gpu_layers)
+
+# if not LLM_THREADS:
+#     threads = torch.get_num_threads()
+# else: threads = LLM_THREADS
+# print("CPU threads:", threads)
 
 class llama_cpp_init_config_gpu:
     def __init__(self,
@@ -183,15 +184,69 @@ def get_model_path(repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model
         raise Warning("Error loading model:", e)
         #return None
     
-
-def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_layers, max_context_length:int=context_length, gpu_config:llama_cpp_init_config_gpu=gpu_config, cpu_config:llama_cpp_init_config_cpu=cpu_config, torch_device:str=torch_device, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER):
+def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
+    gpu_layers:int=gpu_layers,
+    max_context_length:int=context_length,
+    gpu_config:llama_cpp_init_config_gpu=gpu_config,
+    cpu_config:llama_cpp_init_config_cpu=cpu_config,
+    torch_device:str=torch_device,
+    repo_id=LOCAL_REPO_ID,
+    model_filename=LOCAL_MODEL_FILE,
+    model_dir=LOCAL_MODEL_FOLDER):
     '''
-    Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub. 
+    Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub.
+
+    Args:
+        local_model_type (str): The type of local model to load (e.g., "llama-cpp").
+        gpu_layers (int): The number of GPU layers to offload to the GPU.
+        max_context_length (int): The maximum context length for the model.
+        gpu_config (llama_cpp_init_config_gpu): Configuration object for GPU-specific Llama.cpp parameters.
+        cpu_config (llama_cpp_init_config_cpu): Configuration object for CPU-specific Llama.cpp parameters.
+        torch_device (str): The device to load the model on ("cuda" for GPU, "cpu" for CPU).
+        repo_id (str): The Hugging Face repository ID where the model is located.
+        model_filename (str): The specific filename of the model to download from the repository.
+        model_dir (str): The local directory where the model will be stored or downloaded.
+
+    Returns:
+        tuple: A tuple containing:
+            - llama_model (Llama): The loaded Llama.cpp model instance.
+            - tokenizer (list): An empty list (tokenizer is not used with Llama.cpp directly in this setup).
     '''
     print("Loading model ", local_model_type)
     model_path = get_model_path(repo_id=repo_id, model_filename=model_filename, model_dir=model_dir)  
 
-    print("model_path:", model_path)    
+    #print("model_path:", model_path)
+
+    # Verify the device and cuda settings
+    # Check if CUDA is enabled
+    import torch
+    #if RUN_LOCAL_MODEL == "1":
+    #print("Running local model - importing llama-cpp-python")
+    from llama_cpp import Llama
+    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
+
+    torch.cuda.empty_cache()
+    print("Is CUDA enabled? ", torch.cuda.is_available())
+    print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
+    if torch.cuda.is_available():
+        torch_device = "cuda"
+        gpu_layers = int(LLM_MAX_GPU_LAYERS)
+        print("CUDA version:", torch.version.cuda)
+        #try:
+        #    os.system("nvidia-smi")
+        #except Exception as e:
+        #    print("Could not print nvidia-smi settings due to:", e)
+    else: 
+        torch_device =  "cpu"
+        gpu_layers = 0
+
+    print("Running on device:", torch_device)
+    print("GPU layers assigned to cuda:", gpu_layers)
+
+    if not LLM_THREADS:
+        threads = torch.get_num_threads()
+    else: threads = LLM_THREADS
+    print("CPU threads:", threads)
 
     # GPU mode    
     if torch_device == "cuda":

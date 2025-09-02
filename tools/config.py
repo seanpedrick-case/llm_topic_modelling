@@ -228,8 +228,8 @@ if RUN_GEMINI_MODELS == "1":
     model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
     model_source.extend(["Gemini", "Gemini", "Gemini"])
 
-print("model_short_names:", model_short_names)
-print("model_full_names:", model_full_names)
+#print("model_short_names:", model_short_names)
+#print("model_full_names:", model_full_names)
 
 model_name_map = {
     full: {"short_name": short, "source": source}
@@ -283,11 +283,6 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_REPO_ID = GPT_OSS_REPO_ID
     LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
-
-    print("CHOSEN_LOCAL_MODEL_TYPE:", CHOSEN_LOCAL_MODEL_TYPE)
-    print("LOCAL_REPO_ID:", LOCAL_REPO_ID)
-    print("LOCAL_MODEL_FILE:", LOCAL_MODEL_FILE)
-    print("LOCAL_MODEL_FOLDER:", LOCAL_MODEL_FOLDER)
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))

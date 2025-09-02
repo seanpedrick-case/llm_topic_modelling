@@ -12,7 +12,7 @@ from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, verify_titles_prompt, verify_titles_system_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
 from tools.verify_titles import verify_titles
-from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, model_name_map, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS
+from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, model_name_map, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER
 
 def ensure_folder_exists(output_folder:str):
     """Checks if the specified folder exists, creates it if not."""   
@@ -22,7 +22,8 @@ def ensure_folder_exists(output_folder:str):
         os.makedirs(output_folder, exist_ok=True)
         print(f"Created the {output_folder} folder.")
     else:
-        print(f"The {output_folder} folder already exists.")
+        pass
+            #print(f"The {output_folder} folder already exists.")
 
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
@@ -79,7 +80,9 @@ with app:
     missing_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="missing_df_state", visible=False, type="pandas")
 
     master_modify_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_modify_unique_topics_df_state", visible=False, type="pandas")
-    master_modify_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_modify_reference_df_state", visible=False, type="pandas")    
+    master_modify_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_modify_reference_df_state", visible=False, type="pandas")   
+
+    conversation_metadata_textbox_placeholder = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8, visible=False) 
  
     session_hash_state = gr.Textbox(visible=False, value=HOST_NAME)
     output_folder_state = gr.Textbox(visible=False, value=OUTPUT_FOLDER)
@@ -90,14 +93,22 @@ with app:
     s3_log_bucket_name = gr.Textbox(visible=False, value=S3_LOG_BUCKET)
 
     # Logging state
-    log_file_name = 'log.csv'
+    # log_file_name = 'log.csv'
 
-    access_logs_state = gr.Textbox(ACCESS_LOGS_FOLDER + log_file_name, visible=False)
-    access_s3_logs_loc_state = gr.Textbox(ACCESS_LOGS_FOLDER, visible=False)
-    usage_logs_state = gr.Textbox(USAGE_LOGS_FOLDER + log_file_name, visible=False)
-    usage_s3_logs_loc_state = gr.Textbox(USAGE_LOGS_FOLDER, visible=False)
-    feedback_logs_state = gr.Textbox(FEEDBACK_LOGS_FOLDER + log_file_name, visible=False)
-    feedback_s3_logs_loc_state = gr.Textbox(FEEDBACK_LOGS_FOLDER, visible=False)
+    # access_logs_state = gr.Textbox(ACCESS_LOGS_FOLDER + log_file_name, visible=False)
+    # access_s3_logs_loc_state = gr.Textbox(ACCESS_LOGS_FOLDER, visible=False)
+    # usage_logs_state = gr.Textbox(USAGE_LOGS_FOLDER + log_file_name, visible=False)
+    # usage_s3_logs_loc_state = gr.Textbox(USAGE_LOGS_FOLDER, visible=False)
+    # feedback_logs_state = gr.Textbox(FEEDBACK_LOGS_FOLDER + log_file_name, visible=False)
+    # feedback_s3_logs_loc_state = gr.Textbox(FEEDBACK_LOGS_FOLDER, visible=False)
+
+    # Logging variables
+    access_logs_state = gr.Textbox(label= "access_logs_state", value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME, visible=False)
+    access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible=False)
+    feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME, visible=False)
+    feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible=False)
+    usage_logs_state = gr.Textbox(label= "usage_logs_state", value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME, visible=False)
+    usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible=False)
 
     input_tokens_num = gr.Textbox('0', visible=False, label="Total input tokens")
     output_tokens_num = gr.Textbox('0', visible=False, label="Total output tokens")
@@ -135,22 +146,21 @@ with app:
 
     gr.Markdown("""# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, a Gemma model if local, Gemini Flash/Pro, or Claude 3 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify). 
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see config.py), Gemini 2.5, or Claude 3 Haiku/Claude Sonnet 3.7 through AWS Bedrock if running on AWS). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
     
     Instructions on use can be found in the README.md file. Try it out with this [dummy development consultation dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation), which you can also try with [zero-shot topics](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/blob/main/example_zero_shot.csv), or this [dummy case notes dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_case_notes).
 
-    You can use an AWS Bedrock model (Claude 3, paid), or Gemini (a free API, but with strict limits for the Pro model). The use of Gemini models requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information).
+    You can use an AWS Bedrock model (paid), or Gemini (a free API for Flash). The use of Gemini requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information). 
 
-    NOTE: that **API calls to Gemini are not considered secure**, so please only submit redacted, non-sensitive tabular files to this source. Also, large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
+    NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
     
     with gr.Tab(label="Extract topics"):
-        gr.Markdown("""### Choose a tabular data file (xlsx or csv) of open text to extract topics from.""")
+        gr.Markdown("""### Choose a tabular data file (xlsx, csv, parquet) of open text to extract topics from.""")
         with gr.Row():
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
 
-
         with gr.Accordion("Upload xlsx or csv file", open = True):
-            in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
         
         in_excel_sheets = gr.Dropdown(choices=[""], multiselect = False, label="Select the Excel sheet of interest.", visible=False, allow_custom_value=True)
         in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
@@ -180,7 +190,10 @@ with app:
 
         extract_topics_btn = gr.Button("Extract topics", variant="primary")
         
-        topic_extraction_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output files")
+        with gr.Row():
+            topic_extraction_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output files", scale=3, interactive=False)
+            topic_extraction_output_files_xlsx = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx summary file", scale=1, interactive=False)
+
         display_topic_table_markdown = gr.Markdown(value="### Language model response will appear here", show_copy_button=True)        
         latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
         # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
@@ -199,7 +212,7 @@ with app:
         gr.Markdown("""Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to modify topics, deduplicate topics, or summarise the outputs. If you want pivot table outputs, please load in the original data file along with the selected open text column on the first tab before deduplicating or summarising.""")
 
         with gr.Accordion("Modify existing topics", open = False):
-            modification_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to modify topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            modification_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to modify topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
             modifiable_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=(4, "fixed"), row_count = (1, "fixed"), visible=True, type="pandas")
 
@@ -207,7 +220,7 @@ with app:
 
         with gr.Accordion("Deduplicate topics - upload reference data file and unique data files", open = True):            
             ### DEDUPLICATION
-            deduplication_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to deduplicate topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            deduplication_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to deduplicate topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
             deduplication_input_files_status = gr.Textbox(value = "", label="Previous file input", visible=False)
 
             with gr.Row():
@@ -218,48 +231,55 @@ with app:
             deduplicate_previous_data_btn = gr.Button("Deduplicate topics", variant="primary")
 
             ### SUMMARISATION
-            summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
             summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt])
             
             summarise_previous_data_btn = gr.Button("Summarise topics", variant="primary")
-            summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False)
+            with gr.Row():
+                summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False, scale=3)
+                summary_output_files_xlsx = gr.File(height=FILE_INPUT_HEIGHT, label="xlsx file summary", interactive=False, scale=1)
+
             summarised_output_markdown = gr.Markdown(value="### Summarised table will appear here", show_copy_button=True)
 
     with gr.Tab(label="Create overall summary"):
         gr.Markdown("""### Create an overall summary from an existing topic summary table.""")
 
         ### SUMMARISATION
-        overall_summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload a '...unique_topic' file to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+        overall_summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload a '...unique_topic' file to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
         overall_summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt], visible=False) # This is currently an invisible placeholder in case in future I want to add in overall summarisation customisation
         
         overall_summarise_previous_data_btn = gr.Button("Summarise table", variant="primary")
-        overall_summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False)
+
+        with gr.Row():
+            overall_summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False, scale=3)
+            overall_summary_output_files_xlsx = gr.File(height=FILE_INPUT_HEIGHT, label="xlsx file summary", interactive=False, scale=1)
+        
         overall_summarised_output_markdown = gr.HTML(value="### Overall summary will appear here")    
     
-    with gr.Tab(label="Topic table viewer"):
+    with gr.Tab(label="Topic table viewer", visible=False):
         gr.Markdown("""### View a 'unique_topic_table' csv file in markdown format.""")
     
-        in_view_table = gr.File(height=FILE_INPUT_HEIGHT, label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet', '.csv.gz'])
+        in_view_table = gr.File(height=FILE_INPUT_HEIGHT, label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet'])
         view_table_markdown = gr.Markdown(value = "", label="View table", show_copy_button=True)
 
-    with gr.Tab(label="Continue unfinished topic extraction"):
+    with gr.Tab(label="Continue unfinished topic extraction", visible=False):
         gr.Markdown("""### Load in output files from a previous topic extraction process and continue topic extraction with new data.""")
 
         with gr.Accordion("Upload reference data file and unique data files", open = True):
-            in_previous_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose output csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            in_previous_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose output csv files", file_count= "multiple", file_types=['.csv'])
             in_previous_data_files_status = gr.Textbox(value = "", label="Previous file input")
             continue_previous_data_files_btn = gr.Button(value="Continue previous topic extraction", variant="primary")
 
-    with gr.Tab(label="Verify descriptions"):
+    with gr.Tab(label="Verify descriptions", visible=False):
         gr.Markdown("""### Choose a tabular data file (xlsx or csv) with titles and original text to verify descriptions for.""")
         with gr.Row():
             verify_model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
             verify_in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
-            verify_in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet', '.csv.gz'])
+            verify_in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
         
         verify_in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet"], multiselect = False, label="Select the Excel sheet.", visible=False, allow_custom_value=True)
         verify_in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text columns that have a response and a title/description. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
@@ -271,14 +291,26 @@ with app:
 
         verify_modification_input_files_placeholder = gr.File(height=FILE_INPUT_HEIGHT, label="Placeholder for files to avoid errors", visible=False)
 
-    with gr.Tab(label="Topic extraction settings"):
+    with gr.Tab(label="LLM and topic extraction settings"):
         gr.Markdown("""Define settings that affect large language model output.""")
         with gr.Accordion("Settings for LLM generation", open = True):
             temperature_slide = gr.Slider(minimum=0.1, maximum=1.0, value=0.1, label="Choose LLM temperature setting")
             batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query", value = BATCH_SIZE_DEFAULT, precision=0, minimum=1, maximum=100)
-            random_seed = gr.Number(value=LLM_SEED, label="Random seed for LLM generation", visible=False)            
+            random_seed = gr.Number(value=LLM_SEED, label="Random seed for LLM generation", visible=False)
 
-        with gr.Accordion("Prompt settings", open = False):
+        with gr.Accordion("AWS API keys", open = False):
+            with gr.Row():
+                aws_access_key_textbox = gr.Textbox(label="AWS access key", interactive=False, lines=1, type="password")
+                aws_secret_key_textbox = gr.Textbox(label="AWS secret key", interactive=False, lines=1, type="password")
+
+        with gr.Accordion("Gemini API keys", open = False):
+            google_api_key_textbox = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
+
+        with gr.Accordion("Log outputs", open = False):
+            log_files_output = gr.File(height=FILE_INPUT_HEIGHT, label="Log file output", interactive=False)
+            conversation_metadata_textbox = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8)
+
+        with gr.Accordion("Prompt settings", open = False, visible=False):
             number_of_prompts = gr.Number(value=1, label="Number of prompts to send to LLM in sequence", minimum=1, maximum=3, visible=False)
             system_prompt_textbox = gr.Textbox(label="Initial system prompt", lines = 4, value = system_prompt)
             initial_table_prompt_textbox = gr.Textbox(label = "Initial topics prompt", lines = 8, value = initial_table_prompt)
@@ -286,8 +318,8 @@ with app:
             prompt_3_textbox = gr.Textbox(label = "Prompt 3", lines = 8, value = prompt3, visible=False)
             add_to_existing_topics_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = add_existing_topics_system_prompt)
             add_to_existing_topics_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = add_existing_topics_prompt)
-            verify_titles_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = verify_titles_system_prompt)
-            verify_titles_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = verify_titles_prompt)
+            verify_titles_system_prompt_textbox = gr.Textbox(label="Verify descriptions system prompt", lines = 4, value = verify_titles_system_prompt, visible=False)
+            verify_titles_prompt_textbox = gr.Textbox(label = "Verify descriptions prompt", lines = 8, value = verify_titles_prompt, visible=False)
 
         with gr.Accordion("Join additional columns to reference file outputs", open = False):
             join_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
@@ -296,20 +328,9 @@ with app:
                 join_cols_btn = gr.Button("Join columns to reference output", variant="primary")
             out_join_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output joined reference files will go here.")
 
-        with gr.Accordion("Export output files to xlsx format", open = False):
+        with gr.Accordion("Export output files to xlsx format", open = False, visible=False):
             export_xlsx_btn = gr.Button("Export output files to xlsx format", variant="primary")
-            out_xlsx_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx files will go here.")
-
-        with gr.Accordion("Logging outputs", open = False):
-            log_files_output = gr.File(height=FILE_INPUT_HEIGHT, label="Log file output", interactive=False)
-            conversation_metadata_textbox = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", interactive=False, lines=8)
-
-        with gr.Accordion("Enter AWS API keys", open = False):
-            aws_access_key_textbox = gr.Textbox(label="AWS access key", interactive=False, lines=1, type="password")
-            aws_secret_key_textbox = gr.Textbox(label="AWS secret key", interactive=False, lines=1, type="password")
-
-        with gr.Accordion("Enter Gemini API keys", open = False):
-            google_api_key_textbox = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
+            out_xlsx_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx files will go here.")        
 
         # Invisible text box to hold the session hash/username just for logging purposes
         session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible=False) 
@@ -400,13 +421,14 @@ with app:
                 input_tokens_num,
                 output_tokens_num,
                 number_of_calls_num],
-                api_name="extract_topics")
+                api_name="extract_topics").\
+                success(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[topic_extraction_output_files_xlsx])
 
     ###
     # DEDUPLICATION AND SUMMARISATION FUNCTIONS
     ###
     # If you upload data into the deduplication input box, the modifiable topic dataframe box is updated
-    modification_input_files.change(fn=load_in_previous_data_files, inputs=[modification_input_files, modified_unique_table_change_bool], outputs=[modifiable_unique_topics_df_state, master_modify_reference_df_state, master_modify_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, text_output_modify_file_list_state])
+    modification_input_files.upload(fn=load_in_previous_data_files, inputs=[modification_input_files, modified_unique_table_change_bool], outputs=[modifiable_unique_topics_df_state, master_modify_reference_df_state, master_modify_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, text_output_modify_file_list_state])
 
     # Modify output table with custom topic names
     save_modified_files_button.click(fn=modify_existing_output_tables, inputs=[master_modify_unique_topics_df_state, modifiable_unique_topics_df_state, master_modify_reference_df_state, text_output_modify_file_list_state, output_folder_state], outputs=[master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, deduplication_input_files, summarisation_input_files, working_data_file_name_textbox, unique_topics_table_file_name_textbox, summarised_output_markdown])
@@ -420,14 +442,14 @@ with app:
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
         success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
             success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
-                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], api_name="summarise_topics")
-
-    # latest_summary_completed_num.change(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num], scroll_to_output=True)
+                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], api_name="summarise_topics").\
+                success(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_revised_summaries_state, master_unique_topics_df_revised_summaries_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[summary_output_files_xlsx])
 
     # SUMMARISE WHOLE TABLE PAGE
     overall_summarise_previous_data_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
             success(load_in_previous_data_files, inputs=[overall_summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="overall_summary")
+            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="overall_summary").\
+            success(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[overall_summary_output_files_xlsx])
 
     ###
     # CONTINUE PREVIOUS TOPIC EXTRACTION PAGE
@@ -499,8 +521,7 @@ with app:
 
     # Log usage when making a query
     usage_callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
-    usage_callback.setup([session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num,
-                output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], USAGE_LOGS_FOLDER)
+    usage_callback.setup([session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], USAGE_LOGS_FOLDER)
 
     number_of_calls_num.change(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
         success(fn = upload_file_to_s3, inputs=[usage_logs_state, usage_s3_logs_loc_state, s3_log_bucket_name, aws_access_key_textbox, aws_secret_key_textbox], outputs=[s3_logs_output_textbox])
