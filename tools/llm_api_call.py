@@ -361,17 +361,13 @@ def write_llm_output_and_logs(response_text: str,
     whole_conversation_metadata_str = '\n'.join(whole_conversation_metadata)
     start_row_reported = start_row + 1
 
-    print("model_choice_clean in write_llm_output_and_logs:", model_choice_clean)
-
     batch_file_path_details = create_batch_file_path_details(file_name)
 
     # Need to reduce output file names as full length files may be too long
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     # in_column_cleaned = clean_column_name(in_column, max_length=20)    
-    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)   
-    # 
+    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)
 
-    print("model_choice_clean_short in write_llm_output_and_logs:", model_choice_clean_short)
 
     # # Save outputs for each batch. If master file created, label file as master
     # batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"

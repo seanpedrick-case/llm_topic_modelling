@@ -284,11 +284,6 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
-    print("CHOSEN_LOCAL_MODEL_TYPE:", CHOSEN_LOCAL_MODEL_TYPE)
-    print("LOCAL_REPO_ID:", LOCAL_REPO_ID)
-    print("LOCAL_MODEL_FILE:", LOCAL_MODEL_FILE)
-    print("LOCAL_MODEL_FOLDER:", LOCAL_MODEL_FOLDER)
-
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
 LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','96')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune

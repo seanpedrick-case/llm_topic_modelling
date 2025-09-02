@@ -22,7 +22,8 @@ def ensure_folder_exists(output_folder:str):
         os.makedirs(output_folder, exist_ok=True)
         print(f"Created the {output_folder} folder.")
     else:
-        print(f"The {output_folder} folder already exists.")
+        pass
+            #print(f"The {output_folder} folder already exists.")
 
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
