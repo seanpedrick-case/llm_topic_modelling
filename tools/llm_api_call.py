@@ -914,13 +914,13 @@ def extract_topics(in_data_file: GradioFileData,
                         formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
                                                                                     topics=unique_topics_markdown)
                     
-                    # if "gemma" in model_choice:
-                    #     formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
-                    #     full_prompt = formatted_summary_prompt
-                    # else:
-                    #     full_prompt = formatted_system_prompt + formatted_summary_prompt
+                    if "gemma" in model_choice:
+                        formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
+                        full_prompt = formatted_summary_prompt
+                    else:
+                        full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
 
-                    #  
+                     
 
                     # Save outputs for each batch. If master file created, label file as master
                     batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"        
