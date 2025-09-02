@@ -213,6 +213,13 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
     out_message = ""
     latest_batch = 0
 
+    if not file_paths_partial_output:
+        out_message = out_message + " No reference or unique data table provided."
+        return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name, unique_file_name
+
+    if not isinstance(file_paths_partial_output, list):
+        file_paths_partial_output = [file_paths_partial_output]
+
     for file in file_paths_partial_output:
 
         if isinstance(file, gr.FileData):

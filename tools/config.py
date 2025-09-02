@@ -228,8 +228,8 @@ if RUN_GEMINI_MODELS == "1":
     model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
     model_source.extend(["Gemini", "Gemini", "Gemini"])
 
-print("model_short_names:", model_short_names)
-print("model_full_names:", model_full_names)
+#print("model_short_names:", model_short_names)
+#print("model_full_names:", model_full_names)
 
 model_name_map = {
     full: {"short_name": short, "source": source}

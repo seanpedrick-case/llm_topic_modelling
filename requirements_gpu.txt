@@ -1,7 +1,7 @@
 pandas==2.3.1
 gradio==5.44.1
 transformers==4.55.2
-spaces==0.40.0
+spaces==0.40.1
 boto3==1.40.11
 pyarrow==21.0.0
 openpyxl==3.1.5
