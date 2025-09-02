@@ -23,7 +23,7 @@ ENV CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
 COPY requirements_aws.txt .
 
 RUN pip install --no-cache-dir --target=/install torch==2.7.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
-&& pip install --no-cache-dir --target=/install --verbose llama-cpp-python==0.3.16 \
+&& pip install --no-cache-dir --target=/install https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl \
 && pip install --no-cache-dir --target=/install -r requirements_aws.txt
 
 RUN rm requirements_aws.txt
