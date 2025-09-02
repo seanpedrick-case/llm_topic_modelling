@@ -290,10 +290,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
     output = model.create_chat_completion(
         messages=[
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": formatted_string
-            }
+            {"role": "user",  "content": formatted_string}
         ],
         temperature=temperature, 
         top_k=top_k, 
