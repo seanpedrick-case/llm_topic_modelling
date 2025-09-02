@@ -211,7 +211,7 @@ model_full_names = list()
 model_short_names = list()
 model_source = list()
 
-CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "gpt-oss-20b") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
+CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 3 4B") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)

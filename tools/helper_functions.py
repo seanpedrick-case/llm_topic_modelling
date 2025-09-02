@@ -744,19 +744,16 @@ def _get_env_list(env_var_name: str) -> List[str]:
     # Split by comma and filter out any empty strings that might result from extra commas
     return [s.strip() for s in value.split(',') if s.strip()]
 
-def create_batch_file_path_details(reference_data_file_name: str, model_name_map: dict, model_choice: str) -> str:
+def create_batch_file_path_details(reference_data_file_name: str) -> str:
             """
             Creates a standardized batch file path detail string from a reference data filename.
             
             Args:
                 reference_data_file_name (str): Name of the reference data file
-                model_name_map (dict): Dictionary mapping model choices to their properties
-                model_choice (str): The chosen model name
             
             Returns:
                 str: Formatted batch file path detail string
             """
-            model_choice_clean = model_name_map[model_choice]["short_name"]
             
             # Extract components from filename using regex
             file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name

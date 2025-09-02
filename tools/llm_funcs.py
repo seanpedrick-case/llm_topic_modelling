@@ -7,7 +7,6 @@ import pandas as pd
 import json
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
-from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 from typing import List, Tuple, TypeVar
 from google import genai as ai
 from google.genai import types
@@ -52,6 +51,7 @@ print("GPU layers assigned to cuda:", gpu_layers)
 if RUN_LOCAL_MODEL == "1":
     print("Running local model - importing llama-cpp-python")
     from llama_cpp import Llama
+    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 
 max_tokens = MAX_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -370,10 +370,11 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
             api_key = os.environ["GOOGLE_API_KEY"]
             client = ai.Client(api_key=api_key)
         else:
-            print("No API key foound")
-            raise gr.Error("No API key found.")
+            print("No Gemini API key found")
+            raise Warning("No Gemini API key found.")
     except Exception as e:
-        print(e)
+        print("Error constructing Gemini generative model:", e)
+        raise Warning("Error constructing Gemini generative model:", e)
         
     config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens, seed=random_seed)
 
@@ -553,11 +554,6 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
         response_text = response_text.strip()
         conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     
-    # Print the updated conversation history
-    #print("conversation_history:", conversation_history)
-
-    print("response_text:", response_text)
-    
     return response, conversation_history, response_text
 
 def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
@@ -619,11 +615,14 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
                     # Append the clean, standardised data
                     whole_conversation_metadata.append('outputTokens: ' + str(output_tokens) + ' inputTokens: ' + str(input_tokens))
 
-                elif "Gemini" in model_source:
+                elif "Gemini" in model_source:                    
+
+                    output_tokens = response.usage_metadata.candidates_token_count
+                    input_tokens = response.usage_metadata.prompt_token_count
+
                     whole_conversation_metadata.append(str(response.usage_metadata))
 
                 elif "Local" in model_source:
-                    #print("Adding usage metadata to whole conversation metadata:", response['usage'])
                     output_tokens = response['usage'].get('completion_tokens', 0)
                     input_tokens = response['usage'].get('prompt_tokens', 0)
                     whole_conversation_metadata.append(str(response['usage']))
