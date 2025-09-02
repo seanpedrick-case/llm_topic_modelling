@@ -8,16 +8,16 @@ initial_table_system_prompt = system_prompt + markdown_additional_prompt
 
 initial_table_assistant_prefill = "|"
 
-initial_table_prompt = """The open text data is shown in the following table that contains two columns, Reference and Response. Response table: 
-{response_table}
-
-Your task is to create one new markdown table with the headings 'General topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
+initial_table_prompt = """Your task is to create one new markdown table based on open text responses in the reponse table below with the headings 'General topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first column identify general topics relevant to responses. Create as many general topics as you can.
 In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be blank or empty.
 {sentiment_choices}.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
 In the fifth column, write a short summary of the subtopic based on relevant responses - highlight specific issues that appear.
 Do not add any other columns. Do not add any other text to your response.
+
+Response table: 
+{response_table}
 
 New table:"""
 
@@ -43,18 +43,18 @@ In the first and second columns, assign General Topics and Subtopics to Response
 
 force_single_topic_prompt = """ Assign each response to one single topic only."""
 
-add_existing_topics_prompt = """Responses are shown in the following Response table: 
-{response_table}
-
-Topics known to be relevant to this dataset are shown in the following Topics table: 
-{topics}
-
-Your task is to create one new markdown table, assigning responses from the Response table to topics.
+add_existing_topics_prompt = """Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
 {sentiment_choices}.
 In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
 In the fifth column, write a short summary of the Subtopic based on relevant responses - highlight specific issues that appear.
 Do not add any other columns. Do not add any other text to your response.
+
+Responses are shown in the following Response table: 
+{response_table}
+
+Topics known to be relevant to this dataset are shown in the following Topics table: 
+{topics}
 
 New table:"""
 
@@ -62,19 +62,19 @@ New table:"""
 # STRUCTURE SUMMARY PROMPT
 ###
 
-structured_summary_prompt = """Responses are shown in the following Response table: 
-{response_table}
+structured_summary_prompt = """Your task is to write a structured summary for open text responses.  
 
-Headings with which to structure the summary are in the following Headings table: 
-{topics}
-
-Your task is to write a structured summary for the responses.  
-
-Create a new markdown table with the headings 'Main heading', 'Subheading', 'Placeholder', 'Response References', and 'Summary'.
+Create a new markdown table based on the response table below with the headings 'Main heading', 'Subheading', 'Placeholder', 'Response References', and 'Summary'.
 
 For each of the responses in the Response table, you will create a row for each summary associated with each of the Main headings and Subheadings from the Headings table. If there is no Headings table, created your own headings. In the first and second columns, write a Main heading and Subheading from the Headings table. Write the single relevant response reference number in the 'Response References' column. Then in Summary, write a detailed and comprehensive summary that covers all information relevant to the Main heading and Subheading on the same row.
 
 Do not add any other columns. Do not add any other text to your response.
+
+Responses are shown in the following Response table: 
+{response_table}
+
+Headings with which to structure the summary are in the following Headings table: 
+{topics}
 
 New table:"""
 
@@ -86,11 +86,11 @@ summary_assistant_prefill = ""
 
 summarise_topic_descriptions_system_prompt = system_prompt
 
-summarise_topic_descriptions_prompt = """Below is a table with number of paragraphs related to the data from the open text column:
+summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text in the table below. {summary_format}. Return only the summary and no other text.
 
-'{summaries}'
+Below is a table with paragraphs with open text to summarise:
 
-Your task is to make a consolidated summary of the above text. {summary_format}. Return only the summary and no other text.
+{summaries}
 
 Summary:"""
 

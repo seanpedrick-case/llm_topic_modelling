@@ -208,7 +208,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
 
         except Exception as e:
             print("GPU load failed due to:", e)
-            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) 
+            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, **vars(cpu_config)) 
         
         print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
@@ -222,9 +222,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE, gpu_layers:int=gpu_
         cpu_config.update_context(max_context_length)
 
         if speculative_decoding:
-            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config))
+            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config))
         else:
-            llama_model = Llama(model_path=model_path, type_k=8, **vars(cpu_config)) 
+            llama_model = Llama(model_path=model_path, type_k=8, type_v=8, **vars(cpu_config)) 
 
         print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
@@ -290,10 +290,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
     output = model.create_chat_completion(
         messages=[
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": formatted_string
-            }
+            {"role": "user",  "content": formatted_string}
         ],
         temperature=temperature, 
         top_k=top_k, 
