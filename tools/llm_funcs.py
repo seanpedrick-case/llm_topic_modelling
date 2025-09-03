@@ -533,7 +533,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     progress_bar = range(0,number_of_api_retry_attempts)
 
     # Generate the model's response
-    if "gemini" in model_choice:
+    if "Gemini" in model_source:
 
         for i in progress_bar:
             try:
@@ -541,7 +541,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 
                 response = google_client.models.generate_content(model=model_choice, contents=full_prompt, config=config)
 
-                print("Successful call to Gemini model.")
+                #print("Successful call to Gemini model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
@@ -551,13 +551,13 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
             
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-    elif "anthropic.claude" in model_choice:
+    elif "AWS" in model_source:
         for i in progress_bar:
             try:
                 print("Calling AWS Claude model, attempt", i + 1)
                 response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime, assistant_prefill=assistant_prefill)
 
-                print("Successful call to Claude model.")
+                #print("Successful call to Claude model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
@@ -566,7 +566,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
-    else:
+    elif "Local" in model_source:
         # This is the local model
         for i in progress_bar:
             try:
@@ -577,7 +577,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 
                 response = call_llama_cpp_chatmodel(prompt, system_prompt, gen_config, model=local_model)
 
-                print("Successful call to local model.")
+                #print("Successful call to local model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
@@ -586,7 +586,10 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 time.sleep(timeout_wait)
 
             if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history       
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+    else:
+        print("Model source not recognised")
+        return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
 
     # Update the conversation history with the new prompt and response
     conversation_history.append({'role': 'user', 'parts': [prompt]})

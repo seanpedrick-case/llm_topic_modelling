@@ -140,9 +140,6 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
 
-    print('len(reference_df["Response References"].unique()):', len(reference_df["Response References"].unique()))
-    print('len(topic_summary_df["Topic_number"].unique()):', len(topic_summary_df["Topic_number"].unique()))
-
     if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic_number"].unique()) == 1):
         print("Data file outputs are too short for deduplicating. Returning original data.")
 
@@ -449,9 +446,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
     return response_text, conversation_history, whole_conversation_metadata
 
-
-
-@spaces.GPU
+@spaces.GPU(duration=300)
 def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             topic_summary_df:pd.DataFrame,
                             reference_table_df:pd.DataFrame,
@@ -670,6 +665,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
         return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken
 
+@spaces.GPU(duration=120)
 def overall_summary(topic_summary_df:pd.DataFrame,
                     model_choice:str,
                     in_api_key:str,
