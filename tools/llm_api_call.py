@@ -17,7 +17,7 @@ GradioFileData = gr.FileData
 from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, RUN_AWS_FUNCTIONS, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX
 from tools.aws_functions import connect_to_bedrock_runtime
 
 if RUN_LOCAL_MODEL == "1":
@@ -1283,6 +1283,7 @@ def wrapper_extract_topics_per_column_value(
     acc_input_tokens = 0
     acc_output_tokens = 0
     acc_number_of_calls = 0
+    out_message = list()
 
     if grouping_col is None:
         print("No grouping column found")
@@ -1321,8 +1322,14 @@ def wrapper_extract_topics_per_column_value(
 
     wrapper_first_loop = initial_first_loop_state
 
-    for i, group_value in tqdm(enumerate(unique_values), desc=f"Analysing by group", total=len(unique_values), unit="groups"):
-        print(f"\nProcessing segment: {grouping_col} = {group_value} ({i+1}/{len(unique_values)})")
+    if len(unique_values) == 1:
+        loop_object = enumerate(unique_values)
+    else:
+        loop_object = tqdm(enumerate(unique_values), desc=f"Analysing group", total=len(unique_values), unit="groups")
+
+
+    for i, group_value in loop_object:
+        print(f"\nProcessing group: {grouping_col} = {group_value} ({i+1}/{len(unique_values)})")
         
         filtered_file_data = file_data.copy()
 
@@ -1440,7 +1447,7 @@ def wrapper_extract_topics_per_column_value(
             acc_total_time_taken += float(seg_time_taken)
             acc_gradio_df = seg_gradio_df # Keep the latest Gradio DF            
 
-            print(f"Segment {grouping_col} = {group_value} processed. Time: {seg_time_taken:.2f}s")
+            print(f"Group {grouping_col} = {group_value} processed. Time: {seg_time_taken:.2f}s")
 
         except Exception as e:
             print(f"Error processing segment {grouping_col} = {group_value}: {e}")
@@ -1481,7 +1488,9 @@ def wrapper_extract_topics_per_column_value(
 
     acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(acc_whole_conversation_metadata, model_choice, model_name_map)
 
-    print(f"\nWrapper finished processing all segments. Total time: {acc_total_time_taken:.2f}s")
+    out_message = '\n'.join(out_message)
+    out_message = out_message + " " + f"Topic extraction finished processing all groups. Total time: {acc_total_time_taken:.2f}s"
+    print(out_message)
 
     # The return signature should match extract_topics.
     # The aggregated lists will be returned in the multiple slots.
@@ -1505,7 +1514,8 @@ def wrapper_extract_topics_per_column_value(
         acc_missing_df,
         acc_input_tokens,
         acc_output_tokens,
-        acc_number_of_calls
+        acc_number_of_calls,
+        out_message
     )
 
 

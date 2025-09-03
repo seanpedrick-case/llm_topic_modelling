@@ -283,7 +283,6 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
         return unique_file_data, reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names # gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas")
 
-
 def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.DataFrame, join_columns:List[str], original_file_name:str, output_folder:str=OUTPUT_FOLDER):
 
     #print("original_data_df columns:", original_data_df.columns)
@@ -776,3 +775,7 @@ def create_batch_file_path_details(reference_data_file_name: str) -> str:
             if latest_batch_completed:
                 return f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
             return f"{file_name_cleaned}_col_{in_column_cleaned}"
+
+
+def move_overall_summary_output_files_to_front_page(overall_summary_output_files_xlsx:List[str]):
+    return overall_summary_output_files_xlsx

@@ -1,26 +1,11 @@
 ---
 
-set PKG_CONFIG_PATH=C:\<path-to-openblas>\OpenBLAS\lib\pkgconfig # Set this in environment variables
+#How to build llama-cpp-python on Windows: Step-by-Step Guide
 
+First, you need to set up a proper C++ development environment.
 
-pip install llama-cpp-python==0.3.16 --force-reinstall --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
----
-
-# With CUDA
-
-pip install llama-cpp-python==0.3.16 --force-reinstall --no-cache-dir --verbose -C cmake.args="-DGGML_CUDA=on"
-
-
----
-
-
-How to Make it Work: Step-by-Step Guide
-To successfully run your command, you need to set up a proper C++ development environment.
-
-Step 1: Install the C++ Compiler
-Go to the Visual Studio downloads page.
-
-Scroll down to "Tools for Visual Studio" and download the "Build Tools for Visual Studio". This is a standalone installer that gives you the C++ compiler and libraries without installing the full Visual Studio IDE.
+# Step 1: Install the C++ Compiler
+Scroll down the page past the main programs to "Tools for Visual Studio" and download the "Build Tools for Visual Studio". This is a standalone installer that gives you the C++ compiler and libraries without installing the full Visual Studio IDE.
 
 Run the installer. In the "Workloads" tab, check the box for "Desktop development with C++".
 
@@ -34,18 +19,17 @@ Windows 10 SDK (10.0.20348.0)
 
 Proceed with the installation.
 
+Need to use 'x64 Native Tools Command Prompt for VS 2022' to install the below. Run as administrator
 
-Need to use 'x64 Native Tools Command Prompt for VS 2022' to install. Run as administrator
-
-Step 2: Install CMake
-Go to the CMake download page.
+# Step 2: Install CMake
+Go to the CMake download page: https://cmake.org/download
 
 Download the latest Windows installer (e.g., cmake-x.xx.x-windows-x86_64.msi).
 
 Run the installer. Crucially, when prompted, select the option to "Add CMake to the system PATH for all users" or "for the current user." This allows you to run cmake from any command prompt.
 
 
-Step 3: Download and Place OpenBLAS
+# Step 3: (FOR CPU INFERENCE ONLY) Download and Place OpenBLAS
 This is often the trickiest part.
 
 Go to the OpenBLAS releases on GitHub.
@@ -56,14 +40,12 @@ Create a folder somewhere easily accessible, for example, C:\libs\.
 
 Extract the contents of the OpenBLAS zip file into that folder. Your final directory structure should look something like this:
 
-Generated code
 C:\libs\OpenBLAS\
 ├── bin\
 ├── include\
 └── lib\
-Use code with caution.
 
-3.b. Install Chocolatey
+## 3.b. Install Chocolatey
 https://chocolatey.org/install
 
 Step 1: Install Chocolatey (if you don't already have it)
@@ -71,25 +53,20 @@ Open PowerShell as an Administrator. (Right-click the Start Menu -> "Windows Pow
 
 Run the following command to install Chocolatey. It's a single, long line:
 
-Generated powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-Use code with caution.
-Powershell
-Wait for it to finish. Once it's done, close the Administrator PowerShell window.
+
+Once it's done, close the Administrator PowerShell window.
 
 Step 2: Install pkg-config-lite using Chocolatey
-IMPORTANT: Open a NEW command prompt or PowerShell window (as a regular user is fine). This is necessary so it recognizes the new choco command.
+IMPORTANT: Open a NEW command prompt or PowerShell window (as a regular user is fine). This is necessary so it recognises the new choco command.
 
-Run the following command to install a lightweight version of pkg-config:
+Run the following command in console to install a lightweight version of pkg-config:
 
-Generated cmd
 choco install pkgconfiglite
-Use code with caution.
-Cmd
+
 Approve the installation by typing Y or A if prompted.
 
-
-Step 4: Run the Installation Command
+# Step 4: Run the Installation Command
 Now you have all the pieces. The final step is to run the command in a terminal that is aware of your new build environment.
 
 Open the "Developer Command Prompt for VS" from your Start Menu. This is important! This special command prompt automatically configures all the necessary paths for the C++ compiler.
@@ -98,22 +75,35 @@ Open the "Developer Command Prompt for VS" from your Start Menu. This is importa
 
 set PKG_CONFIG_PATH=C:\<path-to-openblas>\OpenBLAS\lib\pkgconfig # Set this in environment variables
 
-
 pip install llama-cpp-python==0.3.16 --force-reinstall --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
 
-## With Cuda
+or to make a wheel:
 
-### Make sure you are using the x64 version of Developer command tools, e.g. 'x64 Native Tools Command Prompt for VS 2022' ###
+pip install llama-cpp-python==0.3.16 --wheel-dir dist --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
+
+pip wheel llama-cpp-python==0.3.16 --wheel-dir dist --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/Users/spedrickcase/libs/OpenBLAS/include;-DBLAS_LIBRARIES=C:/Users/spedrickcase/libs/OpenBLAS/lib/libopenblas.lib"
+
+C:/Users/spedrickcase/libs
+
+## With Cuda (NVIDIA GPUs only)
+
+Make sure that the have the CUDA 12.4 toolkit for windows installed: https://developer.nvidia.com/cuda-12-4-0-download-archive
+
+### Make sure you are using the x64 version of Developer command tools for the below, e.g. 'x64 Native Tools Command Prompt for VS 2022' ###
 
 Use NVIDIA GPU (cuBLAS): If you have an NVIDIA GPU, using cuBLAS is often easier because the CUDA Toolkit installer handles most of the setup.
 
 Install the NVIDIA CUDA Toolkit.
 
-Run the install command specifying cuBLAS:
+Run the install command specifying cuBLAS (for faster inference):
 
+pip install llama-cpp-python==0.3.16 --force-reinstall --verbose -C cmake.args="-DGGML_CUDA=on -DGGML_CUBLAS=on"
 
-set PKG_CONFIG_PATH=C:\<path-to-openblas>\OpenBLAS\lib\pkgconfig # Set this in environment variables
+If you want to create a new wheel to help with future installs, you can run:
 
-pip install llama-cpp-python==0.3.16 --force-reinstall --no-cache-dir --verbose -C cmake.args="-DGGML_CUDA=on"
+cd first to a folder that you have edit access for
+
+pip wheel llama-cpp-python==0.3.16 --wheel-dir dist --verbose -C cmake.args="-DGGML_CUDA=on -DGGML_CUBLAS=on"
+
 
 

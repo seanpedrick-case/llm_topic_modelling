@@ -133,7 +133,21 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                        deduplicate_topics:str="Yes"                       
                        ):
     '''
-    Deduplicate topics based on a reference and unique topics table
+    Deduplicate topics based on a reference and unique topics table, merging similar topics.
+
+    Args:
+        reference_df (pd.DataFrame): DataFrame containing reference data with topics.
+        topic_summary_df (pd.DataFrame): DataFrame summarizing unique topics.
+        reference_table_file_name (str): Base file name for the output reference table.
+        unique_topics_table_file_name (str): Base file name for the output unique topics table.
+        in_excel_sheets (str, optional): Comma-separated list of Excel sheet names to load. Defaults to "".
+        merge_sentiment (str, optional): Whether to merge topics regardless of sentiment ("Yes" or "No"). Defaults to "No".
+        merge_general_topics (str, optional): Whether to merge topics across different general topics ("Yes" or "No"). Defaults to "No".
+        score_threshold (int, optional): Fuzzy matching score threshold for deduplication. Defaults to 90.
+        in_data_files (List[str], optional): List of input data file paths. Defaults to [].
+        chosen_cols (List[str], optional): List of chosen columns from the input data files. Defaults to "".
+        output_folder (str, optional): Folder path to save output files. Defaults to OUTPUT_FOLDER.
+        deduplicate_topics (str, optional): Whether to perform topic deduplication ("Yes" or "No"). Defaults to "Yes".
     '''
     output_files = list()
     log_output_files = list()
@@ -515,6 +529,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     acc_number_of_calls = 0
     time_taken = 0
     out_metadata_str = "" # Output metadata is currently replaced on starting a summarisation task
+    out_message = list()
 
     tic = time.perf_counter()
 
@@ -559,8 +574,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
         local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
 
-    summary_loop_description = "Creating summaries. " + str(latest_summary_completed) + " summaries completed so far."
-    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Creating summaries", unit="summaries")   
+    summary_loop_description = "Revising topic-level summaries. " + str(latest_summary_completed) + " summaries completed so far."
+    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
 
     if do_summaries == "Yes":
         
@@ -621,7 +636,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
 
         # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
-        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True).str.capitalize()         
 
         reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
         # If no new summary is available, keep the original
@@ -661,9 +676,13 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(out_metadata_str, model_choice, model_name_map)
 
         toc = time.perf_counter()
-        time_taken = toc - tic        
+        time_taken = toc - tic
 
-        return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken
+        out_message = '\n'.join(out_message)
+        out_message = out_message + " " + f"Topic summarisation finished processing. Total time: {time_taken:.2f}s"
+        print(out_message)
+
+        return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken, out_message
 
 @spaces.GPU(duration=120)
 def overall_summary(topic_summary_df:pd.DataFrame,
@@ -733,6 +752,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     output_tokens_num = 0
     number_of_calls_num = 0
     time_taken = 0
+    out_message = list()
 
     tic = time.perf_counter()
 
@@ -778,7 +798,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                 local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
                 #print("Local model loaded:", local_model)
 
-    summary_loop = tqdm(unique_groups, desc="Creating summaries for groups", unit="groups")   
+    summary_loop = tqdm(unique_groups, desc="Creating overall summary for groups", unit="groups")   
 
     if do_summaries == "Yes":
         model_source = model_name_map[model_choice]["source"]
@@ -786,7 +806,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
         for summary_group in summary_loop:
 
-            print("Creating summary for group:", summary_group)
+            print("Creating overallsummary for group:", summary_group)
 
             summary_text = topic_summary_df.loc[topic_summary_df["Group"]==summary_group].to_markdown(index=False)
             
@@ -865,6 +885,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         toc = time.perf_counter()
         time_taken = toc - tic
 
-        print("All group summaries created. Time taken:", time_taken)
+        out_message = '\n'.join(out_message)
+        out_message = out_message + " " + f"Overall summary finished processing. Total time: {time_taken:.2f}s"
+        print(out_message)
 
-    return output_files, html_output_table, summarised_outputs_df, out_metadata_str, input_tokens_num, output_tokens_num, number_of_calls_num, time_taken
+    return output_files, html_output_table, summarised_outputs_df, out_metadata_str, input_tokens_num, output_tokens_num, number_of_calls_num, time_taken, out_message
