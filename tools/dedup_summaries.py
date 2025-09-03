@@ -133,7 +133,21 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                        deduplicate_topics:str="Yes"                       
                        ):
     '''
-    Deduplicate topics based on a reference and unique topics table
+    Deduplicate topics based on a reference and unique topics table, merging similar topics.
+
+    Args:
+        reference_df (pd.DataFrame): DataFrame containing reference data with topics.
+        topic_summary_df (pd.DataFrame): DataFrame summarizing unique topics.
+        reference_table_file_name (str): Base file name for the output reference table.
+        unique_topics_table_file_name (str): Base file name for the output unique topics table.
+        in_excel_sheets (str, optional): Comma-separated list of Excel sheet names to load. Defaults to "".
+        merge_sentiment (str, optional): Whether to merge topics regardless of sentiment ("Yes" or "No"). Defaults to "No".
+        merge_general_topics (str, optional): Whether to merge topics across different general topics ("Yes" or "No"). Defaults to "No".
+        score_threshold (int, optional): Fuzzy matching score threshold for deduplication. Defaults to 90.
+        in_data_files (List[str], optional): List of input data file paths. Defaults to [].
+        chosen_cols (List[str], optional): List of chosen columns from the input data files. Defaults to "".
+        output_folder (str, optional): Folder path to save output files. Defaults to OUTPUT_FOLDER.
+        deduplicate_topics (str, optional): Whether to perform topic deduplication ("Yes" or "No"). Defaults to "Yes".
     '''
     output_files = list()
     log_output_files = list()
@@ -621,7 +635,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
 
         # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
-        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True).str.capitalize()         
 
         reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
         # If no new summary is available, keep the original
