@@ -648,7 +648,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
         
         return zero_shot_topics_df
 
-@spaces.GPU(duration=60)
+@spaces.GPU(duration=300)
 def extract_topics(in_data_file: GradioFileData,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
