@@ -102,7 +102,6 @@ def csvs_to_excel(
     for idx, csv_path in enumerate(csv_files):
         # Use provided sheet name or derive from file name
         sheet_name = sheet_names[idx] if sheet_names and idx < len(sheet_names) else os.path.splitext(os.path.basename(csv_path))[0]
-        print("csv_path:", csv_path)
         df = pd.read_csv(csv_path)
 
         if sheet_name == "Original data":
@@ -160,7 +159,7 @@ def csvs_to_excel(
 
     wb.save(output_filename)
     
-    print(f"Workbook saved as '{output_filename}'")
+    print(f"Output xlsx summary saved as '{output_filename}'")
 
     return output_filename
 
@@ -243,10 +242,9 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     else:
         raise Exception("Could not find unique topic files to put into Excel format")
     if reference_table_csv_path:
-        #reference_table_csv_path = reference_table_csv_path[0]
         csv_files.append(reference_table_csv_path)
         sheet_names.append("Response level data")
-        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "G":100, "H":100}
+        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "H":100}
         wrap_text_columns["Response level data"] = ["C", "G"]        
     else:
         raise Exception("Could not find any reference files to put into Excel format")
@@ -308,8 +306,6 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     sheet_names.append("Original data")
     column_widths["Original data"] = {"A": 20, "B": 20, "C": 20}
     wrap_text_columns["Original data"] = ["C"]
-
-    print("Creating intro page and text")
     
     # Intro page text
     intro_text = [
@@ -381,7 +377,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
 
     xlsx_output_filenames = [xlsx_output_filename]
 
-    return xlsx_output_filenames
+    return xlsx_output_filenames, xlsx_output_filenames
 
 
 

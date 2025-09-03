@@ -62,68 +62,6 @@ def connect_to_s3_client(aws_access_key_textbox:str="", aws_secret_key_textbox:s
 
     return s3_client
 
-# def connect_to_sts_client(aws_access_key_textbox:str="", aws_secret_key_textbox:str="", sts_endpoint:str=""):
-#     # If running an anthropic model, assume that running an AWS sts model, load in sts
-#     sts_client = []
-
-#     if aws_access_key_textbox and aws_secret_key_textbox:
-#         print("Connecting to sts using AWS access key and secret keys from user input.")
-#         sts_client = boto3.client('sts', 
-#             aws_access_key_id=aws_access_key_textbox, 
-#             aws_secret_access_key=aws_secret_key_textbox, region_name=AWS_REGION)
-#     elif RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
-#         print("Connecting to sts via existing SSO connection")
-#         sts_client = boto3.client('sts', region_name=AWS_REGION)
-#     elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
-#         print("Getting sts credentials from environment variables")
-#         sts_client = boto3.client('sts', 
-#             aws_access_key_id=AWS_ACCESS_KEY, 
-#             aws_secret_access_key=AWS_SECRET_KEY,
-#             region_name=AWS_REGION)               
-#     else:
-#         sts_client = ""
-#         out_message = "Cannot connect to sts service. Please provide access keys under LLM settings, or choose another model type."
-#         print(out_message)
-#         raise Exception(out_message)
-
-#     return sts_client
-
-
-
-# def get_assumed_role_info(aws_access_key_textbox, aws_secret_key_textbox, sts_endpoint):
-#     sts_endpoint = 'https://sts.' + AWS_REGION + '.amazonaws.com'
-#     sts = connect_to_sts_client(aws_access_key_textbox, aws_secret_key_textbox, endpoint_url=sts_endpoint)
-    
-#     #boto3.client('sts', region_name=AWS_REGION, endpoint_url=sts_endpoint)
-#     response = sts.get_caller_identity()
-
-#     # Extract ARN of the assumed role
-#     assumed_role_arn = response['Arn']
-    
-#     # Extract the name of the assumed role from the ARN
-#     assumed_role_name = assumed_role_arn.split('/')[-1]
-    
-#     return assumed_role_arn, assumed_role_name
-
-# if RUN_AWS_FUNCTIONS == "1":
-#     try:
-#         bucket_name = S3_LOG_BUCKET
-#         #session = boto3.Session() # profile_name="default"
-#     except Exception as e:
-#         print(e)    
-
-#     try:
-#         assumed_role_arn, assumed_role_name = get_assumed_role_info(aws_access_key_textbox, aws_secret_key_textbox, sts_endpoint)
-
-#         #print("Assumed Role ARN:", assumed_role_arn)
-#         #print("Assumed Role Name:", assumed_role_name)
-
-#         print("Successfully assumed role with AWS STS")
-
-#     except Exception as e:        
-#         print("Could not connect to AWS STS due to:", e)
-
-
 # Download direct from S3 - requires login credentials
 def download_file_from_s3(bucket_name:str, key:str, local_file_path:str, aws_access_key_textbox:str="", aws_secret_key_textbox:str="", RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS):
 

@@ -203,6 +203,7 @@ MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000'))
 
 RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
 RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
+RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
 # Build up options for models
@@ -218,7 +219,7 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
     model_source.append("Local")
 
-if RUN_AWS_FUNCTIONS == "1":
+if RUN_AWS_BEDROCK_MODELS == "1":
     model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
     model_short_names.extend(["haiku", "sonnet"])
     model_source.extend(["AWS", "AWS"])

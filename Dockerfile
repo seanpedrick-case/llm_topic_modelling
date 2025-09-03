@@ -1,3 +1,4 @@
+# This Dockerfile is optimised for AWS ECS using Python 3.11, and assumes CPU inference with OpenBLAS for local models.
 # Stage 1: Build dependencies and download models
 FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm AS builder
 
@@ -7,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     cmake \
-    libopenblas-dev \
+    #libopenblas-dev \
     pkg-config \
     python3-dev \
     libffi-dev \
@@ -18,9 +19,9 @@ WORKDIR /src
 
 COPY requirements_aws.txt .
 
-# Set environment variables for OpenBLAS
-ENV OPENBLAS_VERBOSE=1
-ENV CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
+# Set environment variables for OpenBLAS - not necessary if not building from source
+# ENV OPENBLAS_VERBOSE=1
+# ENV CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
 
 RUN pip install --no-cache-dir --target=/install torch==2.7.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
 && pip install --no-cache-dir --target=/install https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl \
