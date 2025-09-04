@@ -337,6 +337,8 @@ else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
 FILE_INPUT_HEIGHT = get_or_create_env_var('FILE_INPUT_HEIGHT', '200')
 
+SHOW_EXAMPLES = get_or_create_env_var('SHOW_EXAMPLES', 'True')
+
 ###
 # COST CODE OPTIONS
 ###

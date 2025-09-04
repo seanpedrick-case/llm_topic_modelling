@@ -15,20 +15,20 @@ def empty_output_vars_extract_topics():
     master_topic_df_state = pd.DataFrame()
     master_topic_summary_df_state = pd.DataFrame()
     master_reference_df_state = pd.DataFrame()
-    text_output_file = []
-    text_output_file_list_state = []
+    text_output_file = list()
+    text_output_file_list_state = list()
     latest_batch_completed = 0
-    log_files_output = []
-    log_files_output_list_state = []
+    log_files_output = list()
+    log_files_output_list_state = list()
     conversation_metadata_textbox = ""
     estimated_time_taken_number = 0
     file_data_state = pd.DataFrame()
     reference_data_file_name_textbox = ""
     display_topic_table_markdown = ""
-    summary_output_file_list = []
-    summary_input_file_list = []
-    overall_summarisation_input_files = []
-    overall_summary_output_files = []
+    summary_output_file_list = list()
+    summary_input_file_list = list()
+    overall_summarisation_input_files = list()
+    overall_summary_output_files = list()
 
     return master_topic_df_state, master_topic_summary_df_state, master_reference_df_state, text_output_file, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, reference_data_file_name_textbox, display_topic_table_markdown, summary_output_file_list, summary_input_file_list, overall_summarisation_input_files, overall_summary_output_files
 
@@ -38,10 +38,10 @@ def empty_output_vars_summarise():
     summary_reference_table_sample_state = pd.DataFrame()
     master_topic_summary_df_revised_summaries_state = pd.DataFrame()
     master_reference_df_revised_summaries_state = pd.DataFrame()
-    summary_output_files = []
-    summarised_outputs_list = []
+    summary_output_files = list()
+    summarised_outputs_list = list()
     latest_summary_completed_num = 0
-    overall_summarisation_input_files = []
+    overall_summarisation_input_files = list()
 
     return summary_reference_table_sample_state, master_topic_summary_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, overall_summarisation_input_files
 
@@ -407,8 +407,8 @@ def wrap_text(text:str, max_width=100, max_text_length=None):
         return text
         
     # First pass: initial word wrapping
-    wrapped_lines = []
-    current_line = []
+    wrapped_lines = list()
+    current_line = list()
     current_length = 0
     
     def add_line():
@@ -452,8 +452,8 @@ def wrap_text(text:str, max_width=100, max_text_length=None):
         # If current line has only one word and isn't too long
         if len(words_in_line) == 1 and len(words_in_line[0]) < max_width * 0.8:
             # Try to bring words back from the next line
-            words_to_bring_back = []
-            remaining_words = []
+            words_to_bring_back = list()
+            remaining_words = list()
             current_length = len(words_in_line[0])
             
             for word in next_line_words:
@@ -523,10 +523,13 @@ def ensure_output_folder_exists():
         print(f"The 'output/' folder already exists.")
 
 def put_columns_in_df(in_file:List[str]):
-    new_choices = []
-    concat_choices = []
-    all_sheet_names = []
+    new_choices = list()
+    concat_choices = list()
+    all_sheet_names = list()
     number_of_excel_files = 0
+
+    if not in_file:
+        return gr.Dropdown(choices=list()), gr.Dropdown(choices=list()), "", gr.Dropdown(choices=list()), gr.Dropdown(choices=list())
     
     for file in in_file:
         file_name = file.name
@@ -537,7 +540,7 @@ def put_columns_in_df(in_file:List[str]):
 
         if file_type == 'xlsx':
             number_of_excel_files += 1
-            new_choices = []
+            new_choices = list()
             print("Running through all xlsx sheets")
             anon_xlsx = pd.ExcelFile(file_name)
             new_sheet_names = anon_xlsx.sheet_names
