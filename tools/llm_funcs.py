@@ -336,7 +336,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
 
                     model = AutoModelForCausalLM.from_pretrained(
                         model_id,
-                        #dtype=torch_dtype,
+                        dtype=torch_dtype,
                         device_map="auto",
                         quantization_config=quantisation_config,
                         token=hf_token
@@ -345,7 +345,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                     print("Loading model without bitsandbytes quantisation")
                     model = AutoModelForCausalLM.from_pretrained(
                         model_id,
-                        #dtype=torch_dtype,
+                        dtype=torch_dtype,
                         device_map="auto",
                         token=hf_token
                     )
@@ -667,15 +667,15 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     duration = end_time - start_time
     tokens_per_second = num_generated_tokens / duration
 
-    print("\n--- Inference Results ---")
-    print(f"System Prompt: {conversation[0]['content']}")
-    print(f"User Prompt: {conversation[1]['content']}")
-    print("---")
-    print(f"Assistant's Reply: {assistant_reply}")
-    print("\n--- Performance ---")
-    print(f"Time taken: {duration:.2f} seconds")
-    print(f"Generated tokens: {num_generated_tokens}")
-    print(f"Tokens per second: {tokens_per_second:.2f}")
+    # print("\n--- Inference Results ---")
+    # print(f"System Prompt: {conversation[0]['content']}")
+    # print(f"User Prompt: {conversation[1]['content']}")
+    # print("---")
+    # print(f"Assistant's Reply: {assistant_reply}")
+    # print("\n--- Performance ---")
+    # print(f"Time taken: {duration:.2f} seconds")
+    # print(f"Generated tokens: {num_generated_tokens}")
+    # print(f"Tokens per second: {tokens_per_second:.2f}")
 
     return assistant_reply, num_input_tokens, num_generated_tokens
 

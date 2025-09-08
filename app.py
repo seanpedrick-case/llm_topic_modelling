@@ -178,7 +178,7 @@ with app:
         sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
 
         if SHOW_EXAMPLES == "True":
-            examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street"], [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people"]], inputs=[in_data_files, in_colnames, context_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"], label="Test with an example dataset")
+            examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv"], [["example_data/combined_case_notes.csv", "combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people"]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"], label="Test with an example dataset")
 
         if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
             with gr.Accordion("Assign task to cost code", open = True, visible=True):
