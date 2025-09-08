@@ -207,6 +207,33 @@ RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
 # Build up options for models
+### 
+# LLM variables
+###
+
+MAX_TOKENS = int(get_or_create_env_var('MAX_TOKENS', '4096')) # Maximum number of output tokens
+TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # AWS now seems to have a 60 second minimum wait between API calls
+NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5'))
+# Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
+MAX_OUTPUT_VALIDATION_ATTEMPTS = int(get_or_create_env_var('MAX_OUTPUT_VALIDATION_ATTEMPTS', '3'))
+MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999'))
+BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5'))
+DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90'))
+MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000'))
+
+RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
+
+RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
+
+RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
+GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
+
+# Azure AI Inference settings
+RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "0")
+AZURE_API_KEY = get_or_create_env_var('AZURE_API_KEY', '')
+AZURE_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_INFERENCE_ENDPOINT', '')
+
+# Build up options for models
 
 model_full_names = list()
 model_short_names = list()
@@ -225,12 +252,16 @@ if RUN_AWS_BEDROCK_MODELS == "1":
     model_source.extend(["AWS", "AWS", "AWS", "AWS", "AWS"])
 
 if RUN_GEMINI_MODELS == "1":
-    model_full_names.extend(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]) # , # Gemini pro No longer available on free tier
+    model_full_names.extend(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"])
     model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
     model_source.extend(["Gemini", "Gemini", "Gemini"])
 
-#print("model_short_names:", model_short_names)
-#print("model_full_names:", model_full_names)
+# Register Azure AI models (model names must match your Azure deployments)
+if RUN_AZURE_MODELS == "1":
+    # Example deployments; adjust to the deployments you actually create in Azure
+    model_full_names.extend(["gpt-5-mini"])
+    model_short_names.extend(["gpt-5-mini"])
+    model_source.extend(["Azure"])
 
 model_name_map = {
     full: {"short_name": short, "source": source}

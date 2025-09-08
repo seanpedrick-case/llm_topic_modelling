@@ -13,12 +13,16 @@ from google.genai import types
 import gradio as gr
 from gradio import Progress
 
+from azure.ai.inference import ChatCompletionsClient
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.inference.models import SystemMessage, UserMessage
+
 model_type = None # global variable setup
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
 model = list() # Define empty list for model functions to run
 tokenizer = list() #[] # Define empty list for model functions to run
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT
 from tools.prompts import initial_table_assistant_prefill
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
@@ -500,16 +504,7 @@ def llama_cpp_streaming(history, full_prompt, temperature=temperature):
 def construct_gemini_generative_model(in_api_key: str, temperature: float, model_choice: str, system_prompt: str, max_tokens: int, random_seed=seed) -> Tuple[object, dict]:
     """
     Constructs a GenerativeModel for Gemini API calls.
-
-    Parameters:
-    - in_api_key (str): The API key for authentication.
-    - temperature (float): The temperature parameter for the model, controlling the randomness of the output.
-    - model_choice (str): The choice of model to use for generation.
-    - system_prompt (str): The system prompt to guide the generation.
-    - max_tokens (int): The maximum number of tokens to generate.
-
-    Returns:
-    - Tuple[object, dict]: A tuple containing the constructed GenerativeModel and its configuration.
+    ...
     """
     # Construct a GenerativeModel
     try:
@@ -531,6 +526,31 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
     config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens, seed=random_seed)
 
     return client, config
+
+def construct_azure_client(in_api_key: str, endpoint: str) -> Tuple[object, dict]:
+    """
+    Constructs a ChatCompletionsClient for Azure AI Inference.
+    """
+    try:
+        key = None
+        if in_api_key:
+            key = in_api_key
+        elif os.environ.get("AZURE_INFERENCE_CREDENTIAL"):
+            key = os.environ["AZURE_INFERENCE_CREDENTIAL"]
+        elif os.environ.get("AZURE_API_KEY"):
+            key = os.environ["AZURE_API_KEY"]
+        if not key:
+            raise Warning("No Azure API key found.")
+
+        if not endpoint:
+            endpoint = os.environ.get("AZURE_INFERENCE_ENDPOINT", "")
+            if not endpoint:
+                raise Warning("No Azure inference endpoint found.")
+        client = ChatCompletionsClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+        return client, {}
+    except Exception as e:
+        print("Error constructing Azure ChatCompletions client:", e)
+        raise
 
 def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice:str, bedrock_runtime:boto3.Session.client, assistant_prefill:str="") -> ResponseObject:
     """
@@ -667,15 +687,10 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     duration = end_time - start_time
     tokens_per_second = num_generated_tokens / duration
 
-    # print("\n--- Inference Results ---")
-    # print(f"System Prompt: {conversation[0]['content']}")
-    # print(f"User Prompt: {conversation[1]['content']}")
-    # print("---")
-    # print(f"Assistant's Reply: {assistant_reply}")
-    # print("\n--- Performance ---")
-    # print(f"Time taken: {duration:.2f} seconds")
-    # print(f"Generated tokens: {num_generated_tokens}")
-    # print(f"Tokens per second: {tokens_per_second:.2f}")
+    print("\n--- Performance ---")
+    print(f"Time taken: {duration:.2f} seconds")
+    print(f"Generated tokens: {num_generated_tokens}")
+    print(f"Tokens per second: {tokens_per_second:.2f}")
 
     return assistant_reply, num_input_tokens, num_generated_tokens
 
@@ -725,6 +740,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
             
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+                
     elif "AWS" in model_source:
         for i in progress_bar:
             try:
@@ -738,6 +754,35 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 print("Call to Claude model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
                 time.sleep(timeout_wait)
 
+            if i == number_of_api_retry_attempts:
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+    elif "Azure" in model_source:
+        for i in progress_bar:
+            try:
+                print("Calling Azure AI Inference model, attempt", i + 1)
+                # Use structured messages for Azure
+                response_raw = google_client.complete(
+                    messages=[
+                        SystemMessage(content=system_prompt),
+                        UserMessage(content=prompt),
+                    ],
+                    model=model_choice
+                )
+                response_text = response_raw.choices[0].message.content
+                usage = getattr(response_raw, "usage", None)
+                input_tokens = 0
+                output_tokens = 0
+                if usage is not None:
+                    input_tokens = getattr(usage, "input_tokens", getattr(usage, "prompt_tokens", 0))
+                    output_tokens = getattr(usage, "output_tokens", getattr(usage, "completion_tokens", 0))
+                response = ResponseObject(
+                    text=response_text,
+                    usage_metadata={'inputTokens': input_tokens, 'outputTokens': output_tokens}
+                )
+                break
+            except Exception as e:
+                print("Call to Azure model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
+                time.sleep(timeout_wait)
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
     elif "Local" in model_source:
@@ -776,28 +821,29 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     # Check if is a LLama.cpp model response
     if isinstance(response, ResponseObject):
         response_text = response.text
-        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     elif 'choices' in response: # LLama.cpp model response
         if "gpt-oss" in model_choice:
             response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
         else:
             response_text = response['choices'][0]['message']['content']
         response_text = response_text.strip()
-        conversation_history.append({'role': 'assistant', 'parts': [response_text]}) #response['choices'][0]['text']]})
     elif model_source == "Gemini":
         response_text = response.text
         response_text = response_text.strip()
-        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     else: # Assume transformers model response
         if "gpt-oss" in model_choice:
             response_text = response.split('<|start|>assistant<|channel|>final<|message|>')[1]
         else:
             response_text = response
-        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
+    
+    conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     
     return response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=tokenizer, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+def process_requests(prompts: List[str],
+system_prompt: str,
+conversation_history: List[dict],
+whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=tokenizer, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -836,27 +882,26 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
         whole_conversation.append(response_text)
 
         # Create conversation metadata
-        if master == False:
-            whole_conversation_metadata.append(f"Batch {batch_no}:")
-        else:
-            #whole_conversation_metadata.append(f"Query summary metadata:")
-            whole_conversation_metadata.append(f"Batch {batch_no}:")
+        # if master == False:
+        #     whole_conversation_metadata.append(f"Batch {batch_no}:")
+        # else:
+        #     #whole_conversation_metadata.append(f"Query summary metadata:")
+
+        whole_conversation_metadata.append(f"Batch {batch_no}:")
 
         # if not isinstance(response, str):
         try:
             if "AWS" in model_source:
-                #print("Extracting usage metadata from Converse API response...")
-                    
-                # Using .get() is safer than direct access, in case a key is missing.
                 output_tokens = response.usage_metadata.get('outputTokens', 0)
                 input_tokens = response.usage_metadata.get('inputTokens', 0)
-                
-                #print(f"Extracted Token Counts - Input: {input_tokens}, Output: {output_tokens}")
-
-            elif "Gemini" in model_source:                    
-
+   
+            elif "Gemini" in model_source:
                 output_tokens = response.usage_metadata.candidates_token_count
                 input_tokens = response.usage_metadata.prompt_token_count
+
+            elif "Azure" in model_source:
+                input_tokens = response.usage_metadata.get('inputTokens', 0)
+                output_tokens = response.usage_metadata.get('outputTokens', 0)
 
             elif "Local" in model_source:
                 if USE_LLAMA_CPP == "True":
@@ -1012,20 +1057,8 @@ def calculate_tokens_from_metadata(metadata_string:str, model_choice:str, model_
 
     # Regex to find the numbers following the keys in the "Query summary metadata" section
     # This ensures we get the final, aggregated totals for the whole query.
-    #if "Gemini" in model_source:
     input_regex = r"input_tokens: (\d+)"
     output_regex = r"output_tokens: (\d+)"
-    # elif "AWS" in model_source:
-    #     input_regex = r"inputTokens: (\d+)"
-    #     output_regex = r"outputTokens: (\d+)"
-    # elif "Local" in model_source:
-    #     print("Local model source")
-    #     input_regex = r"\'prompt_tokens\': (\d+)"
-    #     output_regex = r"\'completion_tokens\': (\d+)"
-
-    #print("Metadata string:", metadata_string)
-    #print("Input regex:", input_regex)
-    #print("Output regex:", output_regex)
 
     # re.findall returns a list of all matching strings (the captured groups).
     input_token_strings = re.findall(input_regex, metadata_string)

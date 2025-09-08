@@ -16,8 +16,8 @@ GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details
-from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX
+from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT
 from tools.aws_functions import connect_to_bedrock_runtime
 
 if RUN_LOCAL_MODEL == "1":
@@ -477,8 +477,6 @@ def write_llm_output_and_logs(response_text: str,
         new_reference_df = pd.DataFrame(reference_data)
     else:
         new_reference_df = pd.DataFrame(columns=["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group"])
-
-    print("new_reference_df:", new_reference_df)
     
     # Append on old reference data
     if not new_reference_df.empty:
@@ -689,6 +687,7 @@ def extract_topics(in_data_file: GradioFileData,
               aws_access_key_textbox:str='',
               aws_secret_key_textbox:str='',
               hf_api_key_textbox:str='',
+              azure_api_key_textbox:str='',
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,
@@ -708,7 +707,7 @@ def extract_topics(in_data_file: GradioFileData,
     - unique_table_df_display_table_markdown (str): Table for display in markdown format.
     - file_name (str): File name of the data file.
     - num_batches (int): Number of batches required to go through all the response rows.
-    - in_api_key (str): The API key for authentication.
+    - in_api_key (str): The API key for authentication (Google Gemini).
     - temperature (float): The temperature parameter for the model.
     - chosen_cols (List[str]): A list of chosen columns to process.
     - candidate_topics (gr.FileData): A Gradio FileData object of existing candidate topics submitted by the user.
@@ -843,7 +842,7 @@ def extract_topics(in_data_file: GradioFileData,
 
         for i in topics_loop:       
             reported_batch_no = latest_batch_completed + 1  
-            print("Running batch:", reported_batch_no)
+            print("Running response batch:", reported_batch_no)
 
             # Call the function to prepare the input table
             simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, latest_batch_completed, batch_size)
@@ -859,10 +858,16 @@ def extract_topics(in_data_file: GradioFileData,
 
                     formatted_system_prompt = add_existing_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
 
-                    # Prepare Gemini models before query       
+                    # Prepare clients before query       
                     if "Gemini" in model_source:
                         print("Using Gemini model:", model_choice)
                         google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
+                    elif "Azure" in model_source:
+                        print("Using Azure AI Inference model:", model_choice)
+                        # If provided, set env for downstream calls too
+                        if azure_api_key_textbox:
+                            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
+                        google_client, google_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=AZURE_INFERENCE_ENDPOINT)
                     elif "anthropic.claude" in model_choice:
                         print("Using AWS Bedrock model:", model_choice)
                     else:
@@ -1034,6 +1039,11 @@ def extract_topics(in_data_file: GradioFileData,
                     if model_source == "Gemini":
                         print("Using Gemini model:", model_choice)
                         google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_initial_table_system_prompt, max_tokens=max_tokens)
+                    elif model_source == "Azure":
+                        print("Using Azure AI Inference model:", model_choice)
+                        if azure_api_key_textbox:
+                            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
+                        google_client, google_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=AZURE_INFERENCE_ENDPOINT)
                     elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
                         print("Using local model:", model_choice)
                     else:
@@ -1118,7 +1128,7 @@ def extract_topics(in_data_file: GradioFileData,
 
             # Increase latest file completed count unless we are over the last batch number
             if latest_batch_completed <= num_batches:
-                print("Completed batch number:", str(reported_batch_no))
+                #print("Completed batch number:", str(reported_batch_no))
                 latest_batch_completed += 1 
 
             toc = time.perf_counter()
@@ -1242,19 +1252,16 @@ def wrapper_extract_topics_per_column_value(
     initial_existing_topic_summary_df: pd.DataFrame,
     initial_unique_table_df_display_table_markdown: str,
     original_file_name: str, # Original file name, to be modified per segment
-    # Initial state parameters (wrapper will use these for the very first call)
     total_number_of_batches:int,
     in_api_key: str,        
     temperature: float,
     chosen_cols: List[str],
     model_choice: str,
     candidate_topics: GradioFileData = None,
-
     initial_first_loop_state: bool = True,
     initial_whole_conversation_metadata_str: str = '',
     initial_latest_batch_completed: int = 0, 
     initial_time_taken: float = 0,
-
     initial_table_prompt: str = initial_table_prompt,
     prompt2: str = prompt2,
     prompt3: str = prompt3,
@@ -1273,14 +1280,67 @@ def wrapper_extract_topics_per_column_value(
     aws_access_key_textbox:str="",
     aws_secret_key_textbox:str="",
     hf_api_key_textbox:str="",
+    azure_api_key_textbox:str="",
     output_folder: str = OUTPUT_FOLDER,
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
     max_time_for_loop: int = max_time_for_loop, # This applies per call to extract_topics
+    reasoning_suffix: str = reasoning_suffix,
     CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
     progress=Progress(track_tqdm=True) # type: ignore
 ) -> Tuple: # Mimicking the return tuple structure of extract_topics
+    """
+    A wrapper function that iterates through unique values in a specified grouping column
+    and calls the `extract_topics` function for each segment of the data.
+    It accumulates results from each call and returns a consolidated output.
+
+    :param grouping_col: The name of the column to group the data by.
+    :param in_data_file: The input data file object (e.g., Gradio FileData).
+    :param file_data: The full DataFrame containing all data.
+    :param initial_existing_topics_table: Initial DataFrame of existing topics.
+    :param initial_existing_reference_df: Initial DataFrame mapping responses to topics.
+    :param initial_existing_topic_summary_df: Initial DataFrame summarizing topics.
+    :param initial_unique_table_df_display_table_markdown: Initial markdown string for topic display.
+    :param original_file_name: The original name of the input file.
+    :param total_number_of_batches: The total number of batches across all data.
+    :param in_api_key: API key for the chosen LLM.
+    :param temperature: Temperature setting for the LLM.
+    :param chosen_cols: List of columns from `file_data` to be processed.
+    :param model_choice: The chosen LLM model (e.g., "Gemini", "AWS Claude").
+    :param candidate_topics: Optional Gradio FileData for candidate topics (zero-shot).
+    :param initial_first_loop_state: Boolean indicating if this is the very first loop iteration.
+    :param initial_whole_conversation_metadata_str: Initial metadata string for the whole conversation.
+    :param initial_latest_batch_completed: The batch number completed in the previous run.
+    :param initial_time_taken: Initial time taken for processing.
+    :param initial_table_prompt: The initial prompt for table summarization.
+    :param prompt2: The second prompt for LLM interaction.
+    :param prompt3: The third prompt for LLM interaction.
+    :param initial_table_system_prompt: The initial system prompt for table summarization.
+    :param add_existing_topics_system_prompt: System prompt for adding existing topics.
+    :param add_existing_topics_prompt: Prompt for adding existing topics.
+    :param number_of_prompts_used: Number of prompts used in the LLM call.
+    :param batch_size: Number of rows to process in each batch for the LLM.
+    :param context_textbox: Additional context provided by the user.
+    :param sentiment_checkbox: Choice for sentiment assessment (e.g., "Negative, Neutral, or Positive").
+    :param force_zero_shot_radio: Option to force responses into zero-shot topics.
+    :param in_excel_sheets: List of Excel sheet names if applicable.
+    :param force_single_topic_radio: Option to force a single topic per response.
+    :param produce_structures_summary_radio: Option to produce a structured summary.
+    :param aws_access_key_textbox: AWS access key for Bedrock.
+    :param aws_secret_key_textbox: AWS secret key for Bedrock.
+    :param hf_api_key_textbox: Hugging Face API key for local models.
+    :param azure_api_key_textbox: Azure API key for Azure AI Inference.
+    :param output_folder: The folder where output files will be saved.
+    :param force_single_topic_prompt: Prompt for forcing a single topic.
+    :param max_tokens: Maximum tokens for LLM generation.
+    :param model_name_map: Dictionary mapping model names to their properties.
+    :param max_time_for_loop: Maximum time allowed for the processing loop.
+    :param reasoning_suffix: Suffix to append for reasoning.
+    :param CHOSEN_LOCAL_MODEL_TYPE: Type of local model chosen.
+    :param progress: Gradio Progress object for tracking progress.
+    :return: A tuple containing consolidated results, mimicking the return structure of `extract_topics`.
+    """
     
     acc_input_tokens = 0
     acc_output_tokens = 0
@@ -1380,7 +1440,7 @@ def wrapper_extract_topics_per_column_value(
                 seg_join_files,
                 seg_reference_df_pivot,
                 seg_missing_df
-            ) = extract_topics(
+                        ) = extract_topics(
                 in_data_file=in_data_file,
                 file_data=filtered_file_data,
                 existing_topics_table=pd.DataFrame(), #acc_topics_table.copy(), # Pass the accumulated table
@@ -1389,19 +1449,17 @@ def wrapper_extract_topics_per_column_value(
                 unique_table_df_display_table_markdown="", # extract_topics will generate this
                 file_name=segment_file_name,
                 num_batches=current_num_batches,
-                latest_batch_completed=current_latest_batch_completed, # Reset for each new segment's internal batching
-                first_loop_state=current_first_loop_state, # True only for the very first iteration of wrapper
-                out_message= list(), # Fresh for each call
-                out_file_paths= list(),# Fresh for each call
-                log_files_output_paths= list(),# Fresh for each call
-                whole_conversation_metadata_str="", # Fresh for each call
-                time_taken=0, # Time taken for this specific call, wrapper sums it.
-                # Pass through other parameters
                 in_api_key=in_api_key,
                 temperature=temperature,
                 chosen_cols=chosen_cols,
                 model_choice=model_choice,
                 candidate_topics=candidate_topics,
+                latest_batch_completed=current_latest_batch_completed, # Reset for each new segment's internal batching
+                out_message= list(), # Fresh for each call
+                out_file_paths= list(),# Fresh for each call
+                log_files_output_paths= list(),# Fresh for each call                
+                first_loop_state=current_first_loop_state, # True only for the very first iteration of wrapper                
+                whole_conversation_metadata_str="", # Fresh for each call
                 initial_table_prompt=initial_table_prompt,
                 prompt2=prompt2,
                 prompt3=prompt3,
@@ -1411,6 +1469,7 @@ def wrapper_extract_topics_per_column_value(
                 number_of_prompts_used=number_of_prompts_used,
                 batch_size=batch_size,
                 context_textbox=context_textbox,
+                time_taken=0, # Time taken for this specific call, wrapper sums it.
                 sentiment_checkbox=sentiment_checkbox,
                 force_zero_shot_radio=force_zero_shot_radio,
                 in_excel_sheets=in_excel_sheets,
@@ -1422,11 +1481,13 @@ def wrapper_extract_topics_per_column_value(
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
                 hf_api_key_textbox=hf_api_key_textbox,
+                azure_api_key_textbox=azure_api_key_textbox,
                 max_tokens=max_tokens,
                 model_name_map=model_name_map,
                 max_time_for_loop=max_time_for_loop,
                 CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
-                progress=progress,
+                reasoning_suffix=reasoning_suffix,
+                progress=progress
             )
 
             # Aggregate results
