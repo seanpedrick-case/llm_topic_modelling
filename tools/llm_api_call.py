@@ -801,7 +801,6 @@ def extract_topics(in_data_file: GradioFileData,
 
     # If this is the first time around, set variables to 0/blank
     if first_loop_state==True:
-        print("This is the first time through the loop, resetting latest_batch_completed to 0")
         if (latest_batch_completed == 999) | (latest_batch_completed == 0):
             latest_batch_completed = 0
             out_message = list()

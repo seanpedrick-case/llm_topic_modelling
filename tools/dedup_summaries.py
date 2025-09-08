@@ -776,25 +776,6 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     else:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
-    # model_choice_clean = model_name_map[model_choice]
-    # model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-    # file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
-    # latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
-    # batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
-    # in_column = re.search(r'col_(.*?)_unique', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
-
-
-    # file_name_cleaned = clean_column_name(file_name, max_length=20)
-    # in_column_cleaned = clean_column_name(in_column, max_length=20)
-
-    # # Save outputs for each batch. If master file created, label file as master
-    # if latest_batch_completed:
-    #     batch_file_path_details = f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
-    # else:
-    #     batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
-
-    print("reference_data_file_name:", reference_data_file_name)
-
     batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
 
     tic = time.perf_counter()
@@ -802,7 +783,6 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
                 progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
                 local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER, hf_token=hf_api_key_textbox)
-                #print("Local model loaded:", local_model)
 
     summary_loop = tqdm(unique_groups, desc="Creating overall summary for groups", unit="groups")   
 

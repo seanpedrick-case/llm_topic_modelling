@@ -327,7 +327,7 @@ REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
 COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'True') # Whether to compile transformers models
 USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether to use bitsandbytes for quantization
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
-MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'float16') # alternatively 'bfloat16'
+MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 OFFLOAD_TO_CPU = get_or_create_env_var('OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
 
 MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))

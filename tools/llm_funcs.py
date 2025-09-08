@@ -638,8 +638,6 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     if hasattr(gen_config, 'repeat_penalty'):
         generation_kwargs['repetition_penalty'] = gen_config.repeat_penalty
 
-    print("Generation kwargs:", generation_kwargs)
-
     # --- Timed Inference Test ---
     print("\nStarting model inference...")
     start_time = time.time()
@@ -784,7 +782,10 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
         response_text = response_text.strip()
         conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     else: # Assume transformers model response
-        response_text = response
+        if "gpt-oss" in model_choice:
+            response_text = response.split('<|start|>assistant<|channel|>final<|message|>')[1]
+        else:
+            response_text = response
         conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     
     return response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
@@ -834,43 +835,42 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
             #whole_conversation_metadata.append(f"Query summary metadata:")
             whole_conversation_metadata.append(f"Batch {batch_no}:")
 
-        if not isinstance(response, str):
-            try:
-                if "AWS" in model_source:
-                    #print("Extracting usage metadata from Converse API response...")
-                       
-                    # Using .get() is safer than direct access, in case a key is missing.
-                    output_tokens = response.usage_metadata.get('outputTokens', 0)
-                    input_tokens = response.usage_metadata.get('inputTokens', 0)
+        # if not isinstance(response, str):
+        try:
+            if "AWS" in model_source:
+                #print("Extracting usage metadata from Converse API response...")
                     
-                    print(f"Extracted Token Counts - Input: {input_tokens}, Output: {output_tokens}")
-                    
-                    # Append the clean, standardised data
-                    whole_conversation_metadata.append('outputTokens: ' + str(output_tokens) + ' inputTokens: ' + str(input_tokens))
+                # Using .get() is safer than direct access, in case a key is missing.
+                output_tokens = response.usage_metadata.get('outputTokens', 0)
+                input_tokens = response.usage_metadata.get('inputTokens', 0)
+                
+                #print(f"Extracted Token Counts - Input: {input_tokens}, Output: {output_tokens}")
 
-                elif "Gemini" in model_source:                    
+            elif "Gemini" in model_source:                    
 
-                    output_tokens = response.usage_metadata.candidates_token_count
-                    input_tokens = response.usage_metadata.prompt_token_count
+                output_tokens = response.usage_metadata.candidates_token_count
+                input_tokens = response.usage_metadata.prompt_token_count
 
-                    whole_conversation_metadata.append(str(response.usage_metadata))
+            elif "Local" in model_source:
+                if USE_LLAMA_CPP == "True":
+                    output_tokens = response['usage'].get('completion_tokens', 0)
+                    input_tokens = response['usage'].get('prompt_tokens', 0)
 
-                elif "Local" in model_source:
-                    if USE_LLAMA_CPP == "True":
-                        output_tokens = response['usage'].get('completion_tokens', 0)
-                        input_tokens = response['usage'].get('prompt_tokens', 0)
-                        whole_conversation_metadata.append(str(response['usage']))
+                if USE_LLAMA_CPP == "False":
+                    input_tokens = num_transformer_input_tokens
+                    output_tokens = num_transformer_generated_tokens
 
-                    if USE_LLAMA_CPP == "False":
-                        input_tokens = num_transformer_input_tokens
-                        output_tokens = num_transformer_generated_tokens
-                        whole_conversation_metadata.append('inputTokens: ' + str(input_tokens) + ' outputTokens: ' + str(output_tokens))
+            else:
+                input_tokens = 0
+                output_tokens = 0
 
-            except KeyError as e:
-                print(f"Key error: {e} - Check the structure of response.usage_metadata")
-        else:
-            print("Response is a string object.")
-            whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
+            whole_conversation_metadata.append("input_tokens: " + str(input_tokens) + " output_tokens: " + str(output_tokens))
+
+        except KeyError as e:
+            print(f"Key error: {e} - Check the structure of response.usage_metadata")
+        # else:
+        #     print("Response is a string object.")
+        #     whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
 
     return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
 
@@ -1005,15 +1005,20 @@ def calculate_tokens_from_metadata(metadata_string:str, model_choice:str, model_
 
     # Regex to find the numbers following the keys in the "Query summary metadata" section
     # This ensures we get the final, aggregated totals for the whole query.
-    if "Gemini" in model_source:
-        input_regex = r"prompt_token_count=(\d+)"
-        output_regex = r"candidates_token_count=(\d+)"
-    elif "AWS" in model_source:
-        input_regex = r"inputTokens: (\d+)"
-        output_regex = r"outputTokens: (\d+)"
-    elif "Local" in model_source:
-        input_regex = r"\'prompt_tokens\': (\d+)"
-        output_regex = r"\'completion_tokens\': (\d+)"
+    #if "Gemini" in model_source:
+    input_regex = r"input_tokens: (\d+)"
+    output_regex = r"output_tokens: (\d+)"
+    # elif "AWS" in model_source:
+    #     input_regex = r"inputTokens: (\d+)"
+    #     output_regex = r"outputTokens: (\d+)"
+    # elif "Local" in model_source:
+    #     print("Local model source")
+    #     input_regex = r"\'prompt_tokens\': (\d+)"
+    #     output_regex = r"\'completion_tokens\': (\d+)"
+
+    #print("Metadata string:", metadata_string)
+    #print("Input regex:", input_regex)
+    #print("Output regex:", output_regex)
 
     # re.findall returns a list of all matching strings (the captured groups).
     input_token_strings = re.findall(input_regex, metadata_string)
