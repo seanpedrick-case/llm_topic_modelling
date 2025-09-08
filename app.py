@@ -12,7 +12,7 @@ from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, verify_titles_prompt, verify_titles_system_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
 from tools.verify_titles import verify_titles
-from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, model_name_map, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY
+from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, model_name_map, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY, SHOW_EXAMPLES, HF_TOKEN
 
 def ensure_folder_exists(output_folder:str):
     """Checks if the specified folder exists, creates it if not."""   
@@ -144,18 +144,18 @@ with app:
 
     gr.Markdown("""# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini 2.5, or Bedrock models e.g. (Claude 3 Haiku/Claude Sonnet 3.7). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini 2.5, or Bedrock models (e.g. Claude 3 Haiku, Claude Sonnet 3.7). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
     
     Instructions on use can be found in the README.md file. Try it out with this [dummy development consultation dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/tree/main), which you can also try with [zero-shot topics](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/tree/main). Try also this [dummy case notes dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_case_notes/tree/main).
 
-    You can use an AWS Bedrock model (paid), or Gemini (a free API for Flash). The use of Gemini requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information). 
+    You can use an AWS Bedrock model (paid), or Gemini (a free API for Flash). The use of Gemini requires an API key. To set up your own Gemini API key, go [here](https://aistudio.google.com/app/u/1/plan_information).
 
     NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
     
     with gr.Tab(label="1. Extract topics"):
         gr.Markdown("""### Choose a tabular data file (xlsx, csv, parquet) of open text to extract topics from.""")
         with gr.Row():
-            model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
+            model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)        
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
             in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
@@ -176,6 +176,9 @@ with app:
         context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
 
         sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
+
+        if SHOW_EXAMPLES == "True":
+            examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv"], [["example_data/combined_case_notes.csv", "combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people"]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"], label="Test with an example dataset")
 
         if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
             with gr.Accordion("Assign task to cost code", open = True, visible=True):
@@ -304,6 +307,9 @@ with app:
         with gr.Accordion("Gemini API keys", open = False):
             google_api_key_textbox = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
+        with gr.Accordion("Hugging Face API keys", open = False):
+            hf_api_key_textbox = gr.Textbox(value = HF_TOKEN, label="Enter Hugging Face API key (only if using Hugging Face models)", lines=1, type="password")
+
         with gr.Accordion("Log outputs", open = False):
             log_files_output = gr.File(height=FILE_INPUT_HEIGHT, label="Log file output", interactive=False)
             conversation_metadata_textbox = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8)
@@ -398,6 +404,7 @@ with app:
                 produce_structures_summary_radio,
                 aws_access_key_textbox,
                 aws_secret_key_textbox,
+                hf_api_key_textbox,
                 output_folder_state],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
@@ -495,6 +502,7 @@ with app:
                 produce_structures_summary_radio,
                 aws_access_key_textbox,
                 aws_secret_key_textbox,
+                hf_api_key_textbox,
                 output_folder_state],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,

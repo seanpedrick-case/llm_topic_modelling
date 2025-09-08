@@ -415,7 +415,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     return sampled_reference_table_df, summarised_references_markdown#, reference_df, topic_summary_df
 
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list()):
+def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list(), tokenizer=list()):
     """
     Query an LLM to generate a summary of topics based on the provided prompts.
 
@@ -428,7 +428,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
         model_source (str): Source of the model (e.g. "AWS", "Gemini", "Local")
         bedrock_runtime (boto3.Session.client): AWS Bedrock runtime client for AWS models
         local_model (object, optional): Local model object if using local inference. Defaults to empty list.
-
+        tokenizer (object, optional): Tokenizer object if using local inference. Defaults to empty list.
     Returns:
         tuple: Contains:
             - response_text (str): The generated summary text
@@ -454,7 +454,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation = [summarise_topic_descriptions_system_prompt] 
 
     # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, assistant_prefill=summary_assistant_prefill)
+    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, tokenizer=tokenizer, assistant_prefill=summary_assistant_prefill)
 
     print("Finished summary query")
 
@@ -482,7 +482,9 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             aws_secret_key_textbox:str='',
                             model_name_map:dict=model_name_map,
                             reasoning_suffix:str=reasoning_suffix,
-                            local_model:object=list(),          
+                            local_model:object=list(), 
+                            tokenizer:object=list(),
+                            hf_api_key_textbox:str='',
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, 
                             summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
                             do_summaries:str="Yes",                            
@@ -572,7 +574,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     if (model_source == "Local") & (RUN_LOCAL_MODEL == "1"):
         progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
-        local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
+        local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER, hf_token=hf_api_key_textbox)
 
     summary_loop_description = "Revising topic-level summaries. " + str(latest_summary_completed) + " summaries completed so far."
     summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
@@ -592,7 +594,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_topic_descriptions_system_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + reasoning_suffix
 
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model)
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer)
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
                 summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
@@ -697,7 +699,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     aws_secret_key_textbox:str='',
                     model_name_map:dict=model_name_map,
                     reasoning_suffix:str=reasoning_suffix,
-                    local_model:object=list(),        
+                    local_model:object=list(),
+                    tokenizer:object=list(),
+                    hf_api_key_textbox:str='',
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
@@ -721,6 +725,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object. Defaults to empty list.
+        tokenizer (object, optional): Tokenizer object. Defaults to empty list.
+        hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         summarise_everything_prompt (str, optional): Prompt for overall summary
         comprehensive_summary_format_prompt (str, optional): Prompt for comprehensive summary format
         comprehensive_summary_format_prompt_by_group (str, optional): Prompt for group summary format
@@ -770,33 +776,13 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     else:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
-    # model_choice_clean = model_name_map[model_choice]
-    # model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-    # file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
-    # latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
-    # batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
-    # in_column = re.search(r'col_(.*?)_unique', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
-
-
-    # file_name_cleaned = clean_column_name(file_name, max_length=20)
-    # in_column_cleaned = clean_column_name(in_column, max_length=20)
-
-    # # Save outputs for each batch. If master file created, label file as master
-    # if latest_batch_completed:
-    #     batch_file_path_details = f"{file_name_cleaned}_batch_{latest_batch_completed}_size_{batch_size_number}_col_{in_column_cleaned}"
-    # else:
-    #     batch_file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}"
-
-    print("reference_data_file_name:", reference_data_file_name)
-
     batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
 
     tic = time.perf_counter()
 
     if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
                 progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
-                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
-                #print("Local model loaded:", local_model)
+                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER, hf_token=hf_api_key_textbox)
 
     summary_loop = tqdm(unique_groups, desc="Creating overall summary for groups", unit="groups")   
 
@@ -806,7 +792,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
         for summary_group in summary_loop:
 
-            print("Creating overallsummary for group:", summary_group)
+            print("Creating overall summary for group:", summary_group)
 
             summary_text = topic_summary_df.loc[topic_summary_df["Group"]==summary_group].to_markdown(index=False)
             
@@ -817,7 +803,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_everything_system_prompt = formatted_summarise_everything_system_prompt + "\n" + reasoning_suffix
             
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model)
+                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer)
                 summarised_output_for_df = response
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break

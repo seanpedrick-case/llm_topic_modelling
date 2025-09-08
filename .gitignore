@@ -5,7 +5,6 @@
 *.ipynb
 *.xls
 *.xlsx
-*.csv
 *.pyc
 examples/*
 output/*

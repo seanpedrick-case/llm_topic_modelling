@@ -17,10 +17,12 @@ python-dotenv==1.1.0
 # Torch and Llama CPP Python
 torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124 # Latest compatible with CUDA 12.4
 # For Linux:
-https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
+#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
 # For Windows:
-#https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-win_amd64.whl
+https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-win_amd64.whl
 # If above doesn't work for Windows, try looking at'windows_install_llama-cpp-python.txt' for instructions on how to build from source
 # If none of the above work for you, try the following:
 # llama-cpp-python==0.3.16 -C cmake.args="-DGGML_CUDA=on -DGGML_CUBLAS=on"
+bitsandbytes==0.47.0
+accelerate==1.10.1
 

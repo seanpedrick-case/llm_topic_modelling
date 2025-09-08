@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /src
 
-COPY requirements_aws.txt .
+COPY requirements_no_local.txt .
 
 # Set environment variables for OpenBLAS - not necessary if not building from source
 # ENV OPENBLAS_VERBOSE=1
@@ -25,9 +25,9 @@ COPY requirements_aws.txt .
 
 RUN pip install --no-cache-dir --target=/install torch==2.7.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
 && pip install --no-cache-dir --target=/install https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl \
-&& pip install --no-cache-dir --target=/install -r requirements_aws.txt
+&& pip install --no-cache-dir --target=/install -r requirements_no_local.txt
 
-RUN rm requirements_aws.txt
+RUN rm requirements_no_local.txt
 
 # Stage 2: Final runtime image
 FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm

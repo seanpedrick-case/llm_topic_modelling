@@ -11,7 +11,7 @@ license: agpl-3.0
 
 # Large language model topic modelling
 
-Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini 2.5, or Bedrock models e.g. (Claude 3 Haiku/Claude Sonnet 3.7). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
+Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini 2.5, or Bedrock models  (e.g. Claude 3 Haiku, Claude Sonnet 3.7). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
 
 Instructions on use can be found in the README.md file. Try it out with this [dummy development consultation dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/tree/main), which you can also try with [zero-shot topics](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/tree/main). Try also this [dummy case notes dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_case_notes/tree/main).
 
@@ -99,10 +99,10 @@ Llama-cpp-python version 3.16 is compatible with Gemma 3 and GPT-OSS models, but
 
 The repo provides several requirements files that are relevant for different situations. I would advise using requirements_gpu.txt for GPU environments, and requirements_cpu.txt for CPU environments:
 
-- **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the last requirement under 'Windows' for Windows compatibility (CUDA 12.4)
-- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the last requirement under 'Windows' for Windows compatibility
-- **requirements.txt**: Used for the Python 3.10 GPU-enabled environment on Hugging Face spaces (CUDA 12.4)
-- **requirements_aws**: Used in conjunction with the Dockerfile for Python 3.11, CPU-only environments.
+- **requirements_no_local**: Can be used to install the app without local model inference for a more lightweight installation.
+- **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the last requirement under 'Windows' for Windows compatibility (CUDA 12.4).
+- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the last requirement under 'Windows' for Windows compatibility.
+- **requirements.txt**: Used for the Python 3.10 GPU-enabled environment on Hugging Face spaces (CUDA 12.4).
 
 2.  **Install packages from the requirements file:**
     ```bash
