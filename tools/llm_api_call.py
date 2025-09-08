@@ -688,6 +688,7 @@ def extract_topics(in_data_file: GradioFileData,
               produce_structures_summary_radio:str="No",
               aws_access_key_textbox:str='',
               aws_secret_key_textbox:str='',
+              hf_api_key_textbox:str='',
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,              
               max_time_for_loop:int=max_time_for_loop,
@@ -737,6 +738,7 @@ def extract_topics(in_data_file: GradioFileData,
     - force_single_topic_prompt (str, optional): The prompt for forcing the model to assign only one single topic to each response.
     - aws_access_key_textbox (str, optional): AWS access key for account with Bedrock permissions.
     - aws_secret_key_textbox (str, optional): AWS secret key for account with Bedrock permissions.
+    - hf_api_key_textbox (str, optional): Hugging Face API key for account with Hugging Face permissions.
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
@@ -808,7 +810,7 @@ def extract_topics(in_data_file: GradioFileData,
 
             if (model_source == "Local") & (RUN_LOCAL_MODEL == "1"):
                 progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
-                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER)
+                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER, hf_token=hf_api_key_textbox)
 
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)
@@ -938,9 +940,9 @@ def extract_topics(in_data_file: GradioFileData,
                         formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
                                                                                     topics=unique_topics_markdown)
                     
-                    if "gemma" in model_choice:
-                        formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
-                        full_prompt = formatted_summary_prompt
+                    if model_source == "Local":
+                        #formatted_summary_prompt = llama_cpp_prefix + formatted_system_prompt + "\n" + formatted_summary_prompt + llama_cpp_suffix
+                        full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
                     else:
                         full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
 
@@ -970,7 +972,7 @@ def extract_topics(in_data_file: GradioFileData,
                     whole_conversation = list()
 
                     # Process requests to large language model
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill, master = True)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill,  master = True)
 
                     # Return output tables
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error = write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)                   
@@ -1030,7 +1032,7 @@ def extract_topics(in_data_file: GradioFileData,
                     formatted_initial_table_system_prompt = initial_table_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
 
                     # Prepare Gemini models before query       
-                    if "gemini" in model_choice:
+                    if model_source == "Gemini":
                         print("Using Gemini model:", model_choice)
                         google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_initial_table_system_prompt, max_tokens=max_tokens)
                     elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
@@ -1062,7 +1064,7 @@ def extract_topics(in_data_file: GradioFileData,
                     
                     whole_conversation = list()
 
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_initial_table_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_initial_table_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, tokenizer,bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
                     
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=True, output_folder=output_folder)
 
@@ -1271,6 +1273,7 @@ def wrapper_extract_topics_per_column_value(
     produce_structures_summary_radio: str = "No",
     aws_access_key_textbox:str="",
     aws_secret_key_textbox:str="",
+    hf_api_key_textbox:str="",
     output_folder: str = OUTPUT_FOLDER,
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
@@ -1419,6 +1422,7 @@ def wrapper_extract_topics_per_column_value(
                 produce_structures_summary_radio=produce_structures_summary_radio,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                hf_api_key_textbox=hf_api_key_textbox,
                 max_tokens=max_tokens,
                 model_name_map=model_name_map,
                 max_time_for_loop=max_time_for_loop,

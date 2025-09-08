@@ -18,7 +18,7 @@ full_text = "" # Define dummy source text (full text) just to enable highlight f
 model = list() # Define empty list for model functions to run
 tokenizer = list() #[] # Define empty list for model functions to run
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, OFFLOAD_TO_CPU
 from tools.prompts import initial_table_assistant_prefill
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
@@ -192,7 +192,10 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     torch_device:str=torch_device,
     repo_id=LOCAL_REPO_ID,
     model_filename=LOCAL_MODEL_FILE,
-    model_dir=LOCAL_MODEL_FOLDER):
+    model_dir=LOCAL_MODEL_FOLDER,
+    compile_mode=COMPILE_MODE,
+    model_dtype=MODEL_DTYPE,
+    hf_token=HF_TOKEN):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub.
 
@@ -206,22 +209,22 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
         repo_id (str): The Hugging Face repository ID where the model is located.
         model_filename (str): The specific filename of the model to download from the repository.
         model_dir (str): The local directory where the model will be stored or downloaded.
-
+        compile_mode (str): The compilation mode to use for the model.
+        model_dtype (str): The data type to use for the model.
+        hf_token (str): The Hugging Face token to use for the model.
     Returns:
         tuple: A tuple containing:
-            - llama_model (Llama): The loaded Llama.cpp model instance.
-            - tokenizer (list): An empty list (tokenizer is not used with Llama.cpp directly in this setup).
+            - model (Llama/transformers model): The loaded Llama.cpp/transformers model instance.
+            - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
     '''
     print("Loading model ", local_model_type)
-    model_path = get_model_path(repo_id=repo_id, model_filename=model_filename, model_dir=model_dir)  
+    tokenizer = list()  
 
     #print("model_path:", model_path)
 
     # Verify the device and cuda settings
     # Check if CUDA is enabled
-    import torch
-    from llama_cpp import Llama
-    from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
+    import torch    
 
     torch.cuda.empty_cache()
     print("Is CUDA enabled? ", torch.cuda.is_available())
@@ -252,41 +255,132 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
         gpu_config.update_gpu(gpu_layers)
         gpu_config.update_context(max_context_length)        
 
-        try:
-            print("GPU load variables:" , vars(gpu_config))
-            if speculative_decoding:
-                llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
-            else:
-                llama_model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config))    
+        if USE_LLAMA_CPP == "True":
+            from llama_cpp import Llama
+            from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
 
-        except Exception as e:
-            print("GPU load failed due to:", e, "Loading model in CPU mode")
-            # If fails, go to CPU mode
-            llama_model = Llama(model_path=model_path, **vars(cpu_config)) 
+            model_path = get_model_path(repo_id=repo_id, model_filename=model_filename, model_dir=model_dir)
+
+            try:
+                print("GPU load variables:" , vars(gpu_config))
+                if speculative_decoding:
+                    model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
+                else:
+                    model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config))    
+
+            except Exception as e:
+                print("GPU load failed due to:", e, "Loading model in CPU mode")
+                # If fails, go to CPU mode
+                model = Llama(model_path=model_path, **vars(cpu_config)) 
+        
+        else:
+            from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+
+            print("Loading model from transformers")
+            # Use the official model ID for Gemma 3 4B
+            model_id = repo_id
+            # 1. Set Data Type (dtype)
+            # For H200/Hopper: 'bfloat16'
+            # For RTX 3060/Ampere: 'float16'
+            dtype_str = model_dtype #os.environ.get("MODEL_DTYPE", "bfloat16").lower()
+            if dtype_str == "bfloat16":
+                torch_dtype = torch.bfloat16
+            elif dtype_str == "float16":
+                torch_dtype = torch.float16
+            else:
+                torch_dtype = torch.float32 # A safe fallback
+
+            # 2. Set Compilation Mode
+            # 'max-autotune' is great for both but can be slow initially.
+            # 'reduce-overhead' is a faster alternative for compiling.
+
+            print(f"--- System Configuration ---")
+            print(f"Using model id: {model_id}")
+            print(f"Using dtype: {torch_dtype}")            
+            print(f"Using compile mode: {compile_mode}")
+            print(f"Using bitsandbytes: {USE_BITSANDBYTES}")
+            print("--------------------------\n")
+
+            # --- Load Tokenizer and Model ---   
+
+            # Load Tokenizer and Model
+            tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+            if not tokenizer.pad_token:
+                tokenizer.pad_token = tokenizer.eos_token    
+
+            if USE_BITSANDBYTES == "True":              
+
+                if OFFLOAD_TO_CPU == "True":
+                    # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
+                    print("Using bitsandbytes for quantisation to 8 bits, with offloading to CPU")
+                    max_memory={0: "4GB", "cpu": "32GB"}
+                    quantization_config = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                    max_memory=max_memory,
+                    llm_int8_enable_fp32_cpu_offload=True # Note: if bitsandbytes has to offload to CPU, inference will be slow
+                    )
+                else:
+                    # For Gemma 4B, requires at least 6GB of VRAM
+                    print("Using bitsandbytes for quantisation to 4 bits")
+                    quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4", # Use the modern NF4 quantisation for better performance
+                    bnb_4bit_compute_dtype=torch_dtype,
+                    bnb_4bit_use_double_quant=True, # Optional: uses a second quantisation step to save even more memory
+                )
+
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    torch_dtype=torch_dtype,
+                    device_map="auto",
+                    quantization_config=quantization_config,
+                    token=hf_token
+                )
+            else:
+                print("Using fp16 precision for model")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    torch_dtype=torch_dtype,
+                    device_map="auto",
+                    token=hf_token
+                )
+
+            # Compile the Model with the selected mode 🚀
+            if COMPILE_TRANSFORMERS == "True":
+                try:
+                    model = torch.compile(model, mode=compile_mode, fullgraph=True)
+                except Exception as e:
+                    print(f"Could not compile model: {e}. Running in eager mode.")
         
         print("Loading with", gpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
     
     # CPU mode
     else:
-        gpu_config.update_gpu(gpu_layers)
+        if USE_LLAMA_CPP == "False":
+            raise Warning("Using transformers model in CPU mode is not supported. Please change your config variable USE_LLAMA_CPP to True if you want to do CPU inference.")
+
+        model_path = get_model_path(repo_id=repo_id, model_filename=model_filename, model_dir=model_dir)
+
+        #gpu_config.update_gpu(gpu_layers)
         cpu_config.update_gpu(gpu_layers)
 
         # Update context length according to slider
-        gpu_config.update_context(max_context_length)
+        #gpu_config.update_context(max_context_length)
         cpu_config.update_context(max_context_length)
 
         if speculative_decoding:
-            llama_model = Llama(model_path=model_path, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config))
+            model = Llama(model_path=model_path, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(cpu_config))
         else:
-            llama_model = Llama(model_path=model_path, **vars(cpu_config)) 
+            model = Llama(model_path=model_path, **vars(cpu_config)) 
 
-        print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", gpu_config.n_ctx)
+        print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", cpu_config.n_ctx)
     
-    tokenizer = list()
+    
 
     print("Finished loading model:", local_model_type)
     print("GPU layers assigned to cuda:", gpu_layers)
-    return llama_model, tokenizer
+    return model, tokenizer
 
 def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
     """
@@ -506,8 +600,83 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
+def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=model, tokenizer=tokenizer):
+    """
+    This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
+    """
+    # 1. Define the conversation as a list of dictionaries
+    conversation = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt}
+    ]
+
+    # 2. Apply the chat template
+    # This function formats the conversation into the exact string Gemma 3 expects.
+    # add_generation_prompt=True adds the special tokens that tell the model it's its turn to speak.
+    input_ids = tokenizer.apply_chat_template(
+        conversation,
+        add_generation_prompt=True,
+        return_tensors="pt"
+    ).to("cuda")
+
+    # Warm-up run
+    print("Performing warm-up run...")
+    _ = model.generate(input_ids, max_new_tokens=50)
+    print("Warm-up complete.")
+
+    # Map LlamaCPP parameters to transformers parameters
+    generation_kwargs = {
+        'max_new_tokens': gen_config.max_tokens,
+        'temperature': gen_config.temperature,
+        'top_p': gen_config.top_p,
+        'top_k': gen_config.top_k,
+        'do_sample': True,
+        'pad_token_id': tokenizer.eos_token_id
+    }
+    
+    # Remove parameters that don't exist in transformers
+    if hasattr(gen_config, 'repeat_penalty'):
+        generation_kwargs['repetition_penalty'] = gen_config.repeat_penalty
+
+    # --- Timed Inference Test ---
+    print("\nStarting timed inference test...")
+    start_time = time.time()
+
+
+
+    outputs = model.generate(
+        input_ids,
+        **generation_kwargs
+    )
+
+    end_time = time.time()
+
+    # --- Decode and Display Results ---
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    # To get only the model's reply, we can decode just the newly generated tokens
+    new_tokens = outputs[0][input_ids.shape[-1]:]
+    assistant_reply = tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+    num_input_tokens = len(input_ids)
+    num_generated_tokens = len(new_tokens)
+    duration = end_time - start_time
+    tokens_per_second = num_generated_tokens / duration
+
+    print("\n--- Inference Results ---")
+    print(f"System Prompt: {conversation[0]['content']}")
+    print(f"User Prompt: {conversation[1]['content']}")
+    print("---")
+    print(f"Assistant's Reply: {assistant_reply}")
+    print("\n--- Performance ---")
+    print(f"Time taken: {duration:.2f} seconds")
+    print(f"Generated tokens: {num_generated_tokens}")
+    print(f"Tokens per second: {tokens_per_second:.2f}")
+
+    return assistant_reply, num_input_tokens, num_generated_tokens
+
+
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=tokenizer, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -516,6 +685,8 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     """
     # Constructing the full prompt from the conversation history
     full_prompt = "Conversation history:\n"
+    num_transformer_input_tokens = 0
+    num_transformer_generated_tokens = 0
     
     for entry in conversation_history:
         role = entry['role'].capitalize()  # Assuming the history is stored with 'role' and 'parts'
@@ -573,13 +744,18 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 gen_config = LlamaCPPGenerationConfig()
                 gen_config.update_temp(temperature)
 
-                response = call_llama_cpp_chatmodel(prompt, system_prompt, gen_config, model=local_model)
+                if USE_LLAMA_CPP == "True":
+                    response = call_llama_cpp_chatmodel(prompt, system_prompt, gen_config, model=local_model)
+
+                else:
+                    response, num_transformer_input_tokens, num_transformer_generated_tokens = call_transformers_model(prompt, system_prompt, gen_config, model=local_model, tokenizer=tokenizer)
+                    response_text = response
 
                 #print("Successful call to local model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to Gemma model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
+                print("Call to local model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
 
                 time.sleep(timeout_wait)
 
@@ -596,21 +772,24 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     if isinstance(response, ResponseObject):
         response_text = response.text
         conversation_history.append({'role': 'assistant', 'parts': [response_text]})
-    elif 'choices' in response:
+    elif 'choices' in response: # LLama.cpp model response
         if "gpt-oss" in model_choice:
             response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
         else:
             response_text = response['choices'][0]['message']['content']
         response_text = response_text.strip()
         conversation_history.append({'role': 'assistant', 'parts': [response_text]}) #response['choices'][0]['text']]})
-    else:
+    elif model_source == "Gemini":
         response_text = response.text
         response_text = response_text.strip()
         conversation_history.append({'role': 'assistant', 'parts': [response_text]})
+    else: # Assume transformers model response
+        response_text = response
+        conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     
-    return response, conversation_history, response_text
+    return response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
 
-def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+def process_requests(prompts: List[str], system_prompt: str, conversation_history: List[dict], whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=tokenizer, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -641,7 +820,7 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
 
     for prompt in prompts:
 
-        response, conversation_history, response_text = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
+        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
 
         responses.append(response)
         whole_conversation.append(system_prompt)
@@ -677,9 +856,16 @@ def process_requests(prompts: List[str], system_prompt: str, conversation_histor
                     whole_conversation_metadata.append(str(response.usage_metadata))
 
                 elif "Local" in model_source:
-                    output_tokens = response['usage'].get('completion_tokens', 0)
-                    input_tokens = response['usage'].get('prompt_tokens', 0)
-                    whole_conversation_metadata.append(str(response['usage']))
+                    if USE_LLAMA_CPP == "True":
+                        output_tokens = response['usage'].get('completion_tokens', 0)
+                        input_tokens = response['usage'].get('prompt_tokens', 0)
+                        whole_conversation_metadata.append(str(response['usage']))
+
+                    if USE_LLAMA_CPP == "False":
+                        input_tokens = num_transformer_input_tokens
+                        output_tokens = num_transformer_generated_tokens
+                        whole_conversation_metadata.append('inputTokens: ' + str(input_tokens) + ' outputTokens: ' + str(output_tokens))
+
             except KeyError as e:
                 print(f"Key error: {e} - Check the structure of response.usage_metadata")
         else:
@@ -699,6 +885,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         temperature: float,
                                         reported_batch_no: int,
                                         local_model: object,
+                                        tokenizer:object,
                                         bedrock_runtime:boto3.Session.client,
                                         model_source:str,
                                         MAX_OUTPUT_VALIDATION_ATTEMPTS: int,
@@ -721,6 +908,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     - temperature (float): The temperature parameter for the model.
     - reported_batch_no (int): The reported batch number.
     - local_model (object): The local model to use.
+    - tokenizer (object): The tokenizer to use.
     - bedrock_runtime (boto3.Session.client): The client object for boto3 Bedrock runtime.
     - model_source (str): The source of the model, whether in AWS, Gemini, or local.
     - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
@@ -743,7 +931,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
         responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
             batch_prompts, system_prompt, conversation_history, whole_conversation, 
             whole_conversation_metadata, google_client, google_config, model_choice, 
-            call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, master=master, assistant_prefill=assistant_prefill
+            call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, tokenizer=tokenizer, master=master, assistant_prefill=assistant_prefill
         )
 
         stripped_response = response_text.strip()

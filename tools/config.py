@@ -241,20 +241,38 @@ model_name_map = {
 
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
+USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers
+
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")
+GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "google/gemma-2-2b-it")
+if USE_LLAMA_CPP == "False":
+    GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
+
 GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf")
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_REPO_ID = get_or_create_env_var("GEMMA3_REPO_ID", "unsloth/gemma-3-270m-it-qat-GGUF")
+GEMMA3_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_REPO_TRANSFORMERS_ID", "google/gemma-3-270m-it")
+if USE_LLAMA_CPP == "False":
+    GEMMA3_REPO_ID = GEMMA3_REPO_TRANSFORMERS_ID
+
 GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-qat-F16.gguf")
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "google/gemma-3-4b-it")
+if USE_LLAMA_CPP == "False":
+    GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
+
 GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-Q4_K_M.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
+GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "openai/gpt-oss-20b")
+if USE_LLAMA_CPP == "False":
+    GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
+
 GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
 
@@ -304,6 +322,13 @@ LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
 REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
+
+# Transformers variables
+COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'True') # Whether to compile transformers models
+USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether to use bitsandbytes for quantization
+COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
+MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'float16') # alternatively 'bfloat16'
+OFFLOAD_TO_CPU = get_or_create_env_var('OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
 
 MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
 
