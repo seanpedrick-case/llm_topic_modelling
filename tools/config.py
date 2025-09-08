@@ -328,7 +328,7 @@ COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'True') # W
 USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether to use bitsandbytes for quantization
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
-OFFLOAD_TO_CPU = get_or_create_env_var('OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
+INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
 
 MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
 

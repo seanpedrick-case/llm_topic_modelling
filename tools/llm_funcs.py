@@ -18,7 +18,7 @@ full_text = "" # Define dummy source text (full text) just to enable highlight f
 model = list() # Define empty list for model functions to run
 tokenizer = list() #[] # Define empty list for model functions to run
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, OFFLOAD_TO_CPU
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU
 from tools.prompts import initial_table_assistant_prefill
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
@@ -303,48 +303,55 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
 
             # --- Load Tokenizer and Model ---   
 
-            # Load Tokenizer and Model
-            tokenizer = AutoTokenizer.from_pretrained(model_id)
+            try:
 
-            if not tokenizer.pad_token:
-                tokenizer.pad_token = tokenizer.eos_token    
+                # Load Tokenizer and Model
+                tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-            if USE_BITSANDBYTES == "True":              
+                if not tokenizer.pad_token:
+                    tokenizer.pad_token = tokenizer.eos_token    
 
-                if OFFLOAD_TO_CPU == "True":
-                    # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
-                    print("Using bitsandbytes for quantisation to 8 bits, with offloading to CPU")
-                    max_memory={0: "4GB", "cpu": "32GB"}
-                    quantisation_config = BitsAndBytesConfig(
-                    load_in_8bit=True,
-                    max_memory=max_memory,
-                    llm_int8_enable_fp32_cpu_offload=True # Note: if bitsandbytes has to offload to CPU, inference will be slow
+                if USE_BITSANDBYTES == "True":              
+
+                    if INT8_WITH_OFFLOAD_TO_CPU == "True":
+                        # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
+                        print("Using bitsandbytes for quantisation to 8 bits, with offloading to CPU")
+                        max_memory={0: "4GB", "cpu": "32GB"}
+                        quantisation_config = BitsAndBytesConfig(
+                        load_in_8bit=True,
+                        max_memory=max_memory,
+                        llm_int8_enable_fp32_cpu_offload=True # Note: if bitsandbytes has to offload to CPU, inference will be slow
+                        )
+                    else:
+                        # For Gemma 4B, requires at least 6GB of VRAM
+                        print("Using bitsandbytes for quantisation to 4 bits")
+                        quantisation_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4", # Use the modern NF4 quantisation for better performance
+                        bnb_4bit_compute_dtype=torch_dtype,
+                        bnb_4bit_use_double_quant=True # Optional: uses a second quantisation step to save even more memory
+                    )
+
+                    print("Loading model with bitsandbytes quantisation config:", quantisation_config)
+
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_id,
+                        #dtype=torch_dtype,
+                        device_map="auto",
+                        quantization_config=quantisation_config,
+                        token=hf_token
                     )
                 else:
-                    # For Gemma 4B, requires at least 6GB of VRAM
-                    print("Using bitsandbytes for quantisation to 4 bits")
-                    quantisation_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4", # Use the modern NF4 quantisation for better performance
-                    bnb_4bit_compute_dtype=torch_dtype,
-                    bnb_4bit_use_double_quant=True # Optional: uses a second quantisation step to save even more memory
-                )
-
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_id,
-                    dtype=torch_dtype,
-                    device_map="auto",
-                    quantization_config=quantisation_config,
-                    token=hf_token
-                )
-            else:
-                print("Using fp16 precision for model")
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_id,
-                    dtype=torch_dtype,
-                    device_map="auto",
-                    token=hf_token
-                )
+                    print("Loading model without bitsandbytes quantisation")
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_id,
+                        #dtype=torch_dtype,
+                        device_map="auto",
+                        token=hf_token
+                    )
+            except Exception as e:
+                print("Error loading model with bitsandbytes quantisation config:", e)
+                raise Warning("Error loading model with bitsandbytes quantisation config:", e)
 
             # Compile the Model with the selected mode 🚀
             if COMPILE_TRANSFORMERS == "True":
@@ -655,7 +662,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     new_tokens = outputs[0][input_ids.shape[-1]:]
     assistant_reply = tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-    num_input_tokens = len(input_ids)
+    num_input_tokens = input_ids.shape[-1]  # This gets the sequence length (number of tokens)
     num_generated_tokens = len(new_tokens)
     duration = end_time - start_time
     tokens_per_second = num_generated_tokens / duration
