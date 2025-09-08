@@ -315,7 +315,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                     # This will be very slow. Requires at least 4GB of VRAM and 32GB of RAM
                     print("Using bitsandbytes for quantisation to 8 bits, with offloading to CPU")
                     max_memory={0: "4GB", "cpu": "32GB"}
-                    quantization_config = BitsAndBytesConfig(
+                    quantisation_config = BitsAndBytesConfig(
                     load_in_8bit=True,
                     max_memory=max_memory,
                     llm_int8_enable_fp32_cpu_offload=True # Note: if bitsandbytes has to offload to CPU, inference will be slow
@@ -323,25 +323,25 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                 else:
                     # For Gemma 4B, requires at least 6GB of VRAM
                     print("Using bitsandbytes for quantisation to 4 bits")
-                    quantization_config = BitsAndBytesConfig(
+                    quantisation_config = BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_quant_type="nf4", # Use the modern NF4 quantisation for better performance
                     bnb_4bit_compute_dtype=torch_dtype,
-                    bnb_4bit_use_double_quant=True, # Optional: uses a second quantisation step to save even more memory
+                    bnb_4bit_use_double_quant=True # Optional: uses a second quantisation step to save even more memory
                 )
 
                 model = AutoModelForCausalLM.from_pretrained(
                     model_id,
-                    torch_dtype=torch_dtype,
+                    dtype=torch_dtype,
                     device_map="auto",
-                    quantization_config=quantization_config,
+                    quantization_config=quantisation_config,
                     token=hf_token
                 )
             else:
                 print("Using fp16 precision for model")
                 model = AutoModelForCausalLM.from_pretrained(
                     model_id,
-                    torch_dtype=torch_dtype,
+                    dtype=torch_dtype,
                     device_map="auto",
                     token=hf_token
                 )
@@ -620,9 +620,9 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     ).to("cuda")
 
     # Warm-up run
-    print("Performing warm-up run...")
-    _ = model.generate(input_ids, max_new_tokens=50)
-    print("Warm-up complete.")
+    # print("Performing warm-up run...")
+    # _ = model.generate(input_ids, max_new_tokens=50)
+    # print("Warm-up complete.")
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
@@ -630,19 +630,19 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         'temperature': gen_config.temperature,
         'top_p': gen_config.top_p,
         'top_k': gen_config.top_k,
-        'do_sample': True,
-        'pad_token_id': tokenizer.eos_token_id
+        'do_sample': True#,
+        #'pad_token_id': tokenizer.eos_token_id
     }
     
     # Remove parameters that don't exist in transformers
     if hasattr(gen_config, 'repeat_penalty'):
         generation_kwargs['repetition_penalty'] = gen_config.repeat_penalty
 
+    print("Generation kwargs:", generation_kwargs)
+
     # --- Timed Inference Test ---
-    print("\nStarting timed inference test...")
+    print("\nStarting model inference...")
     start_time = time.time()
-
-
 
     outputs = model.generate(
         input_ids,
