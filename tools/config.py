@@ -220,9 +220,9 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_source.append("Local")
 
 if RUN_AWS_BEDROCK_MODELS == "1":
-    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"])
-    model_short_names.extend(["haiku", "sonnet"])
-    model_source.extend(["AWS", "AWS"])
+    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0", "amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0"])
+    model_short_names.extend(["haiku", "sonnet", "nova_micro", "nova_lite", "nova_pro"])
+    model_source.extend(["AWS", "AWS", "AWS", "AWS", "AWS"])
 
 if RUN_GEMINI_MODELS == "1":
     model_full_names.extend(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]) # , # Gemini pro No longer available on free tier

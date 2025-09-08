@@ -144,7 +144,7 @@ with app:
 
     gr.Markdown("""# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini 2.5, or Bedrock models (e.g. Claude 3 Haiku, Claude Sonnet 3.7). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini 2.5, or Bedrock models (e.g. Claude 3 Haiku, Claude Sonnet 3.7, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and relevant text rows related to them. The prompts are designed for topic modelling public consultations, but they can be adapted to different contexts (see the LLM settings tab to modify).
     
     Instructions on use can be found in the README.md file. Try it out with this [dummy development consultation dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/tree/main), which you can also try with [zero-shot topics](https://huggingface.co/datasets/seanpedrickcase/dummy_development_consultation/tree/main). Try also this [dummy case notes dataset](https://huggingface.co/datasets/seanpedrickcase/dummy_case_notes/tree/main).
 
@@ -178,7 +178,7 @@ with app:
         sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
 
         if SHOW_EXAMPLES == "True":
-            examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv"], [["example_data/combined_case_notes.csv", "combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people"]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"], label="Test with an example dataset")
+            examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv"], [["example_data/combined_case_notes.csv",], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv"]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"], label="Test with an example dataset")
 
         if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
             with gr.Accordion("Assign task to cost code", open = True, visible=True):
