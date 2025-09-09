@@ -172,6 +172,7 @@ def get_model_path(repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model
         raise Warning("Error loading model:", e)
         #return None
     
+@spaces.GPU(duration=60)
 def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     gpu_layers:int=gpu_layers,
     max_context_length:int=context_length,
@@ -402,6 +403,8 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                 device_map="auto",
                 token=hf_token
             )
+
+            #assistant_model.config._name_or_path = model.config._name_or_path
             
             # Compile the assistant model if compilation is enabled
             if COMPILE_TRANSFORMERS == "True":
@@ -781,11 +784,6 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         add_generation_prompt=True,
         return_tensors="pt"
     ).to("cuda")
-
-    # Warm-up run
-    # print("Performing warm-up run...")
-    # _ = model.generate(input_ids, max_new_tokens=50)
-    # print("Warm-up complete.")
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
