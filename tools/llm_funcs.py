@@ -23,12 +23,16 @@ full_text = "" # Define dummy source text (full text) just to enable highlight f
 # Global variables for model and tokenizer
 _model = None
 _tokenizer = None
+_assistant_model = None
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START, USE_SPECULATIVE_DECODING, ASSISTANT_MODEL
 from tools.prompts import initial_table_assistant_prefill
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
 else: SPECULATIVE_DECODING = False
+
+if USE_SPECULATIVE_DECODING == "True": USE_SPECULATIVE_DECODING = True 
+else: USE_SPECULATIVE_DECODING = False
 
 if isinstance(NUM_PRED_TOKENS, str): NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
 if isinstance(LLM_MAX_GPU_LAYERS, str): LLM_MAX_GPU_LAYERS = int(LLM_MAX_GPU_LAYERS)
@@ -181,7 +185,8 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     model_dtype=MODEL_DTYPE,
     hf_token=HF_TOKEN,
     model=None,
-    tokenizer=None):
+    tokenizer=None,
+    assistant_model=None):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub.
 
@@ -200,10 +205,12 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
         hf_token (str): The Hugging Face token to use for the model.
         model (Llama/transformers model): The model to load.
         tokenizer (list/transformers tokenizer): The tokenizer to load.
+        assistant_model (transformers model): The assistant model for speculative decoding.
     Returns:
         tuple: A tuple containing:
             - model (Llama/transformers model): The loaded Llama.cpp/transformers model instance.
             - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
+            - assistant_model (transformers model): The assistant model for speculative decoding (if USE_SPECULATIVE_DECODING is True).
     '''
     print("Loading model ", local_model_type)
 
@@ -382,16 +389,42 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     print("Finished loading model:", local_model_type)
     print("GPU layers assigned to cuda:", gpu_layers)
 
+    # Load assistant model for speculative decoding if enabled
+    if USE_SPECULATIVE_DECODING and USE_LLAMA_CPP == "False" and torch_device == "cuda":
+        print("Loading assistant model for speculative decoding:", ASSISTANT_MODEL)
+        try:
+            from transformers import AutoModelForCausalLM
+            
+            # Load the assistant model with the same configuration as the main model
+            assistant_model = AutoModelForCausalLM.from_pretrained(
+                ASSISTANT_MODEL,
+                dtype=torch_dtype,
+                device_map="auto",
+                token=hf_token
+            )
+            
+            # Compile the assistant model if compilation is enabled
+            if COMPILE_TRANSFORMERS == "True":
+                try:
+                    assistant_model = torch.compile(assistant_model, mode=compile_mode, fullgraph=True)
+                except Exception as e:
+                    print(f"Could not compile assistant model: {e}. Running in eager mode.")
+            
+            print("Successfully loaded assistant model for speculative decoding")
+            
+        except Exception as e:
+            print(f"Error loading assistant model: {e}")
+            assistant_model = None
+    else:
+        assistant_model = None
 
-    
-
-    return model, tokenizer
+    return model, tokenizer, assistant_model
 
 def get_model():
     """Get the globally loaded model. Load it if not already loaded."""
-    global _model, _tokenizer
+    global _model, _tokenizer, _assistant_model
     if _model is None and LOAD_LOCAL_MODEL_AT_START == "True":
-        _model, _tokenizer = load_model(
+        _model, _tokenizer, _assistant_model = load_model(
             local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
             gpu_layers=gpu_layers, 
             max_context_length=context_length, 
@@ -405,15 +438,16 @@ def get_model():
             model_dtype=MODEL_DTYPE, 
             hf_token=HF_TOKEN, 
             model=_model, 
-            tokenizer=_tokenizer
+            tokenizer=_tokenizer,
+            assistant_model=_assistant_model
         )
     return _model
 
 def get_tokenizer():
     """Get the globally loaded tokenizer. Load it if not already loaded."""
-    global _model, _tokenizer
+    global _model, _tokenizer, _assistant_model
     if _tokenizer is None and LOAD_LOCAL_MODEL_AT_START == "True":
-        _model, _tokenizer = load_model(
+        _model, _tokenizer, _assistant_model = load_model(
             local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
             gpu_layers=gpu_layers, 
             max_context_length=context_length, 
@@ -427,15 +461,40 @@ def get_tokenizer():
             model_dtype=MODEL_DTYPE, 
             hf_token=HF_TOKEN, 
             model=_model, 
-            tokenizer=_tokenizer
+            tokenizer=_tokenizer,
+            assistant_model=_assistant_model
         )
     return _tokenizer
 
-def set_model(model, tokenizer):
-    """Set the global model and tokenizer."""
-    global _model, _tokenizer
+def get_assistant_model():
+    """Get the globally loaded assistant model. Load it if not already loaded."""
+    global _model, _tokenizer, _assistant_model
+    if _assistant_model is None and LOAD_LOCAL_MODEL_AT_START == "True":
+        _model, _tokenizer, _assistant_model = load_model(
+            local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
+            gpu_layers=gpu_layers, 
+            max_context_length=context_length, 
+            gpu_config=gpu_config, 
+            cpu_config=cpu_config, 
+            torch_device=torch_device, 
+            repo_id=LOCAL_REPO_ID, 
+            model_filename=LOCAL_MODEL_FILE, 
+            model_dir=LOCAL_MODEL_FOLDER, 
+            compile_mode=COMPILE_MODE, 
+            model_dtype=MODEL_DTYPE, 
+            hf_token=HF_TOKEN, 
+            model=_model, 
+            tokenizer=_tokenizer,
+            assistant_model=_assistant_model
+        )
+    return _assistant_model
+
+def set_model(model, tokenizer, assistant_model=None):
+    """Set the global model, tokenizer, and assistant model."""
+    global _model, _tokenizer, _assistant_model
     _model = model
     _tokenizer = tokenizer
+    _assistant_model = assistant_model
 
 # Initialize model at startup if configured
 if LOAD_LOCAL_MODEL_AT_START == "True":
@@ -694,7 +753,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None):
+def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None):
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
     """
@@ -702,6 +761,8 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         model = get_model()
     if tokenizer is None:
         tokenizer = get_tokenizer()
+    if assistant_model is None and USE_SPECULATIVE_DECODING:
+        assistant_model = get_assistant_model()
     
     if model is None or tokenizer is None:
         raise ValueError("No model or tokenizer available. Either pass them as parameters or ensure LOAD_LOCAL_MODEL_AT_START is True.")
@@ -744,10 +805,19 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     print("\nStarting model inference...")
     start_time = time.time()
 
-    outputs = model.generate(
-        input_ids,
-        **generation_kwargs
-    )
+    # Use speculative decoding if assistant model is available
+    if USE_SPECULATIVE_DECODING and assistant_model is not None:
+        print("Using speculative decoding with assistant model")
+        outputs = model.generate(
+            input_ids,
+            assistant_model=assistant_model,
+            **generation_kwargs
+        )
+    else:
+        outputs = model.generate(
+            input_ids,
+            **generation_kwargs
+        )
 
     end_time = time.time()
 
@@ -771,7 +841,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
 
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_model=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -873,7 +943,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                     response = call_llama_cpp_chatmodel(prompt, system_prompt, gen_config, model=local_model)
 
                 else:
-                    response, num_transformer_input_tokens, num_transformer_generated_tokens = call_transformers_model(prompt, system_prompt, gen_config, model=local_model, tokenizer=tokenizer)
+                    response, num_transformer_input_tokens, num_transformer_generated_tokens = call_transformers_model(prompt, system_prompt, gen_config, model=local_model, tokenizer=tokenizer, assistant_model=assistant_model)
                     response_text = response
 
                 #print("Successful call to local model.")
@@ -918,7 +988,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 def process_requests(prompts: List[str],
 system_prompt: str,
 conversation_history: List[dict],
-whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=None, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=None, assistant_model=None, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -949,7 +1019,7 @@ whole_conversation: List[str], whole_conversation_metadata: List[str], google_cl
 
     for prompt in prompts:
 
-        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
+        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
 
         responses.append(response)
         whole_conversation.append(system_prompt)

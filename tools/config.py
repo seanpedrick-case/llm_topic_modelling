@@ -310,6 +310,7 @@ GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F1
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "google/gemma-3-270m-it")
 
 GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
 

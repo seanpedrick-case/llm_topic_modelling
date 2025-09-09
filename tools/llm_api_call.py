@@ -16,7 +16,7 @@ GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details
-from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer
+from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT
 from tools.aws_functions import connect_to_bedrock_runtime
 
@@ -695,6 +695,7 @@ def extract_topics(in_data_file: GradioFileData,
               reasoning_suffix:str=reasoning_suffix,
               model:object=list(),
               tokenizer:object=list(),
+              assistant_model:object=list(),
               progress=Progress(track_tqdm=True)):
 
     '''
@@ -815,6 +816,7 @@ def extract_topics(in_data_file: GradioFileData,
                 progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
                 local_model = get_model()
                 tokenizer = get_tokenizer()
+                assistant_model = get_assistant_model()
 
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)
