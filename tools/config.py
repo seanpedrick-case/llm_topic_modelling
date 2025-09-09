@@ -272,6 +272,8 @@ model_name_map = {
 
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
+
+LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', 'True')
 USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers
 
 

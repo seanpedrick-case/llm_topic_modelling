@@ -11,7 +11,7 @@ from tqdm import tqdm
 import os
 
 from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group, summary_assistant_prefill
-from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client
+from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT
@@ -485,12 +485,12 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             aws_access_key_textbox:str='',
                             aws_secret_key_textbox:str='',
                             model_name_map:dict=model_name_map,
+                            hf_api_key_textbox:str='',
                             reasoning_suffix:str=reasoning_suffix,
                             local_model:object=list(), 
-                            tokenizer:object=list(),
-                            hf_api_key_textbox:str='',
+                            tokenizer:object=list(),                            
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, 
-                            summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,
+                            summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,                            
                             do_summaries:str="Yes",                            
                             progress=gr.Progress(track_tqdm=True)):
     '''
@@ -517,10 +517,12 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         aws_access_key_textbox (str, optional): AWS access key. Defaults to empty string.
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
         model_name_map (dict, optional): Dictionary mapping model choices to their properties. Defaults to model_name_map.
+        hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object if using local inference. Defaults to empty list.
-        summarise_topic_descriptions_prompt (str, optional): Prompt template for topic summarization
-        summarise_topic_descriptions_system_prompt (str, optional): System prompt for topic summarization
+        tokenizer (object, optional): Tokenizer object if using local inference. Defaults to empty list.
+        summarise_topic_descriptions_prompt (str, optional): Prompt template for topic summarization.
+        summarise_topic_descriptions_system_prompt (str, optional): System prompt for topic summarization.
         do_summaries (str, optional): Flag to control summary generation. Defaults to "Yes".
         progress (gr.Progress, optional): Gradio progress tracker. Defaults to track_tqdm=True.
 
@@ -576,9 +578,10 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     model_source = model_name_map[model_choice]["source"]
 
-    if (model_source == "Local") & (RUN_LOCAL_MODEL == "1"):
-        progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
-        local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER, hf_token=hf_api_key_textbox)
+    if (model_source == "Local") & (RUN_LOCAL_MODEL == "1") & (not local_model) & (not tokenizer):
+        progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
+        local_model = get_model()
+        tokenizer = get_tokenizer()
 
     summary_loop_description = "Revising topic-level summaries. " + str(latest_summary_completed) + " summaries completed so far."
     summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
@@ -598,8 +601,6 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_topic_descriptions_system_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + reasoning_suffix
 
             try:
-                print("formatted_summarise_topic_descriptions_system_prompt:", formatted_summarise_topic_descriptions_system_prompt)
-
                 response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer)
                 summarised_output = response
                 summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
@@ -704,10 +705,10 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     aws_access_key_textbox:str='',
                     aws_secret_key_textbox:str='',
                     model_name_map:dict=model_name_map,
-                    reasoning_suffix:str=reasoning_suffix,
+                    hf_api_key_textbox:str='',
+                    reasoning_suffix:str=reasoning_suffix,                    
                     local_model:object=list(),
                     tokenizer:object=list(),
-                    hf_api_key_textbox:str='',
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
@@ -729,10 +730,10 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         aws_access_key_textbox (str, optional): AWS access key. Defaults to empty string.
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
         model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
+        hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object. Defaults to empty list.
-        tokenizer (object, optional): Tokenizer object. Defaults to empty list.
-        hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
+        tokenizer (object, optional): Tokenizer object. Defaults to empty list.        
         summarise_everything_prompt (str, optional): Prompt for overall summary
         comprehensive_summary_format_prompt (str, optional): Prompt for comprehensive summary format
         comprehensive_summary_format_prompt_by_group (str, optional): Prompt for group summary format
@@ -786,9 +787,10 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
     tic = time.perf_counter()
 
-    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
-                progress(0.1, f"Loading in local model: {CHOSEN_LOCAL_MODEL_TYPE}")
-                local_model, tokenizer = load_model(local_model_type=CHOSEN_LOCAL_MODEL_TYPE, repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model_dir=LOCAL_MODEL_FOLDER, hf_token=hf_api_key_textbox)
+    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1") & (not local_model) & (not tokenizer):
+        progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
+        local_model = get_model()
+        tokenizer = get_tokenizer()
 
     summary_loop = tqdm(unique_groups, desc="Creating overall summary for groups", unit="groups")   
 

@@ -19,10 +19,12 @@ from azure.ai.inference.models import SystemMessage, UserMessage
 
 model_type = None # global variable setup
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
-model = list() # Define empty list for model functions to run
-tokenizer = list() #[] # Define empty list for model functions to run
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT
+# Global variables for model and tokenizer
+_model = None
+_tokenizer = None
+
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START
 from tools.prompts import initial_table_assistant_prefill
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
@@ -73,30 +75,6 @@ else:
 if not LLM_THREADS: threads = 1
 else: threads = LLM_THREADS
 
-# Check if CUDA is enabled
-# torch.cuda.empty_cache()
-# print("Is CUDA enabled? ", torch.cuda.is_available())
-# print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
-# if torch.cuda.is_available():
-#     torch_device = "cuda"
-#     gpu_layers = int(LLM_MAX_GPU_LAYERS)
-#     print("CUDA version:", torch.version.cuda)
-#     #try:
-#     #    os.system("nvidia-smi")
-#     #except Exception as e:
-#     #    print("Could not print nvidia-smi settings due to:", e)
-# else: 
-#     torch_device =  "cpu"
-#     gpu_layers = 0
-
-# print("Running on device:", torch_device)
-# print("GPU layers assigned to cuda:", gpu_layers)
-
-# if not LLM_THREADS:
-#     threads = torch.get_num_threads()
-# else: threads = LLM_THREADS
-# print("CPU threads:", threads)
-
 class llama_cpp_init_config_gpu:
     def __init__(self,
                  last_n_tokens=last_n_tokens,
@@ -128,6 +106,8 @@ class llama_cpp_init_config_cpu(llama_cpp_init_config_gpu):
 
 gpu_config = llama_cpp_init_config_gpu()
 cpu_config = llama_cpp_init_config_cpu()
+
+
 
 class LlamaCPPGenerationConfig:
     def __init__(self, temperature=temperature,
@@ -199,7 +179,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     model_dir=LOCAL_MODEL_FOLDER,
     compile_mode=COMPILE_MODE,
     model_dtype=MODEL_DTYPE,
-    hf_token=HF_TOKEN):
+    hf_token=HF_TOKEN,
+    model=None,
+    tokenizer=None):
     '''
     Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub.
 
@@ -216,15 +198,25 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
         compile_mode (str): The compilation mode to use for the model.
         model_dtype (str): The data type to use for the model.
         hf_token (str): The Hugging Face token to use for the model.
+        model (Llama/transformers model): The model to load.
+        tokenizer (list/transformers tokenizer): The tokenizer to load.
     Returns:
         tuple: A tuple containing:
             - model (Llama/transformers model): The loaded Llama.cpp/transformers model instance.
             - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
     '''
     print("Loading model ", local_model_type)
-    tokenizer = list()  
 
     #print("model_path:", model_path)
+
+    if model is None:
+        model = list()        
+    else:
+        return model, tokenizer
+    if tokenizer is None:
+        tokenizer = list()
+    else:
+        return model, tokenizer
 
     # Verify the device and cuda settings
     # Check if CUDA is enabled
@@ -386,21 +378,84 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
             model = Llama(model_path=model_path, **vars(cpu_config)) 
 
         print("Loading with", cpu_config.n_gpu_layers, "model layers sent to GPU and a maximum context length of", cpu_config.n_ctx)
-    
-    
 
     print("Finished loading model:", local_model_type)
     print("GPU layers assigned to cuda:", gpu_layers)
+
+
+    
+
     return model, tokenizer
 
-def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
+def get_model():
+    """Get the globally loaded model. Load it if not already loaded."""
+    global _model, _tokenizer
+    if _model is None and LOAD_LOCAL_MODEL_AT_START == "True":
+        _model, _tokenizer = load_model(
+            local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
+            gpu_layers=gpu_layers, 
+            max_context_length=context_length, 
+            gpu_config=gpu_config, 
+            cpu_config=cpu_config, 
+            torch_device=torch_device, 
+            repo_id=LOCAL_REPO_ID, 
+            model_filename=LOCAL_MODEL_FILE, 
+            model_dir=LOCAL_MODEL_FOLDER, 
+            compile_mode=COMPILE_MODE, 
+            model_dtype=MODEL_DTYPE, 
+            hf_token=HF_TOKEN, 
+            model=_model, 
+            tokenizer=_tokenizer
+        )
+    return _model
+
+def get_tokenizer():
+    """Get the globally loaded tokenizer. Load it if not already loaded."""
+    global _model, _tokenizer
+    if _tokenizer is None and LOAD_LOCAL_MODEL_AT_START == "True":
+        _model, _tokenizer = load_model(
+            local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
+            gpu_layers=gpu_layers, 
+            max_context_length=context_length, 
+            gpu_config=gpu_config, 
+            cpu_config=cpu_config, 
+            torch_device=torch_device, 
+            repo_id=LOCAL_REPO_ID, 
+            model_filename=LOCAL_MODEL_FILE, 
+            model_dir=LOCAL_MODEL_FOLDER, 
+            compile_mode=COMPILE_MODE, 
+            model_dtype=MODEL_DTYPE, 
+            hf_token=HF_TOKEN, 
+            model=_model, 
+            tokenizer=_tokenizer
+        )
+    return _tokenizer
+
+def set_model(model, tokenizer):
+    """Set the global model and tokenizer."""
+    global _model, _tokenizer
+    _model = model
+    _tokenizer = tokenizer
+
+# Initialize model at startup if configured
+if LOAD_LOCAL_MODEL_AT_START == "True":
+    get_model()  # This will trigger loading
+
+def call_llama_cpp_model(formatted_string:str, gen_config:str, model=None):
     """
     Calls your generation model with parameters from the LlamaCPPGenerationConfig object.
 
     Args:
         formatted_string (str): The formatted input text for the model.
         gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
+        model: Optional model instance. If None, will use the globally loaded model.
     """
+    if model is None:
+        model = get_model()
+    
+    if model is None:
+        raise ValueError("No model available. Either pass a model parameter or ensure LOAD_LOCAL_MODEL_AT_START is True.")
+    
     # Extracting parameters from the gen_config object
     temperature = gen_config.temperature
     top_k = gen_config.top_k
@@ -425,7 +480,7 @@ def call_llama_cpp_model(formatted_string:str, gen_config:str, model=model):
 
     return output
 
-def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config:LlamaCPPGenerationConfig, model=model):
+def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config:LlamaCPPGenerationConfig, model=None):
     """
     Calls your Llama.cpp chat model with a formatted user message and system prompt,
     using generation parameters from the LlamaCPPGenerationConfig object.
@@ -434,8 +489,14 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
         formatted_string (str): The formatted input text for the user's message.
         system_prompt (str): The system-level instructions for the model.
         gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
-        model (Llama): The Llama.cpp model instance to use for chat completion.
+        model: Optional model instance. If None, will use the globally loaded model.
     """
+    if model is None:
+        model = get_model()
+    
+    if model is None:
+        raise ValueError("No model available. Either pass a model parameter or ensure LOAD_LOCAL_MODEL_AT_START is True.")
+    
     # Extracting parameters from the gen_config object
     temperature = gen_config.temperature
     top_k = gen_config.top_k
@@ -464,7 +525,13 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
     return output
 
 # This function is not used in this app
-def llama_cpp_streaming(history, full_prompt, temperature=temperature):
+def llama_cpp_streaming(history, full_prompt, temperature=temperature, model=None):
+
+    if model is None:
+        model = get_model()
+    
+    if model is None:
+        raise ValueError("No model available. Either pass a model parameter or ensure LOAD_LOCAL_MODEL_AT_START is True.")
 
     gen_config = LlamaCPPGenerationConfig()
     gen_config.update_temp(temperature)
@@ -627,10 +694,18 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=model, tokenizer=tokenizer):
+def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None):
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
     """
+    if model is None:
+        model = get_model()
+    if tokenizer is None:
+        tokenizer = get_tokenizer()
+    
+    if model is None or tokenizer is None:
+        raise ValueError("No model or tokenizer available. Either pass them as parameters or ensure LOAD_LOCAL_MODEL_AT_START is True.")
+    
     # 1. Define the conversation as a list of dictionaries
     conversation = [
         {"role": "system", "content": system_prompt},
@@ -696,7 +771,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
 
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=tokenizer, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
     """
     This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
     It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
@@ -843,7 +918,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 def process_requests(prompts: List[str],
 system_prompt: str,
 conversation_history: List[dict],
-whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=tokenizer, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=None, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 

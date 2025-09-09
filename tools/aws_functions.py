@@ -40,8 +40,6 @@ def connect_to_bedrock_runtime(model_name_map:dict, model_choice:str, aws_access
     else: 
         bedrock_runtime = list()
 
-    print("Bedrock runtime connected:", bedrock_runtime)
-
     return bedrock_runtime
 
 def connect_to_s3_client(aws_access_key_textbox:str="", aws_secret_key_textbox:str=""):
