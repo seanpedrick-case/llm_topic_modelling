@@ -11,34 +11,40 @@ def connect_to_bedrock_runtime(model_name_map:dict, model_choice:str, aws_access
     # If running an anthropic model, assume that running an AWS Bedrock model, load in Bedrock
     model_source = model_name_map[model_choice]["source"]
 
-    if "AWS" in model_source:
-        if aws_access_key_textbox and aws_secret_key_textbox:
+    if "AWS" in model_source:        
+        if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+        elif RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Bedrock using AWS access key and secret keys from user input.")
             bedrock_runtime = boto3.client('bedrock-runtime', 
                 aws_access_key_id=aws_access_key_textbox, 
                 aws_secret_access_key=aws_secret_key_textbox, region_name=AWS_REGION)
-        elif RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
-            print("Connecting to Bedrock via existing SSO connection")
-            bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
             print("Getting Bedrock credentials from environment variables")
             bedrock_runtime = boto3.client('bedrock-runtime', 
                 aws_access_key_id=AWS_ACCESS_KEY, 
                 aws_secret_access_key=AWS_SECRET_KEY,
-                region_name=AWS_REGION)               
+                region_name=AWS_REGION)
+        elif RUN_AWS_FUNCTIONS == "1":
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)             
         else:
             bedrock_runtime = ""
             out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under LLM settings, or choose another model type."
             print(out_message)
             raise Exception(out_message)
     else: 
-        bedrock_runtime = [] 
+        bedrock_runtime = list()
 
     return bedrock_runtime
 
 def connect_to_s3_client(aws_access_key_textbox:str="", aws_secret_key_textbox:str=""):
     # If running an anthropic model, assume that running an AWS s3 model, load in s3
-    s3_client = []
+    s3_client = list()
 
     if aws_access_key_textbox and aws_secret_key_textbox:
         print("Connecting to s3 using AWS access key and secret keys from user input.")
@@ -148,7 +154,7 @@ def upload_file_to_s3(local_file_paths:List[str], s3_key:str, s3_bucket:str=buck
     """
     if RUN_AWS_FUNCTIONS == "1":
 
-        final_out_message = []
+        final_out_message = list()
 
         s3_client = connect_to_s3_client(aws_access_key_textbox, aws_secret_key_textbox)
         #boto3.client('s3')
