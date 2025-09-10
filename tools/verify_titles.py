@@ -12,7 +12,7 @@ GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,add_existing_topics_system_prompt, add_existing_topics_prompt, initial_table_assistant_prefill, add_existing_topics_assistant_prefill
 from tools.helper_functions import put_columns_in_df, wrap_text, clean_column_name, create_batch_file_path_details
-from tools.llm_funcs import load_model, construct_gemini_generative_model, call_llm_with_markdown_table_checks, get_model, get_tokenizer
+from tools.llm_funcs import load_model, construct_gemini_generative_model, call_llm_with_markdown_table_checks, get_model, get_tokenizer, get_assistant_model
 from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table,  convert_response_text_to_dataframe, ResponseObject
 from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_TOKENS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT
 from tools.aws_functions import connect_to_bedrock_runtime
@@ -225,8 +225,6 @@ def verify_titles(in_data_file,
               first_loop_state:bool=False,
               whole_conversation_metadata_str:str="",
               initial_table_prompt:str=initial_table_prompt,
-              prompt2:str=prompt2,
-              prompt3:str=prompt3,
               system_prompt:str=system_prompt,
               add_existing_topics_system_prompt:str=add_existing_topics_system_prompt,
               add_existing_topics_prompt:str=add_existing_topics_prompt,
@@ -242,7 +240,10 @@ def verify_titles(in_data_file,
               in_excel_sheets:List[str] = list(),
               output_folder:str=OUTPUT_FOLDER,
               max_tokens:int=max_tokens,
-              model_name_map:dict=model_name_map,              
+              model_name_map:dict=model_name_map, 
+              local_model:object=None,
+              tokenizer:object=None,
+              assistant_model:object=None,
               max_time_for_loop:int=max_time_for_loop,              
               progress=Progress(track_tqdm=True)):
 
@@ -270,8 +271,6 @@ def verify_titles(in_data_file,
     - first_loop_state (bool): A flag indicating the first loop state.
     - whole_conversation_metadata_str (str): A string to store whole conversation metadata.
     - initial_table_prompt (str): The first prompt for the model.
-    - prompt2 (str): The second prompt for the model.
-    - prompt3 (str): The third prompt for the model.
     - system_prompt (str): The system prompt for the model.
     - add_existing_topics_system_prompt (str): The system prompt for the summary part of the model.
     - add_existing_topics_prompt (str): The prompt for the model summary.
@@ -288,6 +287,9 @@ def verify_titles(in_data_file,
     - output_folder (str): The output folder where files will be saved.
     - max_tokens (int): The maximum number of tokens for the model.
     - model_name_map (dict, optional): A dictionary mapping full model name to shortened.
+    - local_model (object, optional): Local model object if using local inference. Defaults to None.
+    - tokenizer (object, optional): Tokenizer object if using local inference. Defaults to None.
+    - assistant_model (object, optional): Assistant model object if using local inference. Defaults to None.
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
     - progress (Progress): A progress tracker.
     '''
@@ -299,8 +301,9 @@ def verify_titles(in_data_file,
     whole_conversation_metadata = list()
     is_error = False
     create_revised_general_topics = False
-    local_model = list()
-    tokenizer = list()
+    local_model = None
+    tokenizer = None
+    assistant_model = None
     zero_shot_topics_df = pd.DataFrame()
     #llama_system_prefix = "<|start_header_id|>system<|end_header_id|>\n" #"<start_of_turn>user\n"
     #llama_system_suffix = "<|eot_id|>" #"<end_of_turn>\n<start_of_turn>model\n"
@@ -343,11 +346,11 @@ def verify_titles(in_data_file,
             out_file_paths = list()
             #print("model_choice_clean:", model_choice_clean)
 
-            if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1"):
+            if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1") & (not local_model):
                 progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
                 local_model = get_model()
                 tokenizer = get_tokenizer()
-                #print("Local model loaded:", local_model)
+                assistant_model = get_assistant_model()                
 
     if num_batches > 0:
         progress_measure = round(latest_batch_completed / num_batches, 1)

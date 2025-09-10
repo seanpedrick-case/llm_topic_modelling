@@ -14,7 +14,7 @@ from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_d
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME
 
 max_tokens = MAX_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -464,7 +464,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
 
     return response_text, conversation_history, whole_conversation_metadata
 
-@spaces.GPU(duration=300)
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             topic_summary_df:pd.DataFrame,
                             reference_table_df:pd.DataFrame,
@@ -487,9 +487,9 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             model_name_map:dict=model_name_map,
                             hf_api_key_textbox:str='',
                             reasoning_suffix:str=reasoning_suffix,
-                            local_model:object=list(), 
-                            tokenizer:object=list(),
-                            assistant_model:object=list(),                            
+                            local_model:object=None, 
+                            tokenizer:object=None,
+                            assistant_model:object=None,                            
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, 
                             summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,                            
                             do_summaries:str="Yes",                            
@@ -520,8 +520,9 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         model_name_map (dict, optional): Dictionary mapping model choices to their properties. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
-        local_model (object, optional): Local model object if using local inference. Defaults to empty list.
-        tokenizer (object, optional): Tokenizer object if using local inference. Defaults to empty list.
+        local_model (object, optional): Local model object if using local inference. Defaults to None.
+        tokenizer (object, optional): Tokenizer object if using local inference. Defaults to None.
+        assistant_model (object, optional): Assistant model object if using local inference. Defaults to None.
         summarise_topic_descriptions_prompt (str, optional): Prompt template for topic summarization.
         summarise_topic_descriptions_system_prompt (str, optional): System prompt for topic summarization.
         do_summaries (str, optional): Flag to control summary generation. Defaults to "Yes".
@@ -579,7 +580,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     model_source = model_name_map[model_choice]["source"]
 
-    if (model_source == "Local") & (RUN_LOCAL_MODEL == "1") & (not local_model) & (not tokenizer):
+    if (model_source == "Local") & (RUN_LOCAL_MODEL == "1") & (not local_model):
         progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
         local_model = get_model()
         tokenizer = get_tokenizer()
@@ -695,7 +696,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
         return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken, out_message
 
-@spaces.GPU(duration=120)
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def overall_summary(topic_summary_df:pd.DataFrame,
                     model_choice:str,
                     in_api_key:str,
@@ -709,9 +710,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     model_name_map:dict=model_name_map,
                     hf_api_key_textbox:str='',
                     reasoning_suffix:str=reasoning_suffix,                    
-                    local_model:object=list(),
-                    tokenizer:object=list(),
-                    assistant_model:object=list(),
+                    local_model:object=None,
+                    tokenizer:object=None,
+                    assistant_model:object=None,
                     summarise_everything_prompt:str=summarise_everything_prompt,
                     comprehensive_summary_format_prompt:str=comprehensive_summary_format_prompt,
                     comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
@@ -735,8 +736,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
-        local_model (object, optional): Local model object. Defaults to empty list.
-        tokenizer (object, optional): Tokenizer object. Defaults to empty list.        
+        local_model (object, optional): Local model object. Defaults to None.
+        tokenizer (object, optional): Tokenizer object. Defaults to None. 
+        assistant_model (object, optional): Assistant model object. Defaults to None.
         summarise_everything_prompt (str, optional): Prompt for overall summary
         comprehensive_summary_format_prompt (str, optional): Prompt for comprehensive summary format
         comprehensive_summary_format_prompt_by_group (str, optional): Prompt for group summary format
@@ -790,7 +792,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
 
     tic = time.perf_counter()
 
-    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1") & (not local_model) & (not tokenizer):
+    if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1") & (not local_model):
         progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
         local_model = get_model()
         tokenizer = get_tokenizer()

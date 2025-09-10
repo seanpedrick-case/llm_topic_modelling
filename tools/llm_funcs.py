@@ -214,18 +214,11 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
             - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
             - assistant_model (transformers model): The assistant model for speculative decoding (if USE_SPECULATIVE_DECODING is True).
     '''
-    print("Loading model ", local_model_type)
+    
+    if model:
+        return model, tokenizer, assistant_model
 
-    #print("model_path:", model_path)
-
-    if model is None:
-        model = list()        
-    else:
-        return model, tokenizer
-    if tokenizer is None:
-        tokenizer = list()
-    else:
-        return model, tokenizer
+    print("Loading model:", local_model_type)
 
     # Verify the device and cuda settings
     # Check if CUDA is enabled
@@ -427,7 +420,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
 def get_model():
     """Get the globally loaded model. Load it if not already loaded."""
     global _model, _tokenizer, _assistant_model
-    if _model is None and LOAD_LOCAL_MODEL_AT_START == "True":
+    if _model is None:
         _model, _tokenizer, _assistant_model = load_model(
             local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
             gpu_layers=gpu_layers, 
@@ -450,7 +443,7 @@ def get_model():
 def get_tokenizer():
     """Get the globally loaded tokenizer. Load it if not already loaded."""
     global _model, _tokenizer, _assistant_model
-    if _tokenizer is None and LOAD_LOCAL_MODEL_AT_START == "True":
+    if _tokenizer is None:
         _model, _tokenizer, _assistant_model = load_model(
             local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
             gpu_layers=gpu_layers, 
@@ -473,7 +466,7 @@ def get_tokenizer():
 def get_assistant_model():
     """Get the globally loaded assistant model. Load it if not already loaded."""
     global _model, _tokenizer, _assistant_model
-    if _assistant_model is None and LOAD_LOCAL_MODEL_AT_START == "True":
+    if _assistant_model is None:
         _model, _tokenizer, _assistant_model = load_model(
             local_model_type=CHOSEN_LOCAL_MODEL_TYPE, 
             gpu_layers=gpu_layers, 
