@@ -294,7 +294,7 @@ GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "google/gemma-3-4b-it")
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit")  # "google/gemma-3-4b-it"
 if USE_LLAMA_CPP == "False":
     GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 
@@ -364,7 +364,14 @@ COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # altern
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
 
+###
+# Dataset variables
+###
+
+MAX_ROWS = int(get_or_create_env_var('MAX_ROWS', '5000'))
 MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
+MAXIMUM_ZERO_SHOT_TOPICS = int(get_or_create_env_var('MAXIMUM_ZERO_SHOT_TOPICS', '120'))
+MAX_SPACES_GPU_RUN_TIME = int(get_or_create_env_var('MAX_SPACES_GPU_RUN_TIME', '240'))
 
 ###
 # Gradio app variables

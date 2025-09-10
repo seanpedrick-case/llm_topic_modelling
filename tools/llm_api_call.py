@@ -15,10 +15,12 @@ from io import StringIO
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
-from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME
 from tools.aws_functions import connect_to_bedrock_runtime
+from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary
+from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 
 if RUN_LOCAL_MODEL == "1":
     from tools.llm_funcs import load_model
@@ -32,6 +34,8 @@ deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 random_seed = LLM_SEED
 reasoning_suffix = REASONING_SUFFIX
+max_rows = MAX_ROWS
+maximum_zero_shot_topics = MAXIMUM_ZERO_SHOT_TOPICS
 
 ### HELPER FUNCTIONS
 
@@ -538,7 +542,7 @@ def write_llm_output_and_logs(response_text: str,
 def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                                  force_zero_shot_radio:str="No",
                                  create_revised_general_topics:bool=False,
-                                 max_topic_no:int=120):
+                                 max_topic_no:int=maximum_zero_shot_topics):
     """
     Preprocesses a DataFrame of zero-shot topics, cleaning and formatting them
     for use with a large language model. It handles different column configurations
@@ -572,8 +576,9 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
 
     # Max 120 topics allowed
     if zero_shot_topics.shape[0] > max_topic_no:
-        print("Maximum", max_topic_no, "topics allowed to fit within large language model context limits.")
-        zero_shot_topics = zero_shot_topics.iloc[:max_topic_no, :]
+        out_message = "Maximum " + str(max_topic_no) + " zero-shot topics allowed according to application configuration."
+        print(out_message)
+        raise Exception(out_message)        
 
     # Forward slashes in the topic names seems to confuse the model
     if zero_shot_topics.shape[1] >= 1:  # Check if there is at least one column                       
@@ -646,7 +651,7 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
         
         return zero_shot_topics_df
 
-@spaces.GPU(duration=300)
+
 def extract_topics(in_data_file: GradioFileData,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
@@ -667,8 +672,6 @@ def extract_topics(in_data_file: GradioFileData,
               first_loop_state:bool=False,
               whole_conversation_metadata_str:str="",
               initial_table_prompt:str=initial_table_prompt,
-              prompt2:str=prompt2,
-              prompt3:str=prompt3,
               initial_table_system_prompt:str=initial_table_system_prompt,
               add_existing_topics_system_prompt:str=add_existing_topics_system_prompt,
               add_existing_topics_prompt:str=add_existing_topics_prompt,
@@ -696,6 +699,7 @@ def extract_topics(in_data_file: GradioFileData,
               model:object=list(),
               tokenizer:object=list(),
               assistant_model:object=list(),
+              max_rows:int=max_rows,
               progress=Progress(track_tqdm=True)):
 
     '''
@@ -722,8 +726,6 @@ def extract_topics(in_data_file: GradioFileData,
     - first_loop_state (bool): A flag indicating the first loop state.
     - whole_conversation_metadata_str (str): A string to store whole conversation metadata.
     - initial_table_prompt (str): The first prompt for the model.
-    - prompt2 (str): The second prompt for the model.
-    - prompt3 (str): The third prompt for the model.
     - initial_table_system_prompt (str): The system prompt for the model.
     - add_existing_topics_system_prompt (str): The system prompt for the summary part of the model.
     - add_existing_topics_prompt (str): The prompt for the model summary.
@@ -748,19 +750,23 @@ def extract_topics(in_data_file: GradioFileData,
     - reasoning_suffix (str, optional): The suffix for the reasoning system prompt.
     - model: Model object for local inference.
     - tokenizer: Tokenizer object for local inference.
+    - assistant_model: Assistant model object for local inference.
+    - max_rows: The maximum number of rows to process.
     - progress (Progress): A progress tracker.
 
     '''
 
     tic = time.perf_counter()
+
     google_client = list()
     google_config = {}
     final_time = 0.0
     whole_conversation_metadata = list()
     is_error = False
     create_revised_general_topics = False
-    local_model = list()
-    tokenizer = list()
+    local_model = None
+    tokenizer = None
+    assistant_model = None
     zero_shot_topics_df = pd.DataFrame()
     missing_df = pd.DataFrame()
     new_reference_df = pd.DataFrame(columns=["Response References",	"General topic",	"Subtopic",	"Sentiment",	"Start row of group",	"Group"	,"Topic_number",	"Summary"])
@@ -795,9 +801,14 @@ def extract_topics(in_data_file: GradioFileData,
             file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default, in_excel_sheets)
         except:
             # Check if files and text exist
-            out_message = "Please enter a data file to summarise."
+            out_message = "Please enter a data file to process."
             print(out_message)
             raise Exception(out_message)
+    
+    if file_data.shape[0] > max_rows:
+        out_message = "Your data has more than " + str(max_rows) + " rows, which has been set as the maximum in the application configuration."
+        print(out_message)
+        raise Exception(out_message)
 
     model_choice_clean = model_name_map[model_choice]['short_name']
     model_source = model_name_map[model_choice]["source"]
@@ -812,8 +823,8 @@ def extract_topics(in_data_file: GradioFileData,
             out_file_paths = list()
             final_time = 0
 
-            if (model_source == "Local") & (RUN_LOCAL_MODEL == "1") & (not model) & (not tokenizer):
-                progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
+            if (model_source == "Local") & (RUN_LOCAL_MODEL == "1") & (not model):
+                progress(0.1, f"Using local model: {model_choice_clean}")
                 local_model = get_model()
                 tokenizer = get_tokenizer()
                 assistant_model = get_assistant_model()
@@ -868,38 +879,36 @@ def extract_topics(in_data_file: GradioFileData,
 
                     # Prepare clients before query       
                     if "Gemini" in model_source:
-                        print("Using Gemini model:", model_choice)
+                        #print("Using Gemini model:", model_choice)
                         google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
                     elif "Azure" in model_source:
-                        print("Using Azure AI Inference model:", model_choice)
+                        #print("Using Azure AI Inference model:", model_choice)
                         # If provided, set env for downstream calls too
                         if azure_api_key_textbox:
                             os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
                         google_client, google_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=AZURE_INFERENCE_ENDPOINT)
                     elif "anthropic.claude" in model_choice:
-                        print("Using AWS Bedrock model:", model_choice)
+                        #print("Using AWS Bedrock model:", model_choice)
+                        pass
                     else:
-                        print("Using local model:", model_choice)
+                        #print("Using local model:", model_choice)
+                        pass
 
                     # Preparing candidate topics if no topics currently exist
                     if candidate_topics and existing_topic_summary_df.empty:
                         #progress(0.1, "Creating revised zero shot topics table")
 
                         # 'Zero shot topics' are those supplied by the user
-                        max_topic_no = 120
                         zero_shot_topics = read_file(candidate_topics.name)
-                        zero_shot_topics = zero_shot_topics.fillna("")           # Replace NaN with empty string
+                        zero_shot_topics = zero_shot_topics.fillna("")      # Replace NaN with empty string
                         zero_shot_topics = zero_shot_topics.astype(str)
                             
-                        zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics, max_topic_no)
-
-                        
+                        zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics)                        
 
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
                         if not existing_topic_summary_df.empty and force_zero_shot_radio != "Yes":
                             existing_topic_summary_df = pd.concat([existing_topic_summary_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
-                        else:
-                            existing_topic_summary_df = zero_shot_topics_df
+                        else: existing_topic_summary_df = zero_shot_topics_df
 
                     if candidate_topics and not zero_shot_topics_df.empty:
                         # If you have already created revised zero shot topics, concat to the current
@@ -1064,18 +1073,12 @@ def extract_topics(in_data_file: GradioFileData,
                         unique_topics_markdown="No suggested headings for this summary"
                         formatted_initial_table_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown)
 
-                    if prompt2: formatted_prompt2 = prompt2.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
-                    else: formatted_prompt2 = prompt2
-                    
-                    if prompt3: formatted_prompt3 = prompt3.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
-                    else: formatted_prompt3 = prompt3
-
                     #if "Local" in model_source:
                     #formatted_initial_table_prompt = llama_cpp_prefix + formatted_initial_table_system_prompt + "\n" + formatted_initial_table_prompt + llama_cpp_suffix
                     #formatted_prompt2 = llama_cpp_prefix + formatted_initial_table_system_prompt + "\n" + formatted_prompt2 + llama_cpp_suffix
                     #formatted_prompt3 = llama_cpp_prefix + formatted_initial_table_system_prompt + "\n" + formatted_prompt3 + llama_cpp_suffix
 
-                    batch_prompts = [formatted_initial_table_prompt, formatted_prompt2, formatted_prompt3][:number_of_prompts_used]  # Adjust this list to send fewer requests
+                    batch_prompts = [formatted_initial_table_prompt]
 
                     if "Local" in model_source and reasoning_suffix: formatted_initial_table_system_prompt = formatted_initial_table_system_prompt + "\n" + reasoning_suffix
                     
@@ -1251,6 +1254,7 @@ def extract_topics(in_data_file: GradioFileData,
 
     return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df 
 
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def wrapper_extract_topics_per_column_value(
     grouping_col: str,
     in_data_file: Any,
@@ -1271,12 +1275,9 @@ def wrapper_extract_topics_per_column_value(
     initial_latest_batch_completed: int = 0, 
     initial_time_taken: float = 0,
     initial_table_prompt: str = initial_table_prompt,
-    prompt2: str = prompt2,
-    prompt3: str = prompt3,
     initial_table_system_prompt: str = initial_table_system_prompt,
     add_existing_topics_system_prompt: str = add_existing_topics_system_prompt,
     add_existing_topics_prompt: str = add_existing_topics_prompt,
-
     number_of_prompts_used: int = 1,
     batch_size: int = 50, # Crucial for calculating num_batches per segment
     context_textbox: str = "",
@@ -1296,8 +1297,10 @@ def wrapper_extract_topics_per_column_value(
     max_time_for_loop: int = max_time_for_loop, # This applies per call to extract_topics
     reasoning_suffix: str = reasoning_suffix,
     CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
-    model:object=list(),
-    tokenizer:object=list(),
+    model:object=None,
+    tokenizer:object=None,
+    assistant_model:object=None,
+    max_rows:int=max_rows,
     progress=Progress(track_tqdm=True) # type: ignore
 ) -> Tuple: # Mimicking the return tuple structure of extract_topics
     """
@@ -1324,8 +1327,6 @@ def wrapper_extract_topics_per_column_value(
     :param initial_latest_batch_completed: The batch number completed in the previous run.
     :param initial_time_taken: Initial time taken for processing.
     :param initial_table_prompt: The initial prompt for table summarization.
-    :param prompt2: The second prompt for LLM interaction.
-    :param prompt3: The third prompt for LLM interaction.
     :param initial_table_system_prompt: The initial system prompt for table summarization.
     :param add_existing_topics_system_prompt: System prompt for adding existing topics.
     :param add_existing_topics_prompt: Prompt for adding existing topics.
@@ -1350,6 +1351,8 @@ def wrapper_extract_topics_per_column_value(
     :param CHOSEN_LOCAL_MODEL_TYPE: Type of local model chosen.    
     :param model: Model object for local inference.
     :param tokenizer: Tokenizer object for local inference.
+    :param assistant_model: Assistant model object for local inference.
+    :param max_rows: The maximum number of rows to process.
     :param progress: Gradio Progress object for tracking progress.
     :return: A tuple containing consolidated results, mimicking the return structure of `extract_topics`.
     """
@@ -1358,6 +1361,23 @@ def wrapper_extract_topics_per_column_value(
     acc_output_tokens = 0
     acc_number_of_calls = 0
     out_message = list()
+
+    # If you have a file input but no file data it hasn't yet been loaded. Load it here.
+    if file_data.empty:
+        print("No data table found, loading from file")
+        try:
+            in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_file)
+            file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default, in_excel_sheets)
+        except:
+            # Check if files and text exist
+            out_message = "Please enter a data file to process."
+            print(out_message)
+            raise Exception(out_message)
+    
+    if file_data.shape[0] > max_rows:
+        out_message = "Your data has more than " + str(max_rows) + " rows, which has been set as the maximum in the application configuration."
+        print(out_message)
+        raise Exception(out_message)
 
     if grouping_col is None:
         print("No grouping column found")
@@ -1473,8 +1493,6 @@ def wrapper_extract_topics_per_column_value(
                 first_loop_state=current_first_loop_state, # True only for the very first iteration of wrapper                
                 whole_conversation_metadata_str="", # Fresh for each call
                 initial_table_prompt=initial_table_prompt,
-                prompt2=prompt2,
-                prompt3=prompt3,
                 initial_table_system_prompt=initial_table_system_prompt,
                 add_existing_topics_system_prompt=add_existing_topics_system_prompt,
                 add_existing_topics_prompt=add_existing_topics_prompt,
@@ -1501,6 +1519,8 @@ def wrapper_extract_topics_per_column_value(
                 reasoning_suffix=reasoning_suffix,
                 model=model,
                 tokenizer=tokenizer,
+                assistant_model=assistant_model,
+                max_rows=max_rows,
                 progress=progress
             )
 
@@ -1697,3 +1717,340 @@ def modify_existing_output_tables(original_topic_summary_df:pd.DataFrame, modifi
     
 
     return modifiable_topic_summary_df, reference_df, output_file_list, output_file_list, output_file_list, output_file_list, reference_table_file_name, unique_table_file_name, deduplicated_unique_table_markdown
+
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def all_in_one_pipeline(
+    grouping_col: str,
+    in_data_files: List[str],
+    file_data: pd.DataFrame,
+    existing_topics_table: pd.DataFrame,
+    existing_reference_df: pd.DataFrame,
+    existing_topic_summary_df: pd.DataFrame,
+    unique_table_df_display_table_markdown: str,
+    original_file_name: str,
+    total_number_of_batches: int,
+    in_api_key: str,
+    temperature: float,
+    chosen_cols: List[str],
+    model_choice: str,
+    candidate_topics: GradioFileData,
+    first_loop_state: bool,
+    conversation_metadata_text: str,
+    latest_batch_completed: int,
+    time_taken_so_far: float,
+    initial_table_prompt_text: str,
+    initial_table_system_prompt_text: str,
+    add_existing_topics_system_prompt_text: str,
+    add_existing_topics_prompt_text: str,
+    number_of_prompts_used: int,
+    batch_size: int,
+    context_text: str,
+    sentiment_choice: str,
+    force_zero_shot_choice: str,
+    in_excel_sheets: List[str],
+    force_single_topic_choice: str,
+    produce_structures_summary_choice: str,
+    aws_access_key_text: str,
+    aws_secret_key_text: str,
+    hf_api_key_text: str,
+    azure_api_key_text: str,
+    output_folder: str = OUTPUT_FOLDER,
+    merge_sentiment: str = "No",
+    merge_general_topics: str = "Yes",
+    score_threshold: int = 90,
+    summarise_format: str = "",
+    random_seed: int = 0,
+    log_files_output_list_state: List[str] = list(),
+    model_name_map_state: dict = model_name_map,
+    model: object = None,
+    tokenizer: object = None,
+    assistant_model: object = None,
+    usage_logs_location: str = "",
+    max_rows: int = max_rows,
+    progress=Progress(track_tqdm=True)
+):
+    """
+    Orchestrates the full All-in-one flow: extract → deduplicate → summarise → overall summary → Excel export.
+
+    Returns a large tuple matching the UI components updated during the original chained flow.
+    """
+
+    # Load local model if it's not already loaded
+    if (model_name_map_state[model_choice]["source"] == "Local") & (RUN_LOCAL_MODEL == "1") & (not model):
+        model = get_model()
+        tokenizer = get_tokenizer()
+        assistant_model = get_assistant_model()
+
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_number_of_calls = 0
+    total_time_taken = 0
+    out_message = list()
+
+    # 1) Extract topics (group-aware)
+    (
+        display_markdown,
+        out_topics_table,
+        out_topic_summary_df,
+        out_reference_df,
+        out_file_paths_1,
+        _out_file_paths_dup,
+        out_latest_batch_completed,
+        out_log_files,
+        _out_log_files_dup,
+        out_conversation_metadata,
+        out_time_taken,
+        out_file_paths_2,
+        _out_file_paths_3,
+        out_gradio_df,
+        out_file_paths_4,
+        out_join_files,
+        out_missing_df,
+        out_input_tokens,
+        out_output_tokens,
+        out_number_of_calls,
+        out_message_text
+    ) = wrapper_extract_topics_per_column_value(
+        grouping_col=grouping_col,
+        in_data_file=in_data_files,
+        file_data=file_data,
+        initial_existing_topics_table=existing_topics_table,
+        initial_existing_reference_df=existing_reference_df,
+        initial_existing_topic_summary_df=existing_topic_summary_df,
+        initial_unique_table_df_display_table_markdown=unique_table_df_display_table_markdown,
+        original_file_name=original_file_name,
+        total_number_of_batches=total_number_of_batches,
+        in_api_key=in_api_key,
+        temperature=temperature,
+        chosen_cols=chosen_cols,
+        model_choice=model_choice,
+        candidate_topics=candidate_topics,
+        initial_first_loop_state=first_loop_state,
+        initial_whole_conversation_metadata_str=conversation_metadata_text,
+        initial_latest_batch_completed=latest_batch_completed,
+        initial_time_taken=time_taken_so_far,
+        initial_table_prompt=initial_table_prompt_text,
+        initial_table_system_prompt=initial_table_system_prompt_text,
+        add_existing_topics_system_prompt=add_existing_topics_system_prompt_text,
+        add_existing_topics_prompt=add_existing_topics_prompt_text,
+        number_of_prompts_used=number_of_prompts_used,
+        batch_size=batch_size,
+        context_textbox=context_text,
+        sentiment_checkbox=sentiment_choice,
+        force_zero_shot_radio=force_zero_shot_choice,
+        in_excel_sheets=in_excel_sheets,
+        force_single_topic_radio=force_single_topic_choice,
+        produce_structures_summary_radio=produce_structures_summary_choice,
+        aws_access_key_textbox=aws_access_key_text,
+        aws_secret_key_textbox=aws_secret_key_text,
+        hf_api_key_textbox=hf_api_key_text,
+        azure_api_key_textbox=azure_api_key_text,
+        output_folder=output_folder,
+        model_name_map=model_name_map_state,        
+        model=model,
+        tokenizer=tokenizer,
+        assistant_model=assistant_model,
+        max_rows=max_rows
+    )
+
+    total_input_tokens += out_input_tokens
+    total_output_tokens += out_output_tokens
+    total_number_of_calls += out_number_of_calls
+    total_time_taken += out_time_taken
+    out_message.append(out_message_text)
+
+    # Prepare outputs after extraction, matching wrapper outputs
+    topic_extraction_output_files = out_file_paths_1
+    text_output_file_list_state = out_file_paths_1
+    log_files_output_list_state = out_log_files
+
+    # 2) Deduplication
+    (
+        ref_df_loaded,
+        unique_df_loaded,
+        latest_batch_completed_no_loop,
+        deduplication_input_files_status,
+        working_data_file_name_textbox,
+        unique_topics_table_file_name_textbox
+    ) = load_in_previous_data_files(out_file_paths_1)
+
+    ref_df_after_dedup, unique_df_after_dedup, summarisation_input_files, log_files_output_dedup, summarised_output_markdown = deduplicate_topics(
+        reference_df=ref_df_loaded if not ref_df_loaded.empty else out_reference_df,
+        topic_summary_df=unique_df_loaded if not unique_df_loaded.empty else out_topic_summary_df,
+        reference_table_file_name=working_data_file_name_textbox,
+        unique_topics_table_file_name=unique_topics_table_file_name_textbox,
+        in_excel_sheets=in_excel_sheets,
+        merge_sentiment=merge_sentiment,
+        merge_general_topics=merge_general_topics,
+        score_threshold=score_threshold,
+        in_data_files=in_data_files,
+        chosen_cols=chosen_cols,
+        output_folder=output_folder
+    )
+
+    # 3) Summarisation
+    (
+        ref_df_loaded_2,
+        unique_df_loaded_2,
+        _latest_batch_completed_no_loop_2,
+        _deduplication_input_files_status_2,
+        _working_name_2,
+        _unique_name_2
+    ) = load_in_previous_data_files(summarisation_input_files)
+
+    summary_reference_table_sample_state, summarised_references_markdown = sample_reference_table_summaries(ref_df_after_dedup, random_seed)
+
+    (
+        _summary_reference_table_sample_state,
+        master_unique_topics_df_revised_summaries_state,
+        master_reference_df_revised_summaries_state,
+        summary_output_files,
+        summarised_outputs_list,
+        latest_summary_completed_num,
+        conversation_metadata_text_updated,
+        display_markdown_updated,
+        log_files_output_after_sum,
+        overall_summarisation_input_files,
+        input_tokens_num,
+        output_tokens_num,
+        number_of_calls_num,
+        estimated_time_taken_number,
+        output_messages_textbox
+    ) = summarise_output_topics(
+        sampled_reference_table_df=summary_reference_table_sample_state,
+        topic_summary_df=unique_df_after_dedup,
+        reference_table_df=ref_df_after_dedup,
+        model_choice=model_choice,
+        in_api_key=in_api_key,
+        temperature=temperature,
+        reference_data_file_name=working_data_file_name_textbox,
+        summarised_outputs=list(),
+        latest_summary_completed=0,
+        out_metadata_str=out_conversation_metadata,
+        in_data_files=in_data_files,
+        in_excel_sheets=in_excel_sheets,
+        chosen_cols=chosen_cols,
+        log_output_files=log_files_output_list_state,
+        summarise_format_radio=summarise_format,
+        output_folder=output_folder,
+        context_textbox=context_text,
+        aws_access_key_textbox=aws_access_key_text,
+        aws_secret_key_textbox=aws_secret_key_text,
+        model_name_map=model_name_map_state,
+        hf_api_key_textbox=hf_api_key_text,
+        local_model=model,
+        tokenizer=tokenizer,
+        assistant_model=assistant_model
+    )
+
+    total_input_tokens += input_tokens_num
+    total_output_tokens += output_tokens_num
+    total_number_of_calls += number_of_calls_num
+    total_time_taken += estimated_time_taken_number
+    out_message.append(output_messages_textbox)
+
+    # 4) Overall summary
+    (
+        _ref_df_loaded_3,
+        _unique_df_loaded_3,
+        _latest_batch_completed_no_loop_3,
+        _deduplication_input_files_status_3,
+        _working_name_3,
+        _unique_name_3
+    ) = load_in_previous_data_files(overall_summarisation_input_files)
+
+    (
+        overall_summary_output_files,
+        overall_summarised_output_markdown,
+        summarised_output_df,
+        conversation_metadata_textbox,
+        input_tokens_num,
+        output_tokens_num,
+        number_of_calls_num,
+        estimated_time_taken_number,
+        output_messages_textbox
+    ) = overall_summary(
+        topic_summary_df=master_unique_topics_df_revised_summaries_state,
+        model_choice=model_choice,
+        in_api_key=in_api_key,
+        temperature=temperature,
+        reference_data_file_name=working_data_file_name_textbox,
+        output_folder=output_folder,
+        chosen_cols=chosen_cols,
+        context_textbox=context_text,
+        aws_access_key_textbox=aws_access_key_text,
+        aws_secret_key_textbox=aws_secret_key_text,
+        model_name_map=model_name_map_state,
+        hf_api_key_textbox=hf_api_key_text,
+        local_model=model,
+        tokenizer=tokenizer,
+        assistant_model=assistant_model
+    )
+
+    total_input_tokens += input_tokens_num
+    total_output_tokens += output_tokens_num
+    total_number_of_calls += number_of_calls_num
+    total_time_taken += estimated_time_taken_number
+    out_message.append(output_messages_textbox)
+
+    out_message = '\n'.join(out_message)
+    out_message = out_message + "\n" + f"Overall time for all processes: {total_time_taken:.2f}s"
+    print(out_message)
+
+    # 5) Excel export and move xlsx to front page
+    # overall_summary_output_files_xlsx, summary_xlsx_output_files_list = collect_output_csvs_and_create_excel_output(
+    #     in_data_files=in_data_files,
+    #     chosen_cols=chosen_cols,
+    #     reference_data_file_name_textbox=original_file_name,
+    #     in_group_col=grouping_col,
+    #     model_choice=model_choice,
+    #     master_reference_df_state=master_reference_df_revised_summaries_state,
+    #     master_unique_topics_df_state=master_unique_topics_df_revised_summaries_state,
+    #     summarised_output_df=summarised_output_df,
+    #     missing_df_state=out_missing_df,
+    #     excel_sheets=in_excel_sheets,
+    #     usage_logs_location=usage_logs_location,
+    #     model_name_map=model_name_map_state,
+    #     output_folder=output_folder
+    # )
+
+    # topic_extraction_output_files_xlsx = move_overall_summary_output_files_to_front_page(summary_xlsx_output_files_list)
+
+    # Map to the UI outputs list expected by the new single-call wiring
+    return (
+        display_markdown_updated if display_markdown_updated else display_markdown,
+        out_topics_table,
+        unique_df_after_dedup,
+        ref_df_after_dedup,
+        topic_extraction_output_files,
+        text_output_file_list_state,
+        out_latest_batch_completed,
+        log_files_output_after_sum if log_files_output_after_sum else out_log_files,
+        log_files_output_list_state,
+        conversation_metadata_text_updated if conversation_metadata_text_updated else out_conversation_metadata,
+        total_time_taken,
+        out_file_paths_1,
+        summarisation_input_files,
+        out_gradio_df,
+        list(), # modification_input_files placeholder
+        out_join_files,
+        out_missing_df,
+        total_input_tokens,
+        total_output_tokens,
+        total_number_of_calls,
+        out_message,
+        summary_reference_table_sample_state,
+        summarised_references_markdown,
+        master_unique_topics_df_revised_summaries_state,
+        master_reference_df_revised_summaries_state,
+        summary_output_files,
+        summarised_outputs_list,
+        latest_summary_completed_num,
+        overall_summarisation_input_files,
+        overall_summary_output_files,
+        overall_summarised_output_markdown,
+        summarised_output_df#,
+        # overall_summary_output_files_xlsx,
+        # summary_xlsx_output_files_list,
+        # topic_extraction_output_files_xlsx
+    )
