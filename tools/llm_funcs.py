@@ -5,6 +5,7 @@ import time
 import boto3
 import pandas as pd
 import json
+import spaces
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 from typing import List, Tuple, TypeVar
