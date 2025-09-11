@@ -1898,6 +1898,8 @@ def all_in_one_pipeline(
 
     summary_reference_table_sample_state, summarised_references_markdown = sample_reference_table_summaries(ref_df_after_dedup, random_seed)
 
+    print("model:", model)
+
     (
         _summary_reference_table_sample_state,
         master_unique_topics_df_revised_summaries_state,

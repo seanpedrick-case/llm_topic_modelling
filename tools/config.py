@@ -294,7 +294,7 @@ GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit"
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit" # unsloth/gemma-3-4b-it-qat
 if USE_LLAMA_CPP == "False":
     GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 
