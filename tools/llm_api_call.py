@@ -1757,13 +1757,13 @@ def all_in_one_pipeline(
     merge_general_topics: str = "Yes",
     score_threshold: int = 90,
     summarise_format: str = "",
-    random_seed: int = 0,
+    random_seed: int = 42,
     log_files_output_list_state: List[str] = list(),
     model_name_map_state: dict = model_name_map,
+    usage_logs_location: str = "",
     model: object = None,
     tokenizer: object = None,
-    assistant_model: object = None,
-    usage_logs_location: str = "",
+    assistant_model: object = None,    
     max_rows: int = max_rows,
     progress=Progress(track_tqdm=True)
 ):
