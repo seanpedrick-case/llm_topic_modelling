@@ -286,7 +286,7 @@ with app:
         #verify_title_colnames = gr.Dropdown(choices=["Choose column with titles"], multiselect = False, label="Select the open text columns that have a title. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
         
         verify_titles_btn = gr.Button("Verify descriptions", variant="primary")
-        verify_titles_file_output = gr.File(height=FILE_INPUT_HEIGHT, label="Descriptions verification output files")
+        verify_titles_file_output = gr.File(height=FILE_INPUT_HEIGHT, label="Description verification output files")
         verify_display_topic_table_markdown = gr.Markdown(value="### Language model response will appear here", show_copy_button=True)  
 
         verify_modification_input_files_placeholder = gr.File(height=FILE_INPUT_HEIGHT, label="Placeholder for files to avoid errors", visible=False)

@@ -302,7 +302,7 @@ GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3n-E
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
-GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "openai/gpt-oss-20b")
+GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit")
 if USE_LLAMA_CPP == "False":
     GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
 
@@ -310,7 +310,7 @@ GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F1
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
-ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "google/gemma-3-270m-it")
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
 
 GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
 
@@ -338,7 +338,7 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
-LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
+LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '1'))
 LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','96')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
 LLM_MIN_P = float(get_or_create_env_var('LLM_MIN_P', '0'))
 LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95'))
@@ -348,11 +348,12 @@ LLM_LAST_N_TOKENS = int(get_or_create_env_var('LLM_LAST_N_TOKENS', '512'))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
 LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
 LLM_RESET = get_or_create_env_var('LLM_RESET', 'True')
-LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'False')
+LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'True')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
 LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '128'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
+LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['        ', '\n\n\n\n']")
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
 REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '') # Reasoning: low # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level

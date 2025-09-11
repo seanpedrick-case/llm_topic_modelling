@@ -26,8 +26,9 @@ _model = None
 _tokenizer = None
 _assistant_model = None
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START, USE_SPECULATIVE_DECODING, ASSISTANT_MODEL
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START, USE_SPECULATIVE_DECODING, ASSISTANT_MODEL, LLM_STOP_STRINGS
 from tools.prompts import initial_table_assistant_prefill
+from tools.helper_functions import _get_env_list
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
 else: SPECULATIVE_DECODING = False
@@ -47,6 +48,8 @@ else: stream = False
 
 if LLM_SAMPLE == 'True': sample = True
 else: sample = False
+
+if LLM_STOP_STRINGS: LLM_STOP_STRINGS = _get_env_list(LLM_STOP_STRINGS, strip_strings=False)
 
 max_tokens = MAX_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -69,6 +72,7 @@ stream: bool = stream
 batch_size:int = LLM_BATCH_SIZE
 context_length:int = LLM_CONTEXT_LENGTH
 sample = LLM_SAMPLE
+stop_strings = LLM_STOP_STRINGS
 speculative_decoding = SPECULATIVE_DECODING
 if LLM_MAX_GPU_LAYERS != 0:
     gpu_layers = int(LLM_MAX_GPU_LAYERS)
@@ -570,23 +574,65 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
     max_tokens = gen_config.max_tokens
     stream = gen_config.stream
 
-    # Now you can call your model directly, passing the parameters:
-    output = model.create_chat_completion(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",  "content": formatted_string}
-        ],
-        temperature=temperature, 
-        top_k=top_k, 
-        top_p=top_p, 
-        repeat_penalty=repeat_penalty, 
-        seed=seed,
-        max_tokens=max_tokens,
-        stream=stream
-        #stop=["<|eot_id|>", "\n\n"]
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",  "content": formatted_string}
+    ]
 
-    return output
+    input_tokens = len(model.tokenize((system_prompt + "\n" + formatted_string).encode("utf-8"), special=True))
+
+    if stream:
+        final_tokens = []
+        output_tokens = 0
+        for chunk in model.create_chat_completion(
+            messages=messages,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repeat_penalty=repeat_penalty,
+            seed=seed,
+            max_tokens=max_tokens,
+            stream=True,
+            stop=stop_strings  # spaces to catch runaway spaces
+        ):
+            delta = chunk["choices"][0].get("delta", {})
+            token = delta.get("content") or chunk["choices"][0].get("text") or ""
+            if token:
+                print(token, end="", flush=True)
+                final_tokens.append(token)
+                output_tokens += 1
+        print()  # newline after stream finishes
+
+        text = "".join(final_tokens)
+        return {
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": text},
+                }
+            ],
+            # Provide a usage object so downstream code can read it
+            "usage": {
+                "prompt_tokens": input_tokens,         # unknown during streaming
+                "completion_tokens": output_tokens,     # unknown during streaming
+                "total_tokens": input_tokens + output_tokens,          # unknown during streaming
+            },
+        }
+
+    else:
+        response = model.create_chat_completion(
+            messages=messages,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repeat_penalty=repeat_penalty,
+            seed=seed,
+            max_tokens=max_tokens,
+            stream=False,
+            stop=stop_strings  # spaces to catch runaway spaces
+        )
+        return response
 
 ###
 # LLM FUNCTIONS
@@ -720,7 +766,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
 
 def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None, progress=Progress(track_tqdm=False)):
     """
-    This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
+    This function sends a request to a transformers model (through Unsloth) with the given prompt, system prompt, and generation configuration.
     """
     from transformers import TextStreamer
 
@@ -770,9 +816,15 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         'temperature': gen_config.temperature,
         'top_p': gen_config.top_p,
         'top_k': gen_config.top_k,
-        'do_sample': True#,
+        'do_sample': True,
+        'stop': stop_strings
         #'pad_token_id': tokenizer.eos_token_id
     }
+
+    if gen_config.stream:
+        streamer = TextStreamer(tokenizer, skip_prompt = True)
+    else:
+        streamer = None
     
     # Remove parameters that don't exist in transformers
     if hasattr(gen_config, 'repeat_penalty'):
@@ -789,14 +841,14 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
             input_ids,
             assistant_model=assistant_model,
             **generation_kwargs,
-        streamer = TextStreamer(tokenizer, skip_prompt = True),
+        streamer = streamer
         )
     else:
         print("Generating without speculative decoding")
         outputs = model.generate(
             input_ids,
             **generation_kwargs,
-        streamer = TextStreamer(tokenizer, skip_prompt = True),
+        streamer = streamer
         )
 
     end_time = time.time()

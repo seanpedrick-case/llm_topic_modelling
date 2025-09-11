@@ -215,11 +215,8 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
         html_table = input_string
     else:
         # Input is in Markdown format
-        print("input_string:", input_string)
         lines = input_string.strip().split("\n")
         clean_md_text = "\n".join([lines[0]] + lines[2:])  # Keep header, skip separator, keep data
-
-        print("clean_md_text:", clean_md_text)
         
         # Read Markdown table into a DataFrame
         df = pd.read_csv(pd.io.common.StringIO(clean_md_text), sep="|", skipinitialspace=True,
