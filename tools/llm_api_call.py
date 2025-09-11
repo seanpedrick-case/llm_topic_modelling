@@ -700,10 +700,10 @@ def extract_topics(in_data_file: GradioFileData,
               tokenizer:object=list(),
               assistant_model:object=list(),
               max_rows:int=max_rows,
-              progress=Progress(track_tqdm=True)):
+              progress=Progress(track_tqdm=False)):
 
     '''
-    Query an LLM (local, (Gemma 2B Instruct, Gemini or Anthropic-based on AWS) with up to three prompts about a table of open text data. Up to 'batch_size' rows will be queried at a time.
+    Query an LLM (local, (Gemma/GPT-OSS if local, Gemini, AWS Bedrock or Azure AI Inference) with up to three prompts about a table of open text data. Up to 'batch_size' rows will be queried at a time.
 
     Parameters:
     - in_data_file (gr.File): Gradio file object containing input data
@@ -857,7 +857,8 @@ def extract_topics(in_data_file: GradioFileData,
         else: sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive"
         
         topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
-        topics_loop = tqdm(range(latest_batch_completed, num_batches), desc = topics_loop_description, unit="batches remaining")
+        total_batches_to_do = num_batches - latest_batch_completed
+        topics_loop = progress.tqdm(range(total_batches_to_do), desc = topics_loop_description, unit="batches remaining")
 
         for i in topics_loop:       
             reported_batch_no = latest_batch_completed + 1  
@@ -1301,7 +1302,7 @@ def wrapper_extract_topics_per_column_value(
     tokenizer:object=None,
     assistant_model:object=None,
     max_rows:int=max_rows,
-    progress=Progress(track_tqdm=True) # type: ignore
+    progress=Progress(track_tqdm=False) # type: ignore
 ) -> Tuple: # Mimicking the return tuple structure of extract_topics
     """
     A wrapper function that iterates through unique values in a specified grouping column

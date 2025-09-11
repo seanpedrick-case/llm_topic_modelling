@@ -277,28 +277,28 @@ LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', '
 USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers
 
 
-GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")
-GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "google/gemma-2-2b-it")
+GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
+GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
 if USE_LLAMA_CPP == "False":
     GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
 
-GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf")
+GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf")
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_REPO_ID = get_or_create_env_var("GEMMA3_REPO_ID", "unsloth/gemma-3-270m-it-qat-GGUF")
-GEMMA3_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_REPO_TRANSFORMERS_ID", "google/gemma-3-270m-it")
+GEMMA3_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-270m-it")
 if USE_LLAMA_CPP == "False":
     GEMMA3_REPO_ID = GEMMA3_REPO_TRANSFORMERS_ID
 
 GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-qat-F16.gguf")
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
-GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit")  # "google/gemma-3-4b-it"
+GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3n-E2B-it-GGUF") # "unsloth/gemma-3-4b-it-qat-GGUF"
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit"
 if USE_LLAMA_CPP == "False":
     GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 
-GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-Q4_K_M.gguf")
+GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3n-E2B-it-Q4_K_M.gguf") # "gemma-3-4b-it-qat-Q4_K_M.gguf"
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
@@ -355,7 +355,7 @@ LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
-REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
+REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '') # Reasoning: low # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level
 
 # Transformers variables
 COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'True') # Whether to compile transformers models

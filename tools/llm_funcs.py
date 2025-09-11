@@ -112,8 +112,6 @@ class llama_cpp_init_config_cpu(llama_cpp_init_config_gpu):
 gpu_config = llama_cpp_init_config_gpu()
 cpu_config = llama_cpp_init_config_cpu()
 
-
-
 class LlamaCPPGenerationConfig:
     def __init__(self, temperature=temperature,
                  top_k=top_k,
@@ -171,9 +169,7 @@ def get_model_path(repo_id=LOCAL_REPO_ID, model_filename=LOCAL_MODEL_FILE, model
     except Exception as e:
         print("Error loading model:", e)
         raise Warning("Error loading model:", e)
-        #return None
     
-@spaces.GPU(duration=60)
 def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     gpu_layers:int=gpu_layers,
     max_context_length:int=context_length,
@@ -222,6 +218,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
 
     # Verify the device and cuda settings
     # Check if CUDA is enabled
+    
     import torch    
 
     torch.cuda.empty_cache()
@@ -272,7 +269,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                 model = Llama(model_path=model_path, **vars(cpu_config)) 
         
         else:
+            from unsloth import FastLanguageModel
             from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+            
 
             print("Loading model from transformers")
             # Use the official model ID for Gemma 3 4B
@@ -304,11 +303,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
             try:
 
                 # Load Tokenizer and Model
-                tokenizer = AutoTokenizer.from_pretrained(model_id)
+                # tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-                if not tokenizer.pad_token:
-                    tokenizer.pad_token = tokenizer.eos_token    
-
+                
                 if USE_BITSANDBYTES == "True":              
 
                     if INT8_WITH_OFFLOAD_TO_CPU == "True":
@@ -320,7 +317,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                         max_memory=max_memory,
                         llm_int8_enable_fp32_cpu_offload=True # Note: if bitsandbytes has to offload to CPU, inference will be slow
                         )
-                    else:
+                    else:                        
                         # For Gemma 4B, requires at least 6GB of VRAM
                         print("Using bitsandbytes for quantisation to 4 bits")
                         quantisation_config = BitsAndBytesConfig(
@@ -332,21 +329,32 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
 
                     print("Loading model with bitsandbytes quantisation config:", quantisation_config)
 
-                    model = AutoModelForCausalLM.from_pretrained(
+                    model, tokenizer = FastLanguageModel.from_pretrained(
                         model_id,
+                        max_seq_length=max_context_length,
                         dtype=torch_dtype,
                         device_map="auto",
-                        quantization_config=quantisation_config,
+                        load_in_4bit=True,
+                        # quantization_config=quantisation_config, # Not actually used in Unsloth
                         token=hf_token
                     )
+
+                    FastLanguageModel.for_inference(model)
                 else:
                     print("Loading model without bitsandbytes quantisation")
-                    model = AutoModelForCausalLM.from_pretrained(
+                    model, tokenizer = FastLanguageModel.from_pretrained(
                         model_id,
+                        max_seq_length=max_context_length,
                         dtype=torch_dtype,
                         device_map="auto",
                         token=hf_token
                     )
+
+                    FastLanguageModel.for_inference(model)
+
+                if not tokenizer.pad_token:
+                    tokenizer.pad_token = tokenizer.eos_token    
+
             except Exception as e:
                 print("Error loading model with bitsandbytes quantisation config:", e)
                 raise Warning("Error loading model with bitsandbytes quantisation config:", e)
@@ -580,46 +588,6 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
 
     return output
 
-# This function is not used in this app
-def llama_cpp_streaming(history, full_prompt, temperature=temperature, model=None):
-
-    if model is None:
-        model = get_model()
-    
-    if model is None:
-        raise ValueError("No model available. Either pass a model parameter or ensure LOAD_LOCAL_MODEL_AT_START is True.")
-
-    gen_config = LlamaCPPGenerationConfig()
-    gen_config.update_temp(temperature)
-
-    print(vars(gen_config))
-
-    # Pull the generated text from the streamer, and update the model output.
-    start = time.time()
-    NUM_TOKENS=0
-    print('-'*4+'Start Generation'+'-'*4)
-
-    output = model(
-    full_prompt, **vars(gen_config))
-
-    history[-1][1] = ""
-    for out in output:
-
-        if "choices" in out and len(out["choices"]) > 0 and "text" in out["choices"][0]:
-            history[-1][1] += out["choices"][0]["text"]
-            NUM_TOKENS+=1
-            yield history
-        else:
-            print(f"Unexpected output structure: {out}") 
-
-    time_generate = time.time() - start
-    print('\n')
-    print('-'*4+'End Generation'+'-'*4)
-    print(f'Num of generated tokens: {NUM_TOKENS}')
-    print(f'Time for complete generation: {time_generate}s')
-    print(f'Tokens per secound: {NUM_TOKENS/time_generate}')
-    print(f'Time per token: {(time_generate/NUM_TOKENS)*1000}ms')
-
 ###
 # LLM FUNCTIONS
 ###
@@ -750,10 +718,12 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None):
+def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None, progress=Progress(track_tqdm=False)):
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
     """
+    from transformers import TextStreamer
+
     if model is None:
         model = get_model()
     if tokenizer is None:
@@ -765,19 +735,34 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         raise ValueError("No model or tokenizer available. Either pass them as parameters or ensure LOAD_LOCAL_MODEL_AT_START is True.")
     
     # 1. Define the conversation as a list of dictionaries
+    def wrap_text_message(text):
+        return [{"type": "text", "text": text}]
+
     conversation = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt}
+        {"role": "system", "content": wrap_text_message(system_prompt)},
+        {"role": "user", "content": wrap_text_message(prompt)}
     ]
+    #print("Conversation:", conversation)
+    #import pprint
+    #pprint.pprint(conversation)
 
     # 2. Apply the chat template
     # This function formats the conversation into the exact string Gemma 3 expects.
     # add_generation_prompt=True adds the special tokens that tell the model it's its turn to speak.
-    input_ids = tokenizer.apply_chat_template(
-        conversation,
-        add_generation_prompt=True,
-        return_tensors="pt"
-    ).to("cuda")
+
+    try:
+        input_ids = tokenizer.apply_chat_template(
+                conversation,
+                add_generation_prompt = True, # Must add for generation
+                tokenize = True,
+                return_tensors = "pt",
+            ).to("cuda")
+    except Exception as e:
+        print("Error applying chat template:", e)
+        print("Conversation type:", type(conversation))
+        for turn in conversation:
+            print("Turn type:", type(turn), "Content type:", type(turn.get("content")))
+        raise
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
@@ -803,12 +788,15 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         outputs = model.generate(
             input_ids,
             assistant_model=assistant_model,
-            **generation_kwargs
+            **generation_kwargs,
+        streamer = TextStreamer(tokenizer, skip_prompt = True),
         )
     else:
+        print("Generating without speculative decoding")
         outputs = model.generate(
             input_ids,
-            **generation_kwargs
+            **generation_kwargs,
+        streamer = TextStreamer(tokenizer, skip_prompt = True),
         )
 
     end_time = time.time()
@@ -818,6 +806,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     # To get only the model's reply, we can decode just the newly generated tokens
     new_tokens = outputs[0][input_ids.shape[-1]:]
     assistant_reply = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    #print("Assistant reply:", assistant_reply)
 
     num_input_tokens = input_ids.shape[-1]  # This gets the sequence length (number of tokens)
     num_generated_tokens = len(new_tokens)
@@ -830,7 +819,6 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     print(f"Tokens per second: {tokens_per_second:.2f}")
 
     return assistant_reply, num_input_tokens, num_generated_tokens
-
 
 # Function to send a request and update history
 def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_model=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:

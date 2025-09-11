@@ -14,6 +14,7 @@ logs/*
 usage/*
 feedback/*
 test_code/*
+unsloth_compiled_cache/*
 input/
 output/
 logs/
