@@ -357,9 +357,9 @@ LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n']")
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
 if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
-    REASONING_SUFFIX = int(get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low'))
+    REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
 else:
-    REASONING_SUFFIX = int(get_or_create_env_var('REASONING_SUFFIX', ''))  # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level
+    REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '')  # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level
 
 # Transformers variables
 COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'False') # Whether to compile transformers models
