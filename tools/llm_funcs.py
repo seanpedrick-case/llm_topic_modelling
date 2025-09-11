@@ -331,7 +331,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
                         bnb_4bit_use_double_quant=True # Optional: uses a second quantisation step to save even more memory
                     )
 
-                    print("Loading model with bitsandbytes quantisation config:", quantisation_config)
+                    #print("Loading model with bitsandbytes quantisation config:", quantisation_config)
 
                     model, tokenizer = FastLanguageModel.from_pretrained(
                         model_id,
@@ -593,7 +593,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
             seed=seed,
             max_tokens=max_tokens,
             stream=True,
-            stop=stop_strings  # spaces to catch runaway spaces
+            stop=stop_strings # catching four new lines in sequence by default
         ):
             delta = chunk["choices"][0].get("delta", {})
             token = delta.get("content") or chunk["choices"][0].get("text") or ""
@@ -630,7 +630,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
             seed=seed,
             max_tokens=max_tokens,
             stream=False,
-            stop=stop_strings  # spaces to catch runaway spaces
+            stop=stop_strings  # catching four new lines in sequence by default
         )
         return response
 
@@ -816,8 +816,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         'temperature': gen_config.temperature,
         'top_p': gen_config.top_p,
         'top_k': gen_config.top_k,
-        'do_sample': True,
-        'stop': stop_strings
+        'do_sample': True
         #'pad_token_id': tokenizer.eos_token_id
     }
 
@@ -1020,7 +1019,20 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 def process_requests(prompts: List[str],
 system_prompt: str,
 conversation_history: List[dict],
-whole_conversation: List[str], whole_conversation_metadata: List[str], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, batch_no:int = 1, local_model = list(), tokenizer=None, assistant_model=None, master:bool = False, assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+whole_conversation: List[str],
+whole_conversation_metadata: List[str],
+google_client: ai.Client,
+config: types.GenerateContentConfig,
+model_choice: str,
+temperature: float,
+bedrock_runtime:boto3.Session.client,
+model_source:str,
+batch_no:int = 1,
+local_model = list(),
+tokenizer=None,
+assistant_model=None,
+master:bool = False,
+assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 

@@ -293,12 +293,12 @@ if USE_LLAMA_CPP == "False":
 GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-qat-F16.gguf")
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
-GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3n-E2B-it-GGUF") # "unsloth/gemma-3-4b-it-qat-GGUF"
+GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
 GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3n-E2B-it-unsloth-bnb-4bit" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit"
 if USE_LLAMA_CPP == "False":
     GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 
-GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3n-E2B-it-Q4_K_M.gguf") # "gemma-3-4b-it-qat-Q4_K_M.gguf"
+GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-Q4_K_M.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
@@ -339,7 +339,7 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '1'))
-LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','96')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
 LLM_MIN_P = float(get_or_create_env_var('LLM_MIN_P', '0'))
 LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95'))
 LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1.0'))
@@ -353,13 +353,13 @@ LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
 LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '128'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
-LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['        ', '\n\n\n\n']")
+LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n']")
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
 REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '') # Reasoning: low # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level
 
 # Transformers variables
-COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'True') # Whether to compile transformers models
+COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'False') # Whether to compile transformers models
 USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether to use bitsandbytes for quantization
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
