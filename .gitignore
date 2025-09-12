@@ -4,7 +4,6 @@
 *.png
 *.ipynb
 *.xls
-*.xlsx
 *.pyc
 examples/*
 output/*
