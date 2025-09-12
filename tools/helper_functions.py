@@ -745,13 +745,18 @@ def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost
                     raise Exception("Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions.")
     return
 
-def _get_env_list(env_var_name: str) -> List[str]:
+import codecs
+
+def _get_env_list(env_var_name: str, strip_strings:bool=True) -> List[str]:
     """Parses a comma-separated environment variable into a list of strings."""
     value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
     if not value:
         return []
     # Split by comma and filter out any empty strings that might result from extra commas
-    return [s.strip() for s in value.split(',') if s.strip()]
+    if strip_strings:
+        return [s.strip() for s in value.split(',') if s.strip()]
+    else:
+        return [codecs.decode(s, 'unicode_escape') for s in value.split(',') if s]
 
 def create_batch_file_path_details(reference_data_file_name: str) -> str:
             """

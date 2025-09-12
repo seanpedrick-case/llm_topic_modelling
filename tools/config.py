@@ -187,39 +187,29 @@ if LOGGING == 'True':
     # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-###
-# LLM variables
-###
-
-MAX_TOKENS = int(get_or_create_env_var('MAX_TOKENS', '4096')) # Maximum number of output tokens
-TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # AWS now seems to have a 60 second minimum wait between API calls
-NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5'))
-# Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
-MAX_OUTPUT_VALIDATION_ATTEMPTS = int(get_or_create_env_var('MAX_OUTPUT_VALIDATION_ATTEMPTS', '3'))
-MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999'))
-BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5'))
-DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90'))
-MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000'))
-
-RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
-RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
-RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
-GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
-
-# Build up options for models
 ### 
-# LLM variables
+# App run variables
 ###
+OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'False') # Whether to output debug files
 
-MAX_TOKENS = int(get_or_create_env_var('MAX_TOKENS', '4096')) # Maximum number of output tokens
-TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # AWS now seems to have a 60 second minimum wait between API calls
-NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5'))
+TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # Maximum number of seconds to wait for a response from the LLM
+NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5')) # Maximum number of times to retry a request to the LLM
 # Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
 MAX_OUTPUT_VALIDATION_ATTEMPTS = int(get_or_create_env_var('MAX_OUTPUT_VALIDATION_ATTEMPTS', '3'))
-MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999'))
-BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5'))
-DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90'))
-MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000'))
+MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999')) # Maximum number of seconds to run the loop for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there)
+
+MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000')) # Maximum number of characters in a comment
+MAX_ROWS = int(get_or_create_env_var('MAX_ROWS', '5000')) # Maximum number of rows to process
+MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99')) # Maximum number of groups to process
+BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5')) # Default batch size for LLM calls
+MAXIMUM_ZERO_SHOT_TOPICS = int(get_or_create_env_var('MAXIMUM_ZERO_SHOT_TOPICS', '120')) # Maximum number of zero shot topics to process
+MAX_SPACES_GPU_RUN_TIME = int(get_or_create_env_var('MAX_SPACES_GPU_RUN_TIME', '240')) # Maximum number of seconds to run on GPU on Hugging Face Spaces
+
+DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90')) # Deduplication threshold for topic summary tables
+
+###
+# Model options
+###
 
 RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
 
@@ -277,16 +267,16 @@ LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', '
 USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers
 
 
-GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "lmstudio-community/gemma-2-2b-it-GGUF")
-GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "google/gemma-2-2b-it")
+GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
+GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
 if USE_LLAMA_CPP == "False":
     GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
 
-GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it-Q8_0.gguf")
+GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf")
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_REPO_ID = get_or_create_env_var("GEMMA3_REPO_ID", "unsloth/gemma-3-270m-it-qat-GGUF")
-GEMMA3_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_REPO_TRANSFORMERS_ID", "google/gemma-3-270m-it")
+GEMMA3_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-270m-it")
 if USE_LLAMA_CPP == "False":
     GEMMA3_REPO_ID = GEMMA3_REPO_TRANSFORMERS_ID
 
@@ -294,7 +284,7 @@ GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-
 GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit")  # "google/gemma-3-4b-it"
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit" # unsloth/gemma-3-4b-it-qat
 if USE_LLAMA_CPP == "False":
     GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 
@@ -302,7 +292,7 @@ GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
-GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "openai/gpt-oss-20b")
+GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit")
 if USE_LLAMA_CPP == "False":
     GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
 
@@ -310,7 +300,7 @@ GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F1
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
-ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "google/gemma-3-270m-it")
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
 
 GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
 
@@ -339,7 +329,7 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
-LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','96')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
+LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
 LLM_MIN_P = float(get_or_create_env_var('LLM_MIN_P', '0'))
 LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95'))
 LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1.0'))
@@ -348,30 +338,26 @@ LLM_LAST_N_TOKENS = int(get_or_create_env_var('LLM_LAST_N_TOKENS', '512'))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
 LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
 LLM_RESET = get_or_create_env_var('LLM_RESET', 'True')
-LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'False')
+LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'True')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
 LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '128'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
+LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n']")
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
-REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
+if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
+    REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
+else:
+    REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '')  # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level
 
 # Transformers variables
-COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'True') # Whether to compile transformers models
+COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'False') # Whether to compile transformers models
 USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether to use bitsandbytes for quantization
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
 
-###
-# Dataset variables
-###
-
-MAX_ROWS = int(get_or_create_env_var('MAX_ROWS', '5000'))
-MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
-MAXIMUM_ZERO_SHOT_TOPICS = int(get_or_create_env_var('MAXIMUM_ZERO_SHOT_TOPICS', '120'))
-MAX_SPACES_GPU_RUN_TIME = int(get_or_create_env_var('MAX_SPACES_GPU_RUN_TIME', '240'))
 
 ###
 # Gradio app variables

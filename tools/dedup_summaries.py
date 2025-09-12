@@ -14,9 +14,9 @@ from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_d
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
 
-max_tokens = MAX_TOKENS
+max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
 number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
@@ -24,6 +24,7 @@ batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
+output_debug_files = OUTPUT_DEBUG_FILES
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:
@@ -460,9 +461,79 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     # Process requests to large language model
     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=summary_assistant_prefill)
 
+    summarised_output = re.sub(r'\n{2,}', '\n', response_text)  # Replace multiple line breaks with a single line break
+    summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
+    summarised_output = re.sub(r'\n', '<br>', summarised_output)  # Replace \n with more html friendly <br> tags
+    summarised_output = summarised_output.strip()
+    
     print("Finished summary query")
 
-    return response_text, conversation_history, whole_conversation_metadata
+    return summarised_output, conversation_history, whole_conversation_metadata, response_text
+
+def process_debug_output_iteration(
+    output_debug_files: str, 
+    output_folder: str, 
+    batch_file_path_details: str, 
+    model_choice_clean_short: str, 
+    final_system_prompt: str, 
+    summarised_output: str, 
+    conversation_history: list, 
+    metadata: list, 
+    log_output_files: list,
+    task_type: str
+    ) -> tuple[str, str, str, str]:
+    """
+    Writes debug files for summary generation if output_debug_files is "True",
+    and returns the content of the prompt, summary, conversation, and metadata for the current iteration.
+    
+    Args:
+        output_debug_files (str): Flag to indicate if debug files should be written.
+        output_folder (str): The folder where output files are saved.
+        batch_file_path_details (str): Details for the batch file path.
+        model_choice_clean_short (str): Shortened cleaned model choice.
+        final_system_prompt (str): The system prompt content.
+        summarised_output (str): The summarised output content.
+        conversation_history (list): The full conversation history.
+        metadata (list): The metadata for the conversation.
+        log_output_files (list): A list to append paths of written log files. This list is modified in-place.
+        task_type (str): The type of task being performed.
+    Returns:
+        tuple[str, str, str, str]: A tuple containing the content of the prompt, 
+                                    summarised output, conversation history (as string), 
+                                    and metadata (as string) for the current iteration.
+    """
+    current_prompt_content = final_system_prompt
+    current_summary_content = summarised_output
+    current_conversation_content = str(conversation_history)
+    current_metadata_content = str(metadata)
+    current_task_type = task_type
+    
+    if output_debug_files == "True":
+        try:
+            formatted_prompt_output_path = output_folder + batch_file_path_details +  "_full_prompt_" + model_choice_clean_short + "_" + current_task_type + ".txt"
+            final_table_output_path = output_folder + batch_file_path_details + "_full_response_" + model_choice_clean_short + "_" + current_task_type + ".txt"
+            whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + "_" + current_task_type + ".txt"
+            whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + "_" + current_task_type + ".txt"
+
+            with open(formatted_prompt_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                f.write(current_prompt_content)
+            with open(final_table_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
+                f.write(current_summary_content)
+            with open(whole_conversation_path, "w", encoding='utf-8-sig', errors='replace') as f: 
+                f.write(current_conversation_content)
+            with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f: 
+                f.write(current_metadata_content)
+
+            log_output_files.append(formatted_prompt_output_path)
+            log_output_files.append(final_table_output_path)
+            log_output_files.append(whole_conversation_path)
+            log_output_files.append(whole_conversation_path_meta)
+        except Exception as e: 
+            print(f"Error in writing debug files for summary: {e}")
+    
+    # Return the content of the objects for the current iteration.
+    # The caller can then append these to separate lists if accumulation is desired.
+    return current_prompt_content, current_summary_content, current_conversation_content, current_metadata_content
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
@@ -486,6 +557,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             aws_secret_key_textbox:str='',
                             model_name_map:dict=model_name_map,
                             hf_api_key_textbox:str='',
+                            existing_logged_content:list=list(),
+                            output_debug_files:str=output_debug_files,
                             reasoning_suffix:str=reasoning_suffix,
                             local_model:object=None, 
                             tokenizer:object=None,
@@ -519,6 +592,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
         model_name_map (dict, optional): Dictionary mapping model choices to their properties. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
+        existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
+        output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object if using local inference. Defaults to None.
         tokenizer (object, optional): Tokenizer object if using local inference. Defaults to None.
@@ -540,6 +615,19 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     time_taken = 0
     out_metadata_str = "" # Output metadata is currently replaced on starting a summarisation task
     out_message = list()
+    task_type = "Topic summarisation"
+
+    all_prompts_content = list()
+    all_summaries_content = list()
+    all_conversation_content = list()
+    all_metadata_content = list()
+    all_groups_content = list()
+    all_batches_content = list()
+    all_model_choice_content = list()
+    all_validated_content = list()
+    all_task_type_content = list()
+    all_logged_content = list()
+    all_file_names_content = list()
 
     tic = time.perf_counter()
 
@@ -572,9 +660,14 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     topic_summary_df = topic_summary_df.rename(columns={"General Topic":"General topic"}, errors="ignore")
     if "Group" not in reference_table_df.columns: reference_table_df["Group"] = "All"
     if "Group" not in topic_summary_df.columns: topic_summary_df["Group"] = "All"
+    if "Group" not in sampled_reference_table_df.columns: sampled_reference_table_df["Group"] = "All"
    
-    try: all_summaries = sampled_reference_table_df["Summary"].tolist()
-    except: all_summaries = sampled_reference_table_df["Revised summary"].tolist()
+    try: 
+        all_summaries = sampled_reference_table_df["Summary"].tolist()
+        all_groups = sampled_reference_table_df["Group"].tolist()
+    except: 
+        all_summaries = sampled_reference_table_df["Revised summary"].tolist()
+        all_groups = sampled_reference_table_df["Group"].tolist()
 
     length_all_summaries = len(all_summaries)
 
@@ -593,30 +686,59 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         
         bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
 
+        batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
+        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
 
             summary_text = all_summaries[summary_no]
             formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
 
-            formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
+            formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols,consultation_context=context_textbox)
 
             if "Local" in model_source and reasoning_suffix: formatted_summarise_topic_descriptions_system_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + reasoning_suffix
 
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model)
-                summarised_output = response
-                summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
-                summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
-                summarised_output = summarised_output.strip()
+                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model)
+                summarised_output = response_text
             except Exception as e:
-                print(e)
+                print("Creating summary failed:", e)
                 summarised_output = ""
 
             summarised_outputs.append(summarised_output)
             out_metadata.extend(metadata)
-            out_metadata_str = '. '.join(out_metadata)
+            out_metadata_str = '. '.join(out_metadata)            
 
+            # Call the new function to process and log debug outputs for the current iteration.
+            # The returned values are the contents of the prompt, summary, conversation, and metadata
+
+            full_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + formatted_summary_prompt[0]
+
+            current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = \
+                process_debug_output_iteration(
+                    output_debug_files, 
+                    output_folder, 
+                    batch_file_path_details, 
+                    model_choice_clean_short, 
+                    full_prompt, 
+                    summarised_output, 
+                    conversation_history, 
+                    metadata, 
+                    log_output_files,
+                    task_type=task_type
+                )
+            
+            all_prompts_content.append(current_prompt_content_logged)
+            all_summaries_content.append(current_summary_content_logged)
+            #all_conversation_content.append(current_conversation_content_logged)
+            all_metadata_content.append(current_metadata_content_logged)
+            all_groups_content.append(all_groups[summary_no])
+            all_batches_content.append(f"{summary_no}:")
+            all_model_choice_content.append(model_choice_clean_short)
+            all_validated_content.append("No")
+            all_task_type_content.append(task_type)
+            all_file_names_content.append(reference_data_file_name)
             latest_summary_completed += 1
 
             toc = time.perf_counter()
@@ -630,9 +752,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     # If all summaries completed, make final outputs
     if latest_summary_completed >= length_all_summaries:
-        print("All summaries completed. Creating outputs.")        
-
-        batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
+        print("All summaries completed. Creating outputs.")       
 
         sampled_reference_table_df["Revised summary"] = summarised_outputs           
 
@@ -657,7 +777,17 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
         # Remove topics that are tagged as 'Not Mentioned'
         topic_summary_df_revised = topic_summary_df_revised.loc[topic_summary_df_revised["Sentiment"] != "Not Mentioned", :]
-        reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]            
+        reference_table_df_revised = reference_table_df_revised.loc[reference_table_df_revised["Sentiment"] != "Not Mentioned", :]
+
+        # Combine the logged content into a list of dictionaries         
+        all_logged_content = [
+            {"prompt": prompt, "response": summary, "metadata": metadata, "batch": batch, "model_choice": model_choice, "validated": validated, "group": group, "task_type": task_type, "file_name": file_name}
+            for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(all_prompts_content, all_summaries_content, all_metadata_content, all_batches_content, all_model_choice_content, all_validated_content, all_groups_content, all_task_type_content, all_file_names_content)
+        ]
+
+        out_logged_content = existing_logged_content + all_logged_content
+
+        ### Save output files
 
         if not file_data.empty:
             basic_response_data = get_basic_response_data(file_data, chosen_cols)
@@ -694,7 +824,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         out_message = out_message + " " + f"Topic summarisation finished processing. Total time: {time_taken:.2f}s"
         print(out_message)
 
-        return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken, out_message
+        return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken, out_message, out_logged_content
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def overall_summary(topic_summary_df:pd.DataFrame,
@@ -709,6 +839,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     aws_secret_key_textbox:str='',
                     model_name_map:dict=model_name_map,
                     hf_api_key_textbox:str='',
+                    existing_logged_content:list=list(),
+                    output_debug_files:str=output_debug_files,
+                    log_output_files:list=list(),                    
                     reasoning_suffix:str=reasoning_suffix,                    
                     local_model:object=None,
                     tokenizer:object=None,
@@ -718,7 +851,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     comprehensive_summary_format_prompt_by_group:str=comprehensive_summary_format_prompt_by_group,
                     summarise_everything_system_prompt:str=summarise_everything_system_prompt,
                     do_summaries:str="Yes",                            
-                    progress=gr.Progress(track_tqdm=True)) -> Tuple[List[str], List[str], int, str, List[str], List[str], int, int, int, float]:
+                    progress=gr.Progress(track_tqdm=True)) -> Tuple[List[str], List[str], int, str, List[str], List[str], int, int, int, float, List[dict]]:
     '''
     Create an overall summary of all responses based on a topic summary table.
 
@@ -735,6 +868,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
         model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
+        existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
+        output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
+        log_output_files (list, optional): List of existing logged content. Defaults to empty list.        
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object. Defaults to None.
         tokenizer (object, optional): Tokenizer object. Defaults to None. 
@@ -758,6 +894,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             int: Number of output tokens  
             int: Number of API calls
             float: Time taken
+            List[dict]: List of logged content
     '''
 
     out_metadata = list()
@@ -771,7 +908,20 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     number_of_calls_num = 0
     time_taken = 0
     out_message = list()
-
+    all_logged_content = list()
+    all_prompts_content = list()
+    all_summaries_content = list()
+    all_conversation_content = list()
+    all_metadata_content = list()
+    all_groups_content = list()
+    all_batches_content = list()
+    all_model_choice_content = list()
+    all_validated_content = list()
+    task_type = "Overall summary"
+    all_task_type_content = list()
+    log_output_files = list()
+    all_logged_content = list()
+    all_file_names_content = list()
     tic = time.perf_counter()
 
     if "Group" not in topic_summary_df.columns:
@@ -789,6 +939,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
     batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
+    model_choice_clean = model_name_map[model_choice]["short_name"]
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
 
     tic = time.perf_counter()
 
@@ -812,18 +964,14 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             
             formatted_summary_prompt = [summarise_everything_prompt.format(topic_summary_table=summary_text, summary_format=comprehensive_summary_format_prompt)]
 
-            formatted_summarise_everything_system_prompt = summarise_everything_system_prompt.format(column_name=chosen_cols[0],consultation_context=context_textbox)
+            formatted_summarise_everything_system_prompt = summarise_everything_system_prompt.format(column_name=chosen_cols,consultation_context=context_textbox)
 
             if "Local" in model_source and reasoning_suffix: formatted_summarise_everything_system_prompt = formatted_summarise_everything_system_prompt + "\n" + reasoning_suffix
             
             try:
-                response, conversation_history, metadata = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model)
-                summarised_output_for_df = response
+                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model)
+                summarised_output_for_df = response_text
                 summarised_output = response
-                summarised_output = re.sub(r'\n{2,}', '\n', summarised_output)  # Replace multiple line breaks with a single line break
-                summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
-                summarised_output = re.sub(r'\n', '<br>', summarised_output)  # Replace \n with more html friendly <br> tags
-                summarised_output = summarised_output.strip()
             except Exception as e:
                 print("Cannot create overall summary for group:", summary_group, "due to:", e)
                 summarised_output = ""
@@ -836,23 +984,22 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             out_metadata.extend(metadata)
             out_metadata_str = '. '.join(out_metadata)
 
+            full_prompt = formatted_summarise_everything_system_prompt + "\n" + formatted_summary_prompt[0]
+
+            current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, summarised_output, conversation_history, metadata, log_output_files, task_type=task_type)            
+
+            all_prompts_content.append(current_prompt_content_logged)
+            all_summaries_content.append(current_summary_content_logged)
+            #all_conversation_content.append(current_conversation_content_logged)
+            all_metadata_content.append(current_metadata_content_logged)
+            all_groups_content.append(summary_group)
+            all_batches_content.append("1")
+            all_model_choice_content.append(model_choice_clean_short)
+            all_validated_content.append("No")
+            all_task_type_content.append(task_type)
+            all_file_names_content.append(reference_data_file_name)
             latest_summary_completed += 1
-
-            model_choice_clean = model_name_map[model_choice]["short_name"]
-
             summary_group_short = clean_column_name(summary_group)
-            model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-
-            # Write outputs
-            overall_summary_output_path = output_folder + batch_file_path_details + "_overall_summary_grp_" + summary_group + "_" + model_choice_clean_short + ".txt"
-
-            # Write single group outputs
-            try:
-                with open(overall_summary_output_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                    f.write(summarised_output)
-                # output_files.append(overall_summary_output_path)
-            except Exception as e:
-                print(f"Error writing prompt to file {overall_summary_output_path}: {e}")
 
         # Write overall outputs to csv
         overall_summary_output_csv_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + ".csv" 
@@ -866,17 +1013,6 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         ).str.replace(r"\n", "<br>", regex=False)
         html_output_table = summarised_outputs_df_for_display.to_html(index=False, escape=False)
 
-        # Text output file
-        summarised_outputs_join = "\n".join(txt_summarised_outputs)        
-        overall_summary_output_txt_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + ".txt"     
-
-        try:
-            with open(overall_summary_output_txt_path, "w", encoding='utf-8-sig', errors='replace') as f:
-                f.write(summarised_outputs_join)
-            output_files.append(overall_summary_output_txt_path)
-        except Exception as e:
-            print(f"Error writing prompt to file {overall_summary_output_txt_path}: {e}")
-
         output_files = list(set(output_files))
 
         input_tokens_num, output_tokens_num, number_of_calls_num = calculate_tokens_from_metadata(out_metadata_str, model_choice, model_name_map)
@@ -889,4 +1025,12 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         out_message = out_message + " " + f"Overall summary finished processing. Total time: {time_taken:.2f}s"
         print(out_message)
 
-    return output_files, html_output_table, summarised_outputs_df, out_metadata_str, input_tokens_num, output_tokens_num, number_of_calls_num, time_taken, out_message
+        # Combine the logged content into a list of dictionaries         
+        all_logged_content = [
+            {"prompt": prompt, "response": summary, "metadata": metadata, "batch": batch, "model_choice": model_choice, "validated": validated, "group": group, "task_type": task_type, "file_name": file_name}
+            for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(all_prompts_content, all_summaries_content, all_metadata_content, all_batches_content, all_model_choice_content, all_validated_content, all_groups_content, all_task_type_content, all_file_names_content)
+        ]
+
+        out_logged_content = existing_logged_content + all_logged_content
+
+    return output_files, html_output_table, summarised_outputs_df, out_metadata_str, input_tokens_num, output_tokens_num, number_of_calls_num, time_taken, out_message, out_logged_content
