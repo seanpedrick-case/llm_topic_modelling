@@ -279,6 +279,8 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         column_widths["Missing responses"] = {"A": 25, "B": 30, "C": 50}
         wrap_text_columns["Missing responses"] = ["C"]
 
+    new_csv_files = csv_files.copy()
+
     # Original data file
     original_ext = os.path.splitext(original_data_file_path)[1].lower()
     if original_ext == ".csv":
@@ -376,6 +378,10 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     )
 
     xlsx_output_filenames = [xlsx_output_filename]
+
+    # Delete intermediate csv files
+    for csv_file in new_csv_files:
+        os.remove(csv_file)
 
     return xlsx_output_filenames, xlsx_output_filenames
 

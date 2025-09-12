@@ -14,10 +14,10 @@ from tools.prompts import initial_table_prompt, prompt2, prompt3, system_prompt,
 from tools.helper_functions import put_columns_in_df, wrap_text, clean_column_name, create_batch_file_path_details
 from tools.llm_funcs import load_model, construct_gemini_generative_model, call_llm_with_markdown_table_checks, get_model, get_tokenizer, get_assistant_model
 from tools.llm_api_call import load_in_data_file, get_basic_response_data, data_file_to_markdown_table,  convert_response_text_to_dataframe, ResponseObject
-from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_TOKENS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT
+from tools.config import MAX_OUTPUT_VALIDATION_ATTEMPTS,  RUN_LOCAL_MODEL, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, LLM_MAX_NEW_TOKENS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT
 from tools.aws_functions import connect_to_bedrock_runtime
 
-max_tokens = MAX_TOKENS
+max_tokens = LLM_MAX_NEW_TOKENS
 max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
 random_seed = LLM_SEED

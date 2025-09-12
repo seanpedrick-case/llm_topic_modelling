@@ -187,39 +187,29 @@ if LOGGING == 'True':
     # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-###
-# LLM variables
-###
-
-MAX_TOKENS = int(get_or_create_env_var('MAX_TOKENS', '4096')) # Maximum number of output tokens
-TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # AWS now seems to have a 60 second minimum wait between API calls
-NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5'))
-# Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
-MAX_OUTPUT_VALIDATION_ATTEMPTS = int(get_or_create_env_var('MAX_OUTPUT_VALIDATION_ATTEMPTS', '3'))
-MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999'))
-BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5'))
-DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90'))
-MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000'))
-
-RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
-RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
-RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
-GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
-
-# Build up options for models
 ### 
-# LLM variables
+# App run variables
 ###
+OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'False') # Whether to output debug files
 
-MAX_TOKENS = int(get_or_create_env_var('MAX_TOKENS', '4096')) # Maximum number of output tokens
-TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # AWS now seems to have a 60 second minimum wait between API calls
-NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5'))
+TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # Maximum number of seconds to wait for a response from the LLM
+NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5')) # Maximum number of times to retry a request to the LLM
 # Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
 MAX_OUTPUT_VALIDATION_ATTEMPTS = int(get_or_create_env_var('MAX_OUTPUT_VALIDATION_ATTEMPTS', '3'))
-MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999'))
-BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5'))
-DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90'))
-MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000'))
+MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999')) # Maximum number of seconds to run the loop for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there)
+
+MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000')) # Maximum number of characters in a comment
+MAX_ROWS = int(get_or_create_env_var('MAX_ROWS', '5000')) # Maximum number of rows to process
+MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99')) # Maximum number of groups to process
+BATCH_SIZE_DEFAULT = int(get_or_create_env_var('BATCH_SIZE_DEFAULT', '5')) # Default batch size for LLM calls
+MAXIMUM_ZERO_SHOT_TOPICS = int(get_or_create_env_var('MAXIMUM_ZERO_SHOT_TOPICS', '120')) # Maximum number of zero shot topics to process
+MAX_SPACES_GPU_RUN_TIME = int(get_or_create_env_var('MAX_SPACES_GPU_RUN_TIME', '240')) # Maximum number of seconds to run on GPU on Hugging Face Spaces
+
+DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '90')) # Deduplication threshold for topic summary tables
+
+###
+# Model options
+###
 
 RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
 
@@ -338,7 +328,7 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
-LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '1'))
+LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
 LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
 LLM_MIN_P = float(get_or_create_env_var('LLM_MIN_P', '0'))
 LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95'))
@@ -368,14 +358,6 @@ COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # altern
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
 
-###
-# Dataset variables
-###
-
-MAX_ROWS = int(get_or_create_env_var('MAX_ROWS', '5000'))
-MAX_GROUPS = int(get_or_create_env_var('MAX_GROUPS', '99'))
-MAXIMUM_ZERO_SHOT_TOPICS = int(get_or_create_env_var('MAXIMUM_ZERO_SHOT_TOPICS', '120'))
-MAX_SPACES_GPU_RUN_TIME = int(get_or_create_env_var('MAX_SPACES_GPU_RUN_TIME', '240'))
 
 ###
 # Gradio app variables

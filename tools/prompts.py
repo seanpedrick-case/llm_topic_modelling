@@ -86,9 +86,7 @@ summary_assistant_prefill = ""
 
 summarise_topic_descriptions_system_prompt = system_prompt
 
-summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text in the table below. {summary_format}. Return only the summary and no other text.
-
-Below is a table with paragraphs with open text to summarise:
+summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}. Return only the summary and no other text:
 
 {summaries}
 
@@ -102,7 +100,7 @@ two_para_summary_format_prompt = "Return a summary up to two paragraphs long tha
 # OVERALL SUMMARY PROMPTS
 ###
 
-summarise_everything_system_prompt = generic_system_prompt
+summarise_everything_system_prompt = system_prompt
 
 summarise_everything_prompt = """Below is a table that gives an overview of the main topics from a dataset of open text responses along with a description of each topic, and the number of responses that mentioned each topic:
 

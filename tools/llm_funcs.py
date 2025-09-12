@@ -26,7 +26,7 @@ _model = None
 _tokenizer = None
 _assistant_model = None
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, MAX_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START, USE_SPECULATIVE_DECODING, ASSISTANT_MODEL, LLM_STOP_STRINGS
+from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START, USE_SPECULATIVE_DECODING, ASSISTANT_MODEL, LLM_STOP_STRINGS, LLM_MAX_NEW_TOKENS
 from tools.prompts import initial_table_assistant_prefill
 from tools.helper_functions import _get_env_list
 
@@ -51,7 +51,7 @@ else: sample = False
 
 if LLM_STOP_STRINGS: LLM_STOP_STRINGS = _get_env_list(LLM_STOP_STRINGS, strip_strings=False)
 
-max_tokens = MAX_TOKENS
+max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
 number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
@@ -65,7 +65,7 @@ top_p = LLM_TOP_P
 min_p = LLM_MIN_P
 repetition_penalty = LLM_REPETITION_PENALTY
 last_n_tokens = LLM_LAST_N_TOKENS
-max_new_tokens: int = LLM_MAX_NEW_TOKENS
+LLM_MAX_NEW_TOKENS: int = LLM_MAX_NEW_TOKENS
 seed: int = LLM_SEED
 reset: bool = reset
 stream: bool = stream
@@ -124,7 +124,7 @@ class LlamaCPPGenerationConfig:
                  repeat_penalty=repetition_penalty,
                  seed=seed,
                  stream=stream,
-                 max_tokens=max_new_tokens
+                 max_tokens=LLM_MAX_NEW_TOKENS
                  ):
         self.temperature = temperature
         self.top_k = top_k
@@ -812,7 +812,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
-        'max_new_tokens': gen_config.max_tokens,
+        'LLM_MAX_NEW_TOKENS': gen_config.max_tokens,
         'temperature': gen_config.temperature,
         'top_p': gen_config.top_p,
         'top_k': gen_config.top_k,

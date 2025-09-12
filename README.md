@@ -11,7 +11,7 @@ license: agpl-3.0
 
 # Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets under 'Test with an example dataset' below, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets under 'Test with an example dataset' at the bottom of the page, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
 
     NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.
 
@@ -96,8 +96,8 @@ Llama-cpp-python version 3.16 is compatible with Gemma 3 and GPT-OSS models, but
 The repo provides several requirements files that are relevant for different situations. I would advise using requirements_gpu.txt for GPU environments, and requirements_cpu.txt for CPU environments:
 
 - **requirements_no_local**: Can be used to install the app without local model inference for a more lightweight installation.
-- **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the last requirement under 'Windows' for Windows compatibility (CUDA 12.4).
-- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the last requirement under 'Windows' for Windows compatibility.
+- **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the requirements under 'Windows' for Windows compatibility (CUDA 12.4).
+- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the requirements under 'Windows' for Windows compatibility.
 - **requirements.txt**: Used for the Python 3.10 GPU-enabled environment on Hugging Face spaces (CUDA 12.4).
 
 2.  **Install packages from the requirements file:**
