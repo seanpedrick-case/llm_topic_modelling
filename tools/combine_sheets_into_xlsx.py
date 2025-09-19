@@ -380,8 +380,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     xlsx_output_filenames = [xlsx_output_filename]
 
     # Delete intermediate csv files
-    for csv_file in new_csv_files:
-        os.remove(csv_file)
+    for csv_file in new_csv_files: os.remove(csv_file)
 
     return xlsx_output_filenames, xlsx_output_filenames
 

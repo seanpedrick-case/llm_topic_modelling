@@ -15,7 +15,7 @@ from typing import List, Tuple, Any
 from io import StringIO
 GradioFileData = gr.FileData
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt
+from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, single_response_reference_format
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
@@ -352,9 +352,9 @@ def write_llm_output_and_logs(response_text: str,
     topic_table_out_path = "topic_table_error.csv"
     reference_table_out_path = "reference_table_error.csv"
     topic_summary_df_out_path = "unique_topic_table_error.csv"
-    topic_with_response_df = pd.DataFrame()
-    out_reference_df = pd.DataFrame()
-    out_topic_summary_df = pd.DataFrame()  
+    topic_with_response_df = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment", "Response References", "Summary"])
+    out_reference_df = pd.DataFrame(columns=["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group"])
+    out_topic_summary_df = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment"])  
     is_error = False # If there was an error in parsing, return boolean saying error
     # Convert conversation to string and add to log outputs
     whole_conversation_str = '\n'.join(whole_conversation)
@@ -385,6 +385,7 @@ def write_llm_output_and_logs(response_text: str,
         topic_with_response_df, is_error = convert_response_text_to_dataframe(response_text)
     except Exception as e:
         print("Error in parsing markdown table from response text:", e)
+
         return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
     # Rename columns to ensure consistent use of data frames later in code
@@ -420,8 +421,11 @@ def write_llm_output_and_logs(response_text: str,
     for index, row in topic_with_response_df.iterrows():
         references = re.findall(r'\d+', str(row.iloc[3])) if pd.notna(row.iloc[3]) else []
         # If no numbers found in the Response References column, check the Summary column in case reference numbers were put there by mistake
-        if not references:
-            references = re.findall(r'\d+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else []
+        ##if not references:
+        #    references = re.findall(r'\d+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else []
+        # If batch size is 1, references will always be 1
+        if batch_size_number == 1:
+            references = "1"
         
         # Filter out references that are outside the valid range
         if references:
@@ -695,6 +699,7 @@ def extract_topics(in_data_file: GradioFileData,
               assistant_model:object=list(),
               max_rows:int=max_rows,
               original_full_file_name:str="",
+              add_existing_topics_summary_format:str="",
               progress=Progress(track_tqdm=False)):
 
     '''
@@ -749,6 +754,7 @@ def extract_topics(in_data_file: GradioFileData,
     - assistant_model: Assistant model object for local inference.
     - max_rows: The maximum number of rows to process.
     - original_full_file_name: The original full file name.
+    - add_existing_topics_summary_format: Initial instructions to guide the format for the initial summary of the topics.
     - progress (Progress): A progress tracker.
 
     '''
@@ -863,6 +869,9 @@ def extract_topics(in_data_file: GradioFileData,
             # Call the function to prepare the input table
             simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, latest_batch_completed, batch_size)
 
+            if batch_basic_response_df.shape[0] == 1: response_reference_format = single_response_reference_format
+            else: response_reference_format = default_response_reference_format
+
             # Conversation history
             conversation_history = list()
 
@@ -951,11 +960,15 @@ def extract_topics(in_data_file: GradioFileData,
                     # Format the summary prompt with the response table and topics
                     if produce_structures_summary_radio != "Yes":
                         formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table,
-                                                                                     topics=unique_topics_markdown,
-                                                                                     topic_assignment=topic_assignment_prompt, force_single_topic=force_single_topic_prompt, sentiment_choices=sentiment_prompt)
+                            topics=unique_topics_markdown,
+                            topic_assignment=topic_assignment_prompt,
+                            force_single_topic=force_single_topic_prompt,
+                            sentiment_choices=sentiment_prompt,
+                            response_reference_format=response_reference_format,
+                            add_existing_topics_summary_format=add_existing_topics_summary_format)
                     else:
                         formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
-                                                                                    topics=unique_topics_markdown)
+                        topics=unique_topics_markdown)
                     
                     full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
 
@@ -997,7 +1010,7 @@ def extract_topics(in_data_file: GradioFileData,
 
                     ## Reference table mapping response numbers to topics
                     if output_debug_files == "True":
-                        new_reference_df.to_csv(reference_table_out_path, index=None)
+                        new_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
                         out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
@@ -1006,7 +1019,7 @@ def extract_topics(in_data_file: GradioFileData,
                     new_topic_summary_df["Group"] = group_name
 
                     if output_debug_files == "True":
-                        new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
+                        new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None, encoding='utf-8-sig')
                         out_file_paths.append(topic_summary_df_out_path)
                     
                     # Outputs for markdown table output
@@ -1039,7 +1052,8 @@ def extract_topics(in_data_file: GradioFileData,
 
                     # Format the summary prompt with the response table and topics
                     if produce_structures_summary_radio != "Yes":
-                        formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt)
+                        formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt,
+                        response_reference_format=response_reference_format, add_existing_topics_summary_format=add_existing_topics_summary_format)
                     else:
                         unique_topics_markdown="No suggested headings for this summary"
                         formatted_initial_table_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown)
@@ -1076,7 +1090,7 @@ def extract_topics(in_data_file: GradioFileData,
                     if output_debug_files == "True":                   
 
                         # Output reference table
-                        reference_df.to_csv(reference_table_out_path, index=None)
+                        reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
                         out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
@@ -1086,7 +1100,7 @@ def extract_topics(in_data_file: GradioFileData,
                     new_topic_summary_df["Group"] = group_name
 
                     if output_debug_files == "True":
-                        new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None)
+                        new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None, encoding='utf-8-sig')
                         out_file_paths.append(topic_summary_df_out_path)                    
 
                     whole_conversation_metadata.append(whole_conversation_metadata_str)
@@ -1160,7 +1174,7 @@ def extract_topics(in_data_file: GradioFileData,
         basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
 
         ## Reference table mapping response numbers to topics
-        existing_reference_df.to_csv(reference_table_out_path, index=None)
+        existing_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
         out_file_paths.append(reference_table_out_path)
         join_file_paths.append(reference_table_out_path)
 
@@ -1250,6 +1264,7 @@ def wrapper_extract_topics_per_column_value(
     azure_api_key_textbox:str="",
     output_folder: str = OUTPUT_FOLDER,
     existing_logged_content:list=list(),
+    add_existing_topics_summary_format:str="",
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
@@ -1304,6 +1319,7 @@ def wrapper_extract_topics_per_column_value(
     :param output_folder: The folder where output files will be saved.
     :param existing_logged_content: A list of existing logged content.
     :param force_single_topic_prompt: Prompt for forcing a single topic.
+    :param add_existing_topics_summary_format: Initial instructions to guide the format for the initial summary of the topics.
     :param max_tokens: Maximum tokens for LLM generation.
     :param model_name_map: Dictionary mapping model names to their properties.
     :param max_time_for_loop: Maximum time allowed for the processing loop.
@@ -1312,7 +1328,7 @@ def wrapper_extract_topics_per_column_value(
     :param model: Model object for local inference.
     :param tokenizer: Tokenizer object for local inference.
     :param assistant_model: Assistant model object for local inference.
-    :param max_rows: The maximum number of rows to process.    
+    :param max_rows: The maximum number of rows to process.
     :param progress: Gradio Progress object for tracking progress.
     :return: A tuple containing consolidated results, mimicking the return structure of `extract_topics`.
     """
@@ -1488,6 +1504,7 @@ def wrapper_extract_topics_per_column_value(
                 max_rows=max_rows,
                 existing_logged_content=all_logged_content,
                 original_full_file_name=original_file_name,
+                add_existing_topics_summary_format=add_existing_topics_summary_format,
                 progress=progress
             )
 
@@ -1521,21 +1538,23 @@ def wrapper_extract_topics_per_column_value(
             # For now, it will continue
             continue
 
+    overall_file_name = clean_column_name(original_file_name, max_length=20)
+    model_choice_clean = model_name_map[model_choice]["short_name"]
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+    column_clean = clean_column_name(chosen_cols, max_length=20)
+    
     if "Group" in acc_reference_df.columns:
-        model_choice_clean = model_name_map[model_choice]["short_name"]
-        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-        overall_file_name = clean_column_name(original_file_name, max_length=20)
-        column_clean = clean_column_name(chosen_cols, max_length=20)
+        
         
         acc_reference_df_path = output_folder + overall_file_name + "_col_" + column_clean + "_all_final_reference_table_" + model_choice_clean_short + ".csv"
         acc_topic_summary_df_path = output_folder + overall_file_name + "_col_" + column_clean +  "_all_final_unique_topics_" + model_choice_clean_short + ".csv"
         acc_reference_df_pivot_path = output_folder + overall_file_name + "_col_" + column_clean +  "_all_final_reference_pivot_" + model_choice_clean_short + ".csv"
         acc_missing_df_path = output_folder + overall_file_name + "_col_" + column_clean + "_all_missing_df_" + model_choice_clean_short + ".csv"        
 
-        acc_reference_df.to_csv(acc_reference_df_path, index=None)
-        acc_topic_summary_df.to_csv(acc_topic_summary_df_path, index=None)
-        acc_reference_df_pivot.to_csv(acc_reference_df_pivot_path, index=None)
-        acc_missing_df.to_csv(acc_missing_df_path, index=None)
+        acc_reference_df.to_csv(acc_reference_df_path, index=None, encoding='utf-8-sig')
+        acc_topic_summary_df.to_csv(acc_topic_summary_df_path, index=None, encoding='utf-8-sig')
+        acc_reference_df_pivot.to_csv(acc_reference_df_pivot_path, index=None, encoding='utf-8-sig')
+        acc_missing_df.to_csv(acc_missing_df_path, index=None, encoding='utf-8-sig')
 
         acc_log_files_output_paths.append(acc_missing_df_path)
 
@@ -1740,6 +1759,7 @@ def all_in_one_pipeline(
     model_name_map_state: dict = model_name_map,
     usage_logs_location: str = "",
     existing_logged_content:list=list(),
+    add_existing_topics_summary_format:str="",
     model: object = None,
     tokenizer: object = None,
     assistant_model: object = None,    
@@ -1749,7 +1769,60 @@ def all_in_one_pipeline(
     """
     Orchestrates the full All-in-one flow: extract → deduplicate → summarise → overall summary → Excel export.
 
-    Returns a large tuple matching the UI components updated during the original chained flow.
+    Args:
+        grouping_col (str): The column used for grouping data.
+        in_data_files (List[str]): List of input data file paths.
+        file_data (pd.DataFrame): The input data as a pandas DataFrame.
+        existing_topics_table (pd.DataFrame): DataFrame of existing topics.
+        existing_reference_df (pd.DataFrame): DataFrame of existing reference data.
+        existing_topic_summary_df (pd.DataFrame): DataFrame of existing topic summaries.
+        unique_table_df_display_table_markdown (str): Markdown string for displaying unique topics.
+        original_file_name (str): The original name of the input file.
+        total_number_of_batches (int): Total number of batches for processing.
+        in_api_key (str): API key for the LLM.
+        temperature (float): Temperature setting for the LLM.
+        chosen_cols (List[str]): List of columns chosen for analysis.
+        model_choice (str): The chosen LLM model.
+        candidate_topics (GradioFileData): Gradio file data for candidate topics.
+        first_loop_state (bool): State indicating if it's the first loop.
+        conversation_metadata_text (str): Text containing conversation metadata.
+        latest_batch_completed (int): The latest batch number completed.
+        time_taken_so_far (float): Cumulative time taken so far.
+        initial_table_prompt_text (str): Initial prompt text for table generation.
+        initial_table_system_prompt_text (str): Initial system prompt text for table generation.
+        add_existing_topics_system_prompt_text (str): System prompt for adding existing topics.
+        add_existing_topics_prompt_text (str): Prompt for adding existing topics.
+        number_of_prompts_used (int): Number of prompts used in sequence.
+        batch_size (int): Size of each processing batch.
+        context_text (str): Additional context for the LLM.
+        sentiment_choice (str): Choice for sentiment analysis (e.g., "Yes", "No").
+        force_zero_shot_choice (str): Choice to force zero-shot prompting.
+        in_excel_sheets (List[str]): List of sheet names in the input Excel file.
+        force_single_topic_choice (str): Choice to force single topic extraction.
+        produce_structures_summary_choice (str): Choice to produce structured summaries.
+        aws_access_key_text (str): AWS access key.
+        aws_secret_key_text (str): AWS secret key.
+        hf_api_key_text (str): Hugging Face API key.
+        azure_api_key_text (str): Azure API key.
+        output_folder (str, optional): Folder to save output files. Defaults to OUTPUT_FOLDER.
+        merge_sentiment (str, optional): Whether to merge sentiment. Defaults to "No".
+        merge_general_topics (str, optional): Whether to merge general topics. Defaults to "Yes".
+        score_threshold (int, optional): Score threshold for topic matching. Defaults to 90.
+        summarise_format (str, optional): Format for summarization. Defaults to "".
+        random_seed (int, optional): Random seed for reproducibility. Defaults to 42.
+        log_files_output_list_state (List[str], optional): List of log file paths. Defaults to list().
+        model_name_map_state (dict, optional): Mapping of model names. Defaults to model_name_map.
+        usage_logs_location (str, optional): Location for usage logs. Defaults to "".
+        existing_logged_content (list, optional): Existing logged content. Defaults to list().
+        add_existing_topics_summary_format (str, optional): Summary format for adding existing topics. Defaults to "".
+        model (object, optional): Loaded local model object. Defaults to None.
+        tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.
+        assistant_model (object, optional): Loaded local assistant model object. Defaults to None.
+        max_rows (int, optional): Maximum number of rows to process. Defaults to max_rows.
+        progress (Progress, optional): Gradio Progress object for tracking. Defaults to Progress(track_tqdm=True).
+
+    Returns:
+        A tuple matching the UI components updated during the original chained flow.
     """
 
     # Load local model if it's not already loaded
@@ -1830,7 +1903,8 @@ def all_in_one_pipeline(
         model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,
-        max_rows=max_rows
+        max_rows=max_rows,
+        add_existing_topics_summary_format=add_existing_topics_summary_format
     )
 
     total_input_tokens += out_input_tokens

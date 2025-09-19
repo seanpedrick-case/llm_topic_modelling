@@ -51,12 +51,9 @@ if DYNAMODB_USAGE_LOG_HEADERS: DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMO
 
 today_rev = datetime.now().strftime("%Y%m%d")
 
-if RUN_LOCAL_MODEL == "1":
-    default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
-elif RUN_AWS_FUNCTIONS == "1":
-    default_model_choice = "anthropic.claude-3-haiku-20240307-v1:0"
-else:
-    default_model_choice = "gemini-2.5-flash"
+if RUN_LOCAL_MODEL == "1": default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
+elif RUN_AWS_FUNCTIONS == "1": default_model_choice = "anthropic.claude-3-haiku-20240307-v1:0"
+else: default_model_choice = "gemini-2.5-flash"
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)
@@ -119,6 +116,7 @@ with app:
     summarised_references_markdown = gr.Markdown("", visible=False)
     summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of summarised outputs", allow_custom_value=True)
     latest_summary_completed_num = gr.Number(0, visible=False)
+    add_existing_topics_summary_format_textbox = gr.Textbox(value="", visible=False, label="Add existing topics summary format")
 
     summary_xlsx_output_files_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of xlsx summary output files", allow_custom_value=True)
 
@@ -192,7 +190,7 @@ with app:
         extract_topics_btn = gr.Button("1. Extract topics", variant="secondary")
         
         with gr.Row(equal_height=True):
-            output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False)
+            output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
             topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file", scale=1, interactive=False)         
             topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=False)                        
 
@@ -410,7 +408,8 @@ with app:
                 hf_api_key_textbox,
                 azure_api_key_textbox,
                 output_folder_state,
-                logged_content_df],
+                logged_content_df,
+                add_existing_topics_summary_format_textbox],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -432,7 +431,8 @@ with app:
                 output_tokens_num,
                 number_of_calls_num,
                 output_messages_textbox,
-                logged_content_df],
+                logged_content_df,
+                add_existing_topics_summary_format_textbox],
                 api_name="extract_topics", show_progress_on=output_messages_textbox).\
                 success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
                 then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list])
@@ -518,7 +518,8 @@ with app:
                 log_files_output_list_state,
                 model_name_map_state,
                 usage_logs_state,
-                logged_content_df
+                logged_content_df,
+                add_existing_topics_summary_format_textbox
             ],
             outputs=[
                 display_topic_table_markdown,
@@ -603,7 +604,7 @@ with app:
     success(fn=join_cols_onto_reference_df, inputs=[master_reference_df_state, file_data_state, join_colnames, reference_df_data_file_name_textbox], outputs=[master_reference_df_state_joined, out_join_files])
 
     # Export to xlsx file
-    export_xlsx_btn.click(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[out_xlsx_files], api_name="export_xlsx")
+    export_xlsx_btn.click(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[out_xlsx_files, summary_xlsx_output_files_list], api_name="export_xlsx")
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
     if GET_COST_CODES == "True" and (COST_CODES_PATH or S3_COST_CODES_PATH):

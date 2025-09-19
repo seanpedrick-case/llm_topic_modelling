@@ -492,17 +492,17 @@ def verify_titles(in_data_file,
 
                     # Write outputs to csv
                     ## Topics with references
-                    new_topic_df.to_csv(topic_table_out_path, index=None)
+                    new_topic_df.to_csv(topic_table_out_path, index=None, encoding='utf-8-sig')
                     log_files_output_paths.append(topic_table_out_path)
 
                     ## Reference table mapping response numbers to topics
-                    new_reference_df.to_csv(reference_table_out_path, index=None)
+                    new_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
                     out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
                     new_unique_topics_df = pd.concat([new_unique_topics_df, existing_unique_topics_df]) #.drop_duplicates('Subtopic')
 
-                    new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
+                    new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None, encoding='utf-8-sig')
                     out_file_paths.append(unique_topics_df_out_path)
                     
                     # Outputs for markdown table output
@@ -536,7 +536,7 @@ def verify_titles(in_data_file,
 
                     formatted_initial_table_system_prompt = system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
 
-                    formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table)
+                    formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, add_existing_topics_summary_format=add_existing_topics_summary_format)
 
                     if prompt2: formatted_prompt2 = prompt2.format(response_table=normalised_simple_markdown_table)
                     else: formatted_prompt2 = prompt2
@@ -561,16 +561,16 @@ def verify_titles(in_data_file,
                     # If error in table parsing, leave function
                     if is_error == True: raise Exception("Error in output table parsing")
 
-                    topic_table_df.to_csv(topic_table_out_path, index=None)
+                    topic_table_df.to_csv(topic_table_out_path, index=None, encoding='utf-8-sig')
                     out_file_paths.append(topic_table_out_path)
 
-                    reference_df.to_csv(reference_table_out_path, index=None)
+                    reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
                     out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
                     new_unique_topics_df = pd.concat([new_unique_topics_df, existing_unique_topics_df])
 
-                    new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
+                    new_unique_topics_df.to_csv(unique_topics_df_out_path, index=None, encoding='utf-8-sig')
                     out_file_paths.append(unique_topics_df_out_path)                    
 
                     whole_conversation_metadata.append(whole_conversation_metadata_str)
@@ -672,14 +672,14 @@ def verify_titles(in_data_file,
         basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
 
         ## Reference table mapping response numbers to topics
-        existing_reference_df.to_csv(reference_table_out_path, index=None)
+        existing_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
         out_file_paths.append(reference_table_out_path)
 
         # Create final unique topics table from reference table to ensure consistent numbers
         final_out_unique_topics_df = existing_unique_topics_df #create_topic_summary_df_from_reference_table(existing_reference_df)
 
         ## Unique topic list
-        final_out_unique_topics_df.to_csv(unique_topics_df_out_path, index=None)
+        final_out_unique_topics_df.to_csv(unique_topics_df_out_path, index=None, encoding='utf-8-sig')
         out_file_paths.append(unique_topics_df_out_path)
 
         # Ensure that we are only returning the final results to outputs
@@ -696,7 +696,7 @@ def verify_titles(in_data_file,
         basic_response_data = get_basic_response_data(file_data, chosen_cols, verify_titles=True)
 
         # Save simplified file data to log outputs
-        pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None)
+        pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None, encoding='utf-8-sig')
         log_files_output_paths.append(basic_response_data_out_path)
 
         # Step 1: Identify missing references
@@ -713,7 +713,7 @@ def verify_titles(in_data_file,
         #print("missing_df:", missing_df)
 
         missing_df_out_path = output_folder + file_path_details + "_missing_references_" + model_choice_clean + "_temp_" + str(temperature) + ".csv"
-        missing_df.to_csv(missing_df_out_path, index=None)
+        missing_df.to_csv(missing_df_out_path, index=None, encoding='utf-8-sig')
         log_files_output_paths.append(missing_df_out_path)
 
         out_file_paths = list(set(out_file_paths))

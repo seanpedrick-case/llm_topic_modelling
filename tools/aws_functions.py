@@ -15,9 +15,6 @@ def connect_to_bedrock_runtime(model_name_map:dict, model_choice:str, aws_access
         if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
             print("Connecting to Bedrock via existing SSO connection")
             bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
-        elif RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
-            print("Connecting to Bedrock via existing SSO connection")
-            bedrock_runtime = boto3.client('bedrock-runtime', region_name=AWS_REGION)
         elif aws_access_key_textbox and aws_secret_key_textbox:
             print("Connecting to Bedrock using AWS access key and secret keys from user input.")
             bedrock_runtime = boto3.client('bedrock-runtime', 

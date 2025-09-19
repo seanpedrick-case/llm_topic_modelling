@@ -77,13 +77,15 @@ set PKG_CONFIG_PATH=C:\<path-to-openblas>\OpenBLAS\lib\pkgconfig # Set this in e
 
 pip install llama-cpp-python==0.3.16 --force-reinstall --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
 
+pip install llama-cpp-python==0.3.16 --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/Users/s_cas/libs/OpenBLAS/include;-DBLAS_LIBRARIES=C:/Users/s_cas/OpenBLAS/lib/libopenblas.lib";-DPKG_CONFIG_PATH=C:/users/s_cas/openblas/lib/pkgconfig"
+
 or to make a wheel:
 
 pip install llama-cpp-python==0.3.16 --wheel-dir dist --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/<path-to-openblas>/OpenBLAS/include;-DBLAS_LIBRARIES=C:/<path-to-openblas>/OpenBLAS/lib/libopenblas.lib"
 
-pip wheel llama-cpp-python==0.3.16 --wheel-dir dist --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/Users/spedrickcase/libs/OpenBLAS/include;-DBLAS_LIBRARIES=C:/Users/spedrickcase/libs/OpenBLAS/lib/libopenblas.lib"
+pip wheel llama-cpp-python==0.3.16 --wheel-dir dist --verbose --no-cache-dir -Ccmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS;-DBLAS_INCLUDE_DIRS=C:/Users/<user>/libs/OpenBLAS/include;-DBLAS_LIBRARIES=C:/Users/<user>/libs/OpenBLAS/lib/libopenblas.lib"
 
-C:/Users/spedrickcase/libs
+
 
 ## With Cuda (NVIDIA GPUs only)
 
