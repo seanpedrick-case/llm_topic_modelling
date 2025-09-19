@@ -97,7 +97,7 @@ The repo provides several requirements files that are relevant for different sit
 
 - **requirements_no_local**: Can be used to install the app without local model inference for a more lightweight installation.
 - **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the requirements under 'Windows' for Windows compatibility (CUDA 12.4).
-- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the requirements under 'Windows' for Windows compatibility.
+- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the requirements under 'Windows' for Windows compatibility. Make sure you have [Openblas](https://github.com/OpenMathLib/OpenBLAS) installed!
 - **requirements.txt**: Used for the Python 3.10 GPU-enabled environment on Hugging Face spaces (CUDA 12.4).
 
 2.  **Install packages from the requirements file:**

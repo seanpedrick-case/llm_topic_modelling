@@ -4,14 +4,11 @@ import re
 import time
 import boto3
 import pandas as pd
-import json
-import spaces
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 from typing import List, Tuple, TypeVar
 from google import genai as ai
 from google.genai import types
-import gradio as gr
 from gradio import Progress
 
 from azure.ai.inference import ChatCompletionsClient
@@ -26,15 +23,12 @@ _model = None
 _tokenizer = None
 _assistant_model = None
 
-from tools.config import AWS_REGION, LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, AZURE_INFERENCE_ENDPOINT, LOAD_LOCAL_MODEL_AT_START, USE_SPECULATIVE_DECODING, ASSISTANT_MODEL, LLM_STOP_STRINGS, LLM_MAX_NEW_TOKENS
-from tools.prompts import initial_table_assistant_prefill
+from tools.config import LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, LOAD_LOCAL_MODEL_AT_START, ASSISTANT_MODEL, LLM_STOP_STRINGS, MULTIMODAL_PROMPT_FORMAT, KV_QUANT_LEVEL
 from tools.helper_functions import _get_env_list
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
 else: SPECULATIVE_DECODING = False
 
-if USE_SPECULATIVE_DECODING == "True": USE_SPECULATIVE_DECODING = True 
-else: USE_SPECULATIVE_DECODING = False
 
 if isinstance(NUM_PRED_TOKENS, str): NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
 if isinstance(LLM_MAX_GPU_LAYERS, str): LLM_MAX_GPU_LAYERS = int(LLM_MAX_GPU_LAYERS)
@@ -186,6 +180,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     compile_mode=COMPILE_MODE,
     model_dtype=MODEL_DTYPE,
     hf_token=HF_TOKEN,
+    speculative_decoding=speculative_decoding,
     model=None,
     tokenizer=None,
     assistant_model=None):
@@ -205,6 +200,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
         compile_mode (str): The compilation mode to use for the model.
         model_dtype (str): The data type to use for the model.
         hf_token (str): The Hugging Face token to use for the model.
+        speculative_decoding (bool): Whether to use speculative decoding.
         model (Llama/transformers model): The model to load.
         tokenizer (list/transformers tokenizer): The tokenizer to load.
         assistant_model (transformers model): The assistant model for speculative decoding.
@@ -212,7 +208,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
         tuple: A tuple containing:
             - model (Llama/transformers model): The loaded Llama.cpp/transformers model instance.
             - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
-            - assistant_model (transformers model): The assistant model for speculative decoding (if USE_SPECULATIVE_DECODING is True).
+            - assistant_model (transformers model): The assistant model for speculative decoding (if speculative_decoding is True).
     '''
     
     if model:
@@ -263,9 +259,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
             try:
                 print("GPU load variables:" , vars(gpu_config))
                 if speculative_decoding:
-                    model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
+                    model = Llama(model_path=model_path, type_k=KV_QUANT_LEVEL, type_v=KV_QUANT_LEVEL, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
                 else:
-                    model = Llama(model_path=model_path, type_k=8, type_v=8, flash_attn=True, **vars(gpu_config))    
+                    model = Llama(model_path=model_path, type_k=KV_QUANT_LEVEL, type_v=KV_QUANT_LEVEL, flash_attn=True, **vars(gpu_config))    
 
             except Exception as e:
                 print("GPU load failed due to:", e, "Loading model in CPU mode")
@@ -397,7 +393,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
     print("GPU layers assigned to cuda:", gpu_layers)
 
     # Load assistant model for speculative decoding if enabled
-    if USE_SPECULATIVE_DECODING and USE_LLAMA_CPP == "False" and torch_device == "cuda":
+    if speculative_decoding and USE_LLAMA_CPP == "False" and torch_device == "cuda":
         print("Loading assistant model for speculative decoding:", ASSISTANT_MODEL)
         try:
             from transformers import AutoModelForCausalLM
@@ -764,7 +760,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None, progress=Progress(track_tqdm=False)):
+def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None, speculative_decoding=speculative_decoding, progress=Progress(track_tqdm=False)):
     """
     This function sends a request to a transformers model (through Unsloth) with the given prompt, system prompt, and generation configuration.
     """
@@ -774,7 +770,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         model = get_model()
     if tokenizer is None:
         tokenizer = get_tokenizer()
-    if assistant_model is None and USE_SPECULATIVE_DECODING:
+    if assistant_model is None and speculative_decoding:
         assistant_model = get_assistant_model()
     
     if model is None or tokenizer is None:
@@ -784,10 +780,17 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     def wrap_text_message(text):
         return [{"type": "text", "text": text}]
 
-    conversation = [
-        {"role": "system", "content": wrap_text_message(system_prompt)},
-        {"role": "user", "content": wrap_text_message(prompt)}
-    ]
+    if MULTIMODAL_PROMPT_FORMAT == "True":
+        conversation = [
+            {"role": "system", "content": wrap_text_message(system_prompt)},
+            {"role": "user", "content": wrap_text_message(prompt)}
+        ]
+
+    else:
+        conversation = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt}
+        ]
     #print("Conversation:", conversation)
     #import pprint
     #pprint.pprint(conversation)
@@ -812,7 +815,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
 
     # Map LlamaCPP parameters to transformers parameters
     generation_kwargs = {
-        'LLM_MAX_NEW_TOKENS': gen_config.max_tokens,
+        'max_new_tokens': gen_config.max_tokens,
         'temperature': gen_config.temperature,
         'top_p': gen_config.top_p,
         'top_k': gen_config.top_k,
@@ -834,7 +837,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     start_time = time.time()
 
     # Use speculative decoding if assistant model is available
-    if USE_SPECULATIVE_DECODING and assistant_model is not None:
+    if speculative_decoding and assistant_model is not None:
         print("Using speculative decoding with assistant model")
         outputs = model.generate(
             input_ids,
@@ -853,7 +856,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     end_time = time.time()
 
     # --- Decode and Display Results ---
-    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    #generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     # To get only the model's reply, we can decode just the newly generated tokens
     new_tokens = outputs[0][input_ids.shape[-1]:]
     assistant_reply = tokenizer.decode(new_tokens, skip_special_tokens=True)
@@ -883,6 +886,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     full_prompt = "Conversation history:\n"
     num_transformer_input_tokens = 0
     num_transformer_generated_tokens = 0
+    response_text = ""
     
     for entry in conversation_history:
         role = entry['role'].capitalize()  # Assuming the history is stored with 'role' and 'parts'
@@ -915,7 +919,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 time.sleep(timeout_wait)
             
             if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
                 
     elif "AWS" in model_source:
         for i in progress_bar:
@@ -931,7 +935,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 time.sleep(timeout_wait)
 
             if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
     elif "Azure" in model_source:
         for i in progress_bar:
             try:
@@ -960,7 +964,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 print("Call to Azure model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
                 time.sleep(timeout_wait)
             if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
     elif "Local" in model_source:
         # This is the local model
         for i in progress_bar:
@@ -986,10 +990,10 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 time.sleep(timeout_wait)
 
             if i == number_of_api_retry_attempts:
-                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
     else:
         print("Model source not recognised")
-        return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history
+        return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
 
     # Update the conversation history with the new prompt and response
     conversation_history.append({'role': 'user', 'parts': [prompt]})
@@ -998,19 +1002,17 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
     if isinstance(response, ResponseObject):
         response_text = response.text
     elif 'choices' in response: # LLama.cpp model response
-        if "gpt-oss" in model_choice:
-            response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
-        else:
-            response_text = response['choices'][0]['message']['content']
-        response_text = response_text.strip()
+        if "gpt-oss" in model_choice: response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
+        else: response_text = response['choices'][0]['message']['content']
     elif model_source == "Gemini":
         response_text = response.text
-        response_text = response_text.strip()
     else: # Assume transformers model response
-        if "gpt-oss" in model_choice:
-            response_text = response.split('<|start|>assistant<|channel|>final<|message|>')[1]
-        else:
-            response_text = response
+        if "gpt-oss" in model_choice: response_text = response.split('<|start|>assistant<|channel|>final<|message|>')[1]
+        else: response_text = response
+            
+    # Replace multiple spaces with single space
+    response_text = re.sub(r' {2,}', ' ', response_text)  
+    response_text = response_text.strip()
     
     conversation_history.append({'role': 'assistant', 'parts': [response_text]})
     

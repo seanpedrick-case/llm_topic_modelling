@@ -190,7 +190,7 @@ if LOGGING == 'True':
 ### 
 # App run variables
 ###
-OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'False') # Whether to output debug files
+OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'True') # Whether to output debug files
 
 TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # Maximum number of seconds to wait for a response from the LLM
 NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5')) # Maximum number of times to retry a request to the LLM
@@ -229,7 +229,7 @@ model_full_names = list()
 model_short_names = list()
 model_source = list()
 
-CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Gemma 3 4B") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
+CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Qwen 3 4B") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
@@ -264,8 +264,21 @@ model_name_map = {
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
 
 LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', 'True')
-USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers
 
+# If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
+LOW_VRAM_SYSTEM = get_or_create_env_var('LOW_VRAM_SYSTEM', 'False')
+
+if LOW_VRAM_SYSTEM == 'True':
+    print("Changing settings for low VRAM system")
+    USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True')
+    LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
+    LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '8192'))
+    LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
+    KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', '2')) # 2 is equivalent to q4_0, 8 is q8_0
+
+
+
+USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers with unsloth
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
@@ -293,18 +306,31 @@ GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
 GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit")
-if USE_LLAMA_CPP == "False":
-    GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
+if USE_LLAMA_CPP == "False": GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
 
 GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
-ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
 
-GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
+if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
 
-GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", ".cache/llama.cpp/unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
+DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
+
+GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
+
+GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
+
+QWEN3_4B_REPO_ID = get_or_create_env_var("QWEN3_4B_REPO_ID", "unsloth/Qwen3-4B-Instruct-2507-GGUF")
+QWEN3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("QWEN3_4B_REPO_TRANSFORMERS_ID", "unsloth/Qwen3-4B-unsloth-bnb-4bit")
+if USE_LLAMA_CPP == "False": QWEN3_4B_REPO_ID = QWEN3_4B_REPO_TRANSFORMERS_ID
+
+QWEN3_4B_MODEL_FILE = get_or_create_env_var("QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
+QWEN3_4B_MODEL_FOLDER = get_or_create_env_var("QWEN3_4B_MODEL_FOLDER", "model/qwen")
+
+QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-0.6B-Q8_0.gguf")
+QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
 
 if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 2b":
     LOCAL_REPO_ID = GEMMA2_REPO_ID
@@ -322,34 +348,45 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
 
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
+    LOCAL_REPO_ID = QWEN3_4B_REPO_ID
+    LOCAL_MODEL_FILE = QWEN3_4B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = QWEN3_4B_MODEL_FOLDER
+
 elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_REPO_ID = GPT_OSS_REPO_ID
     LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
-LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.1'))
+LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.6'))
 LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
 LLM_MIN_P = float(get_or_create_env_var('LLM_MIN_P', '0'))
 LLM_TOP_P = float(get_or_create_env_var('LLM_TOP_P', '0.95'))
 LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '1.0'))
 
 LLM_LAST_N_TOKENS = int(get_or_create_env_var('LLM_LAST_N_TOKENS', '512'))
-LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
+LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '8192'))
 LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
 LLM_RESET = get_or_create_env_var('LLM_RESET', 'True')
 LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'True')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
-LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '128'))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
+LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '32768'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
-LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n']")
+LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['                                          ','\n\n\n\n','---------------------------------------------]")
+MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
-if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
-    REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
-else:
-    REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '')  # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level
+KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', '16'))
+
+
+
+
+# If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
+if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b": REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B" and USE_LLAMA_CPP == "False": REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '/nothink')
+else: REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', '') 
 
 # Transformers variables
 COMPILE_TRANSFORMERS = get_or_create_env_var('COMPILE_TRANSFORMERS', 'False') # Whether to compile transformers models

@@ -8,12 +8,16 @@ initial_table_system_prompt = system_prompt + markdown_additional_prompt
 
 initial_table_assistant_prefill = "|"
 
+default_response_reference_format = "list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column."
+
+single_response_reference_format = "'Response References' write the number 1 alongside each subtopic and no other text."
+
 initial_table_prompt = """Your task is to create one new markdown table based on open text responses in the reponse table below with the headings 'General topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
 In the first column identify general topics relevant to responses. Create as many general topics as you can.
 In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be blank or empty.
 {sentiment_choices}.
-In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
-In the fifth column, write a short summary of the subtopic based on relevant responses - highlight specific issues that appear.
+In the fourth column {response_reference_format}
+In the fifth column, write a summary of the subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response.
 
 Response table: 
@@ -46,8 +50,8 @@ force_single_topic_prompt = """ Assign each response to one single topic only.""
 add_existing_topics_prompt = """Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
 {sentiment_choices}.
-In the fourth column list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column.
-In the fifth column, write a short summary of the Subtopic based on relevant responses - highlight specific issues that appear.
+In the fourth column {response_reference_format}
+In the fifth column, write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response.
 
 Responses are shown in the following Response table: 

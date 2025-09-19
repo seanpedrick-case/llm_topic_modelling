@@ -161,8 +161,6 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
         reference_file_out_path = output_folder + reference_table_file_name
         unique_topics_file_out_path = output_folder + unique_topics_table_file_name
-        #reference_df.to_csv(reference_file_out_path, index = None, encoding='utf-8-sig')
-        #topic_summary_df.to_csv(unique_topics_file_out_path, index=None, encoding='utf-8-sig')
 
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
@@ -195,13 +193,17 @@ def deduplicate_topics(reference_df:pd.DataFrame,
         if "Group" not in reference_df.columns:
             reference_df["Group"] = "All"
         for i in range(0, 8):
-            if merge_sentiment == "No":    
+            if merge_sentiment == "No":
                 if merge_general_topics == "No":
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
 
-                    deduplicated_topic_map_df = reference_df_unique.groupby(["General topic", "Sentiment", "Group"]).apply(
-                        lambda group: deduplicate_categories(
+                    # Create an empty list to store results from each group
+                    results = []
+                    # Iterate over each group instead of using .apply()
+                    for name, group in reference_df_unique.groupby(["General topic", "Sentiment", "Group"]):
+                        # Run your function on the 'group' DataFrame
+                        result = deduplicate_categories(
                             group["Subtopic"], 
                             group["Sentiment"], 
                             reference_df, 
@@ -209,30 +211,38 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                             merge_general_topics="No",
                             threshold=score_threshold
                         )
-                    ).reset_index(drop=True)
+                        results.append(result)
+                    
+                    # Concatenate all the results into a single DataFrame
+                    deduplicated_topic_map_df = pd.concat(results).reset_index(drop=True)
+                    # --- MODIFIED SECTION END ---
+
                 else:
                     # This case should allow cross-topic matching but is still grouping by Sentiment
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
-
-                    deduplicated_topic_map_df = reference_df_unique.groupby("Sentiment").apply(
-                        lambda group: deduplicate_categories(
+                    
+                    results = []
+                    for name, group in reference_df_unique.groupby("Sentiment"):
+                        result = deduplicate_categories(
                             group["Subtopic"], 
                             group["Sentiment"], 
                             reference_df, 
-                            general_topic_series=None,  # Set to None to allow cross-topic matching
+                            general_topic_series=None,
                             merge_general_topics="Yes",
                             threshold=score_threshold
                         )
-                    ).reset_index(drop=True)
+                        results.append(result)
+                    deduplicated_topic_map_df = pd.concat(results).reset_index(drop=True)
+
             else:
                 if merge_general_topics == "No":
-                    # Update this case to maintain general topic boundaries
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
-
-                    deduplicated_topic_map_df = reference_df_unique.groupby("General topic").apply(
-                        lambda group: deduplicate_categories(
+                    
+                    results = []
+                    for name, group in reference_df_unique.groupby("General topic"):
+                        result = deduplicate_categories(
                             group["Subtopic"], 
                             group["Sentiment"], 
                             reference_df, 
@@ -241,9 +251,10 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                             merge_sentiment=merge_sentiment, 
                             threshold=score_threshold
                         )
-                    ).reset_index(drop=True)
-                else:
-                    # For complete merging across all categories
+                        results.append(result)
+                    deduplicated_topic_map_df = pd.concat(results).reset_index(drop=True)
+
+                else:                    
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
 
@@ -251,14 +262,13 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                         reference_df_unique["Subtopic"], 
                         reference_df_unique["Sentiment"], 
                         reference_df, 
-                        general_topic_series=None,  # Set to None to allow cross-topic matching
+                        general_topic_series=None,
                         merge_general_topics="Yes",
                         merge_sentiment=merge_sentiment,
                         threshold=score_threshold
                     ).reset_index(drop=True)
-           
+        
             if deduplicated_topic_map_df['deduplicated_category'].isnull().all():
-            # Check if 'deduplicated_category' contains any values
                 print("No deduplicated categories found, skipping the following code.")
 
             else:
@@ -785,6 +795,9 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
             for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(all_prompts_content, all_summaries_content, all_metadata_content, all_batches_content, all_model_choice_content, all_validated_content, all_groups_content, all_task_type_content, all_file_names_content)
         ]
 
+        if isinstance(existing_logged_content, pd.DataFrame):
+            existing_logged_content = existing_logged_content.to_dict(orient="records")
+
         out_logged_content = existing_logged_content + all_logged_content
 
         ### Save output files
@@ -1004,7 +1017,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         # Write overall outputs to csv
         overall_summary_output_csv_path = output_folder + batch_file_path_details + "_overall_summary_" + model_choice_clean_short + ".csv" 
         summarised_outputs_df = pd.DataFrame(data={"Group":unique_groups, "Summary":summarised_outputs_for_df})
-        summarised_outputs_df.to_csv(overall_summary_output_csv_path, index=None)
+        summarised_outputs_df.to_csv(overall_summary_output_csv_path, index=None, encoding='utf-8-sig')
         output_files.append(overall_summary_output_csv_path)
 
         summarised_outputs_df_for_display = pd.DataFrame(data={"Group":unique_groups, "Summary":summarised_outputs})
@@ -1030,6 +1043,9 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             {"prompt": prompt, "response": summary, "metadata": metadata, "batch": batch, "model_choice": model_choice, "validated": validated, "group": group, "task_type": task_type, "file_name": file_name}
             for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(all_prompts_content, all_summaries_content, all_metadata_content, all_batches_content, all_model_choice_content, all_validated_content, all_groups_content, all_task_type_content, all_file_names_content)
         ]
+
+        if isinstance(existing_logged_content, pd.DataFrame):
+            existing_logged_content = existing_logged_content.to_dict(orient="records")
 
         out_logged_content = existing_logged_content + all_logged_content
 
