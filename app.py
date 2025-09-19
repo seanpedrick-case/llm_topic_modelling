@@ -55,6 +55,14 @@ if RUN_LOCAL_MODEL == "1": default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
 elif RUN_AWS_FUNCTIONS == "1": default_model_choice = "anthropic.claude-3-haiku-20240307-v1:0"
 else: default_model_choice = "gemini-2.5-flash"
 
+# Placeholders for example variables
+in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
+in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
+context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
+topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file", scale=1, interactive=False)
+display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
+output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
+
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)
 
@@ -124,6 +132,9 @@ with app:
     working_data_file_name_textbox = gr.Textbox(label = "Working data file name", value="", visible=False)
     unique_topics_table_file_name_textbox = gr.Textbox(label="Unique topics data file name textbox", visible=False)
 
+    dummy_consultation_table_textbox = gr.Textbox(value=dummy_consultation_table, visible=False, label="Dummy consultation table")
+    case_notes_table_textbox = gr.Textbox(value=case_notes_table, visible=False, label="Case notes table")
+
     model_name_map_state = gr.JSON(model_name_map, visible=False, label="model_name_map_state")
 
     # Cost code elements
@@ -141,15 +152,23 @@ with app:
     # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
     latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
 
+    
+
     ###
     # UI LAYOUT
     ###
 
     gr.Markdown("""# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets under 'Test with an example dataset' at the bottom of the page, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets under 'Test with an example dataset' below, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
 
-    NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
+    NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")    
+
+    if SHOW_EXAMPLES == "True":
+        # Placeholder for examples loaded in on app load
+        gr.Markdown("""### Test with an example dataset""")
+        examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"], dummy_consultation_table, "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs."], [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv", ["example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"], case_notes_table, "Example output from the case notes dataset  successfully loaded. Download the xlsx outputs to the right to see full outputs."]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"]) 
+
     
     with gr.Tab(label="1. Extract topics"):
         gr.Markdown("""### Choose a tabular data file (xlsx, csv, parquet) of open text to extract topics from.""")
@@ -157,10 +176,12 @@ with app:
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)        
 
         with gr.Accordion("Upload xlsx or csv file", open = True):
-            in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
+            #in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
+            in_data_files.render()
         
         in_excel_sheets = gr.Dropdown(choices=[""], multiselect = False, label="Select the Excel sheet of interest.", visible=False, allow_custom_value=True)
-        in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
+        #in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
+        in_colnames.render()
 
         with gr.Accordion("Group analysis by unique values in a specific column", open=False):
             in_group_col = gr.Dropdown(multiselect = False, label="Select the open text column to group by", allow_custom_value=True, interactive=True)
@@ -172,7 +193,8 @@ with app:
                 force_single_topic_radio = gr.Radio(label="Ask the model to assign responses to only a single topic", value="No", choices=["Yes", "No"])
                 produce_structures_summary_radio = gr.Radio(label="Ask the model to produce structured summaries using the zero shot topics as headers rather than extract topics", value="No", choices=["Yes", "No"])
 
-        context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
+        #context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
+        context_textbox.render()
 
         sentiment_checkbox = gr.Radio(label="Choose sentiment categories to split responses", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
         
@@ -190,17 +212,16 @@ with app:
         extract_topics_btn = gr.Button("1. Extract topics", variant="secondary")
         
         with gr.Row(equal_height=True):
-            output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
-            topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file", scale=1, interactive=False)         
+            #output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
+            output_messages_textbox.render()
+            #topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file", scale=1, interactive=False)         
             topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=False)                        
+            topic_extraction_output_files_xlsx.render()            
 
-        display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
+        #display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
+        display_topic_table_markdown.render()
 
-        if SHOW_EXAMPLES == "True":
-            gr.Markdown("""### Test with an example dataset""")
-
-            examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"], dummy_consultation_table, "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs."], [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv", ["example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"], case_notes_table, "Example output from the case notes dataset  successfully loaded. Download the xlsx outputs to the right to see full outputs."]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"])      
-
+        
         data_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
         data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the topic extraction.",
                 choices=["The results were good", "The results were not good"], visible=False)
@@ -621,6 +642,8 @@ with app:
     ###
     # LOGGING AND ON APP LOAD FUNCTIONS
     ###
+
+    # Get connection parameters
     app.load(get_connection_params, inputs=None, outputs=[session_hash_state, output_folder_state, session_hash_textbox, input_folder_state])
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
