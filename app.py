@@ -150,9 +150,7 @@ with app:
 
     latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
     # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
-    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
-
-    
+    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)   
 
     ###
     # UI LAYOUT
@@ -168,7 +166,6 @@ with app:
         # Placeholder for examples loaded in on app load
         gr.Markdown("""### Test with an example dataset""")
         examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"], dummy_consultation_table, "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs."], [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv", ["example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"], case_notes_table, "Example output from the case notes dataset  successfully loaded. Download the xlsx outputs to the right to see full outputs."]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"]) 
-
     
     with gr.Tab(label="1. Extract topics"):
         gr.Markdown("""### Choose a tabular data file (xlsx, csv, parquet) of open text to extract topics from.""")

@@ -376,7 +376,9 @@ LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['               
 MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
-KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', '4'))  # 2 = q4_0, 8 = q8_0, 4 = fp16
+KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', ''))  # 2 = q4_0, 8 = q8_0, 4 = fp16
+
+if not KV_QUANT_LEVEL: KV_QUANT_LEVEL = None
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b": REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
