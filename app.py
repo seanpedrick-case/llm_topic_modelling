@@ -150,9 +150,7 @@ with app:
 
     latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
     # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
-    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
-
-    
+    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)   
 
     ###
     # UI LAYOUT
@@ -168,7 +166,6 @@ with app:
         # Placeholder for examples loaded in on app load
         gr.Markdown("""### Test with an example dataset""")
         examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"], dummy_consultation_table, "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs."], [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv", ["example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"], case_notes_table, "Example output from the case notes dataset  successfully loaded. Download the xlsx outputs to the right to see full outputs."]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"]) 
-
     
     with gr.Tab(label="1. Extract topics"):
         gr.Markdown("""### Choose a tabular data file (xlsx, csv, parquet) of open text to extract topics from.""")
@@ -452,8 +449,7 @@ with app:
                 output_tokens_num,
                 number_of_calls_num,
                 output_messages_textbox,
-                logged_content_df,
-                add_existing_topics_summary_format_textbox],
+                logged_content_df],
                 api_name="extract_topics", show_progress_on=output_messages_textbox).\
                 success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
                 then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state], outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list])
