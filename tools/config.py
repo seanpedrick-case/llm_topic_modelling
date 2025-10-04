@@ -190,7 +190,7 @@ if LOGGING == 'True':
 ### 
 # App run variables
 ###
-OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'True') # Whether to output debug files
+OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'False') # Whether to output debug files
 
 TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # Maximum number of seconds to wait for a response from the LLM
 NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5')) # Maximum number of times to retry a request to the LLM

@@ -398,9 +398,6 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
         raise Exception(out_message)
 
     for group_keys, reference_df_group in reference_df_grouped:
-        print(f"Group: {group_keys}")
-        print(f"Data: {reference_df_group}")
-
         if len(reference_df_group["General topic"]) > 1:
 
             filtered_reference_df = reference_df_group.reset_index()
@@ -778,7 +775,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
 
         # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
-        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True).str.capitalize()         
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
 
         reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
         # If no new summary is available, keep the original
