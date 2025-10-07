@@ -1,5 +1,5 @@
 pandas==2.3.2
-gradio==5.45.0
+gradio==5.48.0
 huggingface_hub[hf_xet]==0.34.4
 transformers==4.56.0
 spaces==0.40.1

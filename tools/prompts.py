@@ -1,24 +1,31 @@
+###
+# System prompt
+###
+
 generic_system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset."""
 
 system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. The context of this analysis is '{consultation_context}'."""
 
 markdown_additional_prompt = """ You will be given a request for a markdown table. You must respond with ONLY the markdown table. Do not include any introduction, explanation, or concluding text."""
 
+###
+# Initial topic table prompt
+###
 initial_table_system_prompt = system_prompt + markdown_additional_prompt
 
 initial_table_assistant_prefill = "|"
 
-default_response_reference_format = "list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column."
+default_response_reference_format = "In the next column named 'Response References', list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column."
 
-single_response_reference_format = "'Response References' write the number 1 alongside each subtopic and no other text."
+single_response_reference_format = "In the next column named 'Placeholder', write the number 1 alongside each subtopic and no other text." # Deprecated. Instead now, no prompt is provided, and column is filled automatically with '1'
 
-initial_table_prompt = """Your task is to create one new markdown table based on open text responses in the reponse table below with the headings 'General topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
-In the first column identify general topics relevant to responses. Create as many general topics as you can.
-In the second column list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be blank or empty.
-{sentiment_choices}.
-In the fourth column {response_reference_format}
-In the fifth column, write a summary of the subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
-Do not add any other columns. Do not add any other text to your response.
+initial_table_prompt = """Your task is to create one new markdown table based on open text responses in the reponse table below.
+In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
+In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty.
+{sentiment_choices}
+{response_reference_format}
+In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
+Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Response table: 
 {response_table}
@@ -27,32 +34,26 @@ New table:"""
 
 # Return only one table in markdown format containing all relevant topics. Do not repeat Subtopics with the same Sentiment. 
 
-prompt2 = ""
-
-prompt3 = ""
-
-## Adding existing topics to consultation responses
+###
+# Adding existing topics to consultation responses
+###
 
 add_existing_topics_system_prompt = system_prompt + markdown_additional_prompt
 
 add_existing_topics_assistant_prefill = "|"
 
-force_existing_topics_prompt = """Create a new markdown table with the headings 'Placeholder', 'Subtopics', 'Sentiment', 'Response References', and 'Summary'.
-In the first column, write 'Not assessed'. In the second column, assign Topics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
+force_existing_topics_prompt = """Create a new markdown table. In the first column named 'Placeholder', write 'Not assessed'. In the second column named 'Subtopics', assign Topics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
 
-allow_new_topics_prompt = """Create a new markdown table with the headings 'General topic', 'Subtopic', 'Sentiment', 'Response References', and 'Summary'.
-In the first and second columns, assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic, Subtopic, or Sentiment for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
-
-#force_single_topic_prompt = """ Wherever possible, assign a response to one single topic, unless there are multiple topics that are equally relevant."""
+allow_new_topics_prompt = """Create a new markdown table. In the first column named 'General topic', and the second column named 'Subtopic', assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic, Subtopic, or Sentiment for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
 
 force_single_topic_prompt = """ Assign each response to one single topic only."""
 
 add_existing_topics_prompt = """Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
-{sentiment_choices}.
-In the fourth column {response_reference_format}
-In the fifth column, write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
-Do not add any other columns. Do not add any other text to your response.
+{sentiment_choices}
+{response_reference_format}
+In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
+Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Responses are shown in the following Response table: 
 {response_table}
@@ -61,6 +62,15 @@ Topics known to be relevant to this dataset are shown in the following Topics ta
 {topics}
 
 New table:"""
+
+###
+# SENTIMENT CHOICES
+###
+
+negative_neutral_positive_sentiment_prompt = "In the third column named 'Sentiment', write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+negative_or_positive_sentiment_prompt = "In the third column named 'Sentiment', write the sentiment of the Subtopic: Negative or Positive"
+do_not_assess_sentiment_prompt = "In the third column named 'Sentiment', write the text 'Not assessed'" # Not used anymore. Instead, the column is filled in automatically with 'Not assessed'
+default_sentiment_prompt = "In the third column named 'Sentiment', write the sentiment of the Subtopic: Negative, Neutral, or Positive"
 
 ###
 # STRUCTURE SUMMARY PROMPT

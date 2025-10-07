@@ -3,16 +3,16 @@ import os
 import gradio as gr
 import pandas as pd
 from datetime import datetime
-from tools.helper_functions import put_columns_in_df, get_connection_params, get_or_create_env_var, reveal_feedback_buttons, wipe_logs, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, _get_env_list, move_overall_summary_output_files_to_front_page
+from tools.helper_functions import put_columns_in_df, get_connection_params, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, _get_env_list, move_overall_summary_output_files_to_front_page
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3
 from tools.llm_api_call import modify_existing_output_tables, wrapper_extract_topics_per_column_value, all_in_one_pipeline
 from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
-from tools.example_table_outputs import dummy_consultation_table, case_notes_table
-from tools.prompts import initial_table_prompt, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, verify_titles_prompt, verify_titles_system_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
-from tools.verify_titles import verify_titles
+from tools.example_table_outputs import dummy_consultation_table, case_notes_table, dummy_consultation_table_zero_shot
+from tools.prompts import initial_table_prompt, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
+# from tools.verify_titles import verify_titles
 from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, RUN_LOCAL_MODEL,  FILE_INPUT_HEIGHT, GEMINI_API_KEY, model_full_names, BATCH_SIZE_DEFAULT, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, model_name_map, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY, SHOW_EXAMPLES, HF_TOKEN, AZURE_API_KEY, LLM_TEMPERATURE
 
 def ensure_folder_exists(output_folder:str):
@@ -62,6 +62,7 @@ context_textbox = gr.Textbox(label="Write up to one sentence giving context to t
 topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file", scale=1, interactive=False)
 display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
 output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
+candidate_topics = gr.File(height=FILE_INPUT_HEIGHT, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.")
 
 # Create the gradio interface
 app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)
@@ -160,15 +161,18 @@ with app:
 
     Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets under 'Test with an example dataset' below, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
 
-    NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")    
+    NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
 
     if SHOW_EXAMPLES == "True":
         # Placeholder for examples loaded in on app load
         gr.Markdown("""### Test with an example dataset""")
-        examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"], dummy_consultation_table, "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs."], [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv", ["example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"], case_notes_table, "Example output from the case notes dataset  successfully loaded. Download the xlsx outputs to the right to see full outputs."]], inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox], example_labels=["Consultation for the construction of flats on Main Street", "Social Care case notes for young people"]) 
+        examples = gr.Examples(examples=[[["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"], dummy_consultation_table, "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.", None],\
+        [["example_data/combined_case_notes.csv"], "Case Note",  "Social Care case notes for young people",  "combined_case_notes.csv", ["example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"], case_notes_table, "Example output from the case notes dataset  successfully loaded. Download the xlsx outputs to the right to see full outputs.", None],\
+        [["example_data/dummy_consultation_response.csv"], "Response text", "Consultation for the construction of flats on Main Street", "dummy_consultation_response.csv", ["example_data/dummy_consultation_r_zero_shot_col_Response_text_Qwen_3_4B_topic_analysis.xlsx"], dummy_consultation_table_zero_shot, "Example output from the dummy consultation dataset with zero shot topics successfully loaded. Download the xlsx outputs to the right to see full outputs.", "example_data/dummy_consultation_response_themes.csv"]],\
+        inputs=[in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox, candidate_topics], example_labels=["Main Street construction consultation", "Social Care case notes for young people", "Main Street construction consultation with zero shot topics"])
     
     with gr.Tab(label="1. Extract topics"):
-        gr.Markdown("""### Choose a tabular data file (xlsx, csv, parquet) of open text to extract topics from.""")
+        gr.Markdown("""### Choose a tabular data file (xlsx, csv, or parquet) of open text to extract topics from.""")
         with gr.Row():
             model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)        
 
@@ -184,7 +188,7 @@ with app:
             in_group_col = gr.Dropdown(multiselect = False, label="Select the open text column to group by", allow_custom_value=True, interactive=True)
         
         with gr.Accordion("I have my own list of topics (zero shot topic modelling).", open = False):
-            candidate_topics = gr.File(height=FILE_INPUT_HEIGHT, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.")
+            candidate_topics.render()
             with gr.Row(equal_height=True):
                 force_zero_shot_radio = gr.Radio(label="Force responses into zero shot topics", value="No", choices=["Yes", "No"])
                 force_single_topic_radio = gr.Radio(label="Ask the model to assign responses to only a single topic", value="No", choices=["Yes", "No"])
@@ -292,29 +296,10 @@ with app:
             in_previous_data_files_status = gr.Textbox(value = "", label="Previous file input")
             continue_previous_data_files_btn = gr.Button(value="Continue previous topic extraction", variant="primary")
 
-    with gr.Tab(label="Verify descriptions", visible=False):
-        gr.Markdown("""### Choose a tabular data file (xlsx or csv) with titles and original text to verify descriptions for.""")
-        with gr.Row():
-            verify_model_choice = gr.Dropdown(value = default_model_choice, choices = model_full_names, label="LLM model", multiselect=False)
-            verify_in_api_key = gr.Textbox(value = "", label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
-
-        with gr.Accordion("Upload xlsx or csv file", open = True):
-            verify_in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
-        
-        verify_in_excel_sheets = gr.Dropdown(choices=["Choose Excel sheet"], multiselect = False, label="Select the Excel sheet.", visible=False, allow_custom_value=True)
-        verify_in_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text columns that have a response and a title/description. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
-        #verify_title_colnames = gr.Dropdown(choices=["Choose column with titles"], multiselect = False, label="Select the open text columns that have a title. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
-        
-        verify_titles_btn = gr.Button("Verify descriptions", variant="primary")
-        verify_titles_file_output = gr.File(height=FILE_INPUT_HEIGHT, label="Description verification output files")
-        verify_display_topic_table_markdown = gr.Markdown(value="### Language model response will appear here", show_copy_button=True)  
-
-        verify_modification_input_files_placeholder = gr.File(height=FILE_INPUT_HEIGHT, label="Placeholder for files to avoid errors", visible=False)
-
     with gr.Tab(label="LLM and topic extraction settings"):
         gr.Markdown("""Define settings that affect large language model output.""")
         with gr.Accordion("Settings for LLM generation", open = True):
-            temperature_slide = gr.Slider(minimum=0.1, maximum=1.0, value=LLM_TEMPERATURE, label="Choose LLM temperature setting", precision=1, step=0.1)
+            temperature_slide = gr.Slider(minimum=0.0, maximum=1.0, value=LLM_TEMPERATURE, label="Choose LLM temperature setting", precision=1, step=0.1)
             batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query (batch size)", value = BATCH_SIZE_DEFAULT, precision=0, minimum=1, maximum=50)
             random_seed = gr.Number(value=LLM_SEED, label="Random seed for LLM generation", visible=False)
 
@@ -343,8 +328,6 @@ with app:
             initial_table_prompt_textbox = gr.Textbox(label = "Initial topics prompt", lines = 8, value = initial_table_prompt)
             add_to_existing_topics_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = add_existing_topics_system_prompt)
             add_to_existing_topics_prompt_textbox = gr.Textbox(label = "Additional topics prompt", lines = 8, value = add_existing_topics_prompt)
-            verify_titles_system_prompt_textbox = gr.Textbox(label="Verify descriptions system prompt", lines = 4, value = verify_titles_system_prompt, visible=False)
-            verify_titles_prompt_textbox = gr.Textbox(label = "Verify descriptions prompt", lines = 8, value = verify_titles_prompt, visible=False)
 
         with gr.Accordion("Join additional columns to reference file outputs", open = False):
             join_colnames = gr.Dropdown(choices=["Choose column with responses"], multiselect = True, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
@@ -587,20 +570,6 @@ with app:
     continue_previous_data_files_btn.click(
         load_in_data_file, inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches]).\
         success(load_in_previous_data_files, inputs=[in_previous_data_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed, in_previous_data_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox])
-    
-    ###
-    # VERIFY TEXT TITLES/DESCRIPTIONS
-    ###
-
-    # Tabular data upload
-    verify_in_data_files.upload(fn=put_columns_in_df, inputs=[verify_in_data_files], outputs=[verify_in_colnames, verify_in_excel_sheets, original_data_file_name_textbox, join_colnames])
-
-    verify_titles_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, working_data_file_name_textbox, display_topic_table_markdown]).\
-    success(load_in_data_file,
-        inputs = [verify_in_data_files, verify_in_colnames, batch_size_number, verify_in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches], api_name="verify_load_data").\
-    success(fn=verify_titles,
-        inputs=[verify_in_data_files, file_data_state, master_topic_df_state, master_reference_df_state, master_unique_topics_df_state, display_topic_table_markdown, original_data_file_name_textbox, total_number_of_batches, verify_in_api_key, temperature_slide, verify_in_colnames, verify_model_choice, candidate_topics, latest_batch_completed, display_topic_table_markdown, text_output_file_list_state, log_files_output_list_state, first_loop_state, conversation_metadata_textbox, verify_titles_prompt_textbox,  verify_titles_system_prompt_textbox, verify_titles_system_prompt_textbox, verify_titles_prompt_textbox, number_of_prompts, batch_size_number, context_textbox, estimated_time_taken_number, sentiment_checkbox, force_zero_shot_radio, produce_structures_summary_radio, aws_access_key_textbox, aws_secret_key_textbox, in_excel_sheets, output_folder_state],
-        outputs=[verify_display_topic_table_markdown, master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, verify_titles_file_output, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, deduplication_input_files, summarisation_input_files, modifiable_unique_topics_df_state, verify_modification_input_files_placeholder], api_name="verify_descriptions")
     
     ###
     # VIEW TABLE PAGE

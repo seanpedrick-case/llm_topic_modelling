@@ -48,7 +48,6 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
-
 ###
 # LOAD CONFIG FROM ENV FILE
 ###
@@ -272,7 +271,7 @@ if LOW_VRAM_SYSTEM == 'True':
     print("Using settings for low VRAM system")
     USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True')
     LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
-    LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '8192'))
+    LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
     LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
     KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
 
@@ -280,26 +279,17 @@ USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or tr
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
-if USE_LLAMA_CPP == "False":
-    GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
+if USE_LLAMA_CPP == "False": GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
 
 GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf")
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
-
-GEMMA3_REPO_ID = get_or_create_env_var("GEMMA3_REPO_ID", "unsloth/gemma-3-270m-it-qat-GGUF")
-GEMMA3_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-270m-it")
-if USE_LLAMA_CPP == "False":
-    GEMMA3_REPO_ID = GEMMA3_REPO_TRANSFORMERS_ID
-
-GEMMA3_MODEL_FILE = get_or_create_env_var("GEMMA3_MODEL_FILE", "gemma-3-270m-it-qat-F16.gguf")
-GEMMA3_MODEL_FOLDER = get_or_create_env_var("GEMMA3_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
 GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit" # unsloth/gemma-3-4b-it-qat
 if USE_LLAMA_CPP == "False":
     GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 
-GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-Q4_K_M.gguf")
+GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
@@ -311,35 +301,37 @@ GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
 
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
 if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
 elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
 
 DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
 
 GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
-
 GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
 
 QWEN3_4B_REPO_ID = get_or_create_env_var("QWEN3_4B_REPO_ID", "unsloth/Qwen3-4B-Instruct-2507-GGUF")
 QWEN3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("QWEN3_4B_REPO_TRANSFORMERS_ID", "unsloth/Qwen3-4B-unsloth-bnb-4bit")
 if USE_LLAMA_CPP == "False": QWEN3_4B_REPO_ID = QWEN3_4B_REPO_TRANSFORMERS_ID
 
-QWEN3_4B_MODEL_FILE = get_or_create_env_var("QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
+QWEN3_4B_MODEL_FILE = get_or_create_env_var("QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 QWEN3_4B_MODEL_FOLDER = get_or_create_env_var("QWEN3_4B_MODEL_FOLDER", "model/qwen")
 
 QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-0.6B-Q8_0.gguf")
-QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
+QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
+
+GRANITE_4_TINY_REPO_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_ID", "unsloth/granite-4.0-h-tiny-GGUF")
+GRANITE_4_TINY_MODEL_FILE = get_or_create_env_var("GRANITE_4_TINY_MODEL_FILE", "granite-4.0-h-tiny-UD-Q4_K_XL.gguf")
+GRANITE_4_TINY_MODEL_FOLDER = get_or_create_env_var("GRANITE_4_TINY_MODEL_FOLDER", "model/granite")
+
+GRANITE_4_3B_REPO_ID = get_or_create_env_var("GRANITE_4_3B_REPO_ID", "unsloth/granite-4.0-h-micro-GGUF")
+GRANITE_4_3B_MODEL_FILE = get_or_create_env_var("GRANITE_4_3B_MODEL_FILE", "granite-4.0-h-micro-UD-Q4_K_XL.gguf")
+GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var("GRANITE_4_3B_MODEL_FOLDER", "model/granite")
 
 if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 2b":
     LOCAL_REPO_ID = GEMMA2_REPO_ID
     LOCAL_MODEL_FILE = GEMMA2_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA2_MODEL_FOLDER
-
-# WARNING: In my testing, Gemma 3 1B was not capable enough of giving consistent output tables. I would strongly advise sticking with Gemma 3 4B
-elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 1B":
-    LOCAL_REPO_ID = GEMMA3_REPO_ID
-    LOCAL_MODEL_FILE = GEMMA3_MODEL_FILE
-    LOCAL_MODEL_FOLDER = GEMMA3_MODEL_FOLDER
 
 elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     LOCAL_REPO_ID = GEMMA3_4B_REPO_ID
@@ -356,6 +348,22 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 7B":
+    LOCAL_REPO_ID = GRANITE_4_TINY_REPO_ID
+    LOCAL_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 3B":
+    LOCAL_REPO_ID = GRANITE_4_3B_REPO_ID
+    LOCAL_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
+
+elif not CHOSEN_LOCAL_MODEL_TYPE:
+    LOCAL_REPO_ID = ""
+    LOCAL_MODEL_FILE = ""
+    LOCAL_MODEL_FOLDER = ""
+
+
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var('LLM_TEMPERATURE', '0.6'))
 LLM_TOP_K = int(get_or_create_env_var('LLM_TOP_K','64')) # https://docs.unsloth.ai/basics/gemma-3-how-to-run-and-fine-tune
@@ -366,13 +374,13 @@ LLM_REPETITION_PENALTY = float(get_or_create_env_var('LLM_REPETITION_PENALTY', '
 LLM_LAST_N_TOKENS = int(get_or_create_env_var('LLM_LAST_N_TOKENS', '512'))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '8192'))
 LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
-LLM_RESET = get_or_create_env_var('LLM_RESET', 'True')
+LLM_RESET = get_or_create_env_var('LLM_RESET', 'False')
 LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'True')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
 LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '32768'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
-LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['                                          ','\n\n\n\n','---------------------------------------------]")
+LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['                                          ','\n\n\n\n','---------------------------------------------']")
 MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
@@ -392,7 +400,6 @@ USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether t
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
-
 
 ###
 # Gradio app variables
