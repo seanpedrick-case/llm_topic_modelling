@@ -15,7 +15,7 @@ from typing import List, Tuple, Any
 from io import StringIO
 GradioFileData = gr.FileData
 
-from tools.prompts import initial_table_prompt, prompt2, prompt3, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, single_response_reference_format
+from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
@@ -47,6 +47,9 @@ def normalise_string(text:str):
     
     # Replace two or more spaces with a single space
     text = re.sub(r'\s{2,}', ' ', text)
+
+    # Replace multiple newlines with a single newline.
+    text = re.sub(r'\n{2,}|\r{2,}', '\n', text)
     
     return text
 
@@ -106,6 +109,7 @@ def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_co
                                   ~(batch_basic_response_data["Response"] == ""),:]#~(batch_basic_response_data["Response"].str.len() < 5), :]
 
     simple_markdown_table = batch_basic_response_data[["Reference", "Response"]].to_markdown(index=None)
+    
 
     normalised_simple_markdown_table = normalise_string(simple_markdown_table)
 
@@ -322,6 +326,7 @@ def write_llm_output_and_logs(response_text: str,
                               group_name:str = "All",
                               produce_structures_summary_radio:str = "No",                      
                               first_run: bool = False,
+                              return_logs: bool = False,
                               output_folder:str=OUTPUT_FOLDER) -> Tuple:
     """
     Writes the output of the large language model requests and logs to files.
@@ -356,8 +361,9 @@ def write_llm_output_and_logs(response_text: str,
     out_reference_df = pd.DataFrame(columns=["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group"])
     out_topic_summary_df = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment"])  
     is_error = False # If there was an error in parsing, return boolean saying error
+
     # Convert conversation to string and add to log outputs
-    whole_conversation_str = '\n'.join(whole_conversation)
+    whole_conversation_str = '\n'.join(whole_conversation)    
     whole_conversation_metadata_str = '\n'.join(whole_conversation_metadata)
     start_row_reported = start_row + 1
 
@@ -365,15 +371,10 @@ def write_llm_output_and_logs(response_text: str,
 
     # Need to reduce output file names as full length files may be too long
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
-    # in_column_cleaned = clean_column_name(in_column, max_length=20)    
-    # file_name_clean = clean_column_name(file_name, max_length=20, front_characters=True)
 
-
-    # # Save outputs for each batch. If master file created, label file as master
-    # batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size_number}_col_{in_column_cleaned}"
     row_number_string_start = f"Rows {start_row_reported} to {end_row + 1}: "
 
-    if output_debug_files == "True":
+    if output_debug_files == "True" and return_logs == True:
         whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + ".txt"
         whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + ".txt"
         with open(whole_conversation_path, "w", encoding='utf-8-sig', errors='replace') as f: f.write(whole_conversation_str)
@@ -388,16 +389,38 @@ def write_llm_output_and_logs(response_text: str,
 
         return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
+    # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
-    new_column_names = {
-    topic_with_response_df.columns[0]: "General topic",
-    topic_with_response_df.columns[1]: "Subtopic",
-    topic_with_response_df.columns[2]: "Sentiment",
-    topic_with_response_df.columns[3]: "Response References",
-    topic_with_response_df.columns[4]: "Summary"
-    }
+    if topic_with_response_df.shape[1] == 5:
+        new_column_names = {
+        topic_with_response_df.columns[0]: "General topic",
+        topic_with_response_df.columns[1]: "Subtopic",
+        topic_with_response_df.columns[2]: "Sentiment",
+        topic_with_response_df.columns[3]: "Response References",
+        topic_with_response_df.columns[4]: "Summary"
+        }
 
-    topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
+        topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
+
+    else:
+        # Something went wrong with the table output, so add empty columns
+        print("Table output has wrong number of columns, adding with blank values")
+        # Add empty columns if they are not present
+        if "General topic" not in topic_with_response_df.columns:
+            topic_with_response_df["General topic"] = ""
+        if "Subtopic" not in topic_with_response_df.columns:
+            topic_with_response_df["Subtopic"] = ""
+        if "Sentiment" not in topic_with_response_df.columns:
+            topic_with_response_df["Sentiment"] = "Not assessed"
+        if "Response References" not in topic_with_response_df.columns:
+            if batch_size_number == 1:
+                topic_with_response_df["Response References"] = "1"
+            else:
+                topic_with_response_df["Response References"] = ""
+        if "Summary" not in topic_with_response_df.columns:
+            topic_with_response_df["Summary"] = ""
+
+        topic_with_response_df = topic_with_response_df[["General topic", "Subtopic", "Sentiment", "Response References", "Summary"]]    
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
@@ -717,7 +740,7 @@ def extract_topics(in_data_file: GradioFileData,
     - in_api_key (str): The API key for authentication (Google Gemini).
     - temperature (float): The temperature parameter for the model.
     - chosen_cols (List[str]): A list of chosen columns to process.
-    - candidate_topics (gr.FileData): A Gradio FileData object of existing candidate topics submitted by the user.
+    - candidate_topics (GradioFileData): File with a table of existing candidate topics files submitted by the user.
     - model_choice (str): The choice of model to use.
     - latest_batch_completed (int): The index of the latest file completed.
     - out_message (list): A list to store output messages.
@@ -845,18 +868,19 @@ def extract_topics(in_data_file: GradioFileData,
             out_message = [out_message]
 
         if not out_file_paths:
-            out_file_paths = list()
-    
+            out_file_paths = list()    
         
         if "anthropic.claude-3-sonnet" in model_choice and file_data.shape[1] > 300:
             out_message = "Your data has more than 300 rows, using the Sonnet model will be too expensive. Please choose the Haiku model instead."
             print(out_message)
             raise Exception(out_message)    
-        
-        if sentiment_checkbox == "Negative, Neutral, or Positive": sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive"
-        elif sentiment_checkbox == "Negative or Positive": sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative or Positive"
-        elif sentiment_checkbox == "Do not assess sentiment": sentiment_prompt = "Create a third column containing only the text 'Not assessed'"
-        else: sentiment_prompt = "In the third column, write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+
+        sentiment_prefix = "In the next column named 'Sentiment', "
+        sentiment_suffix = "."
+        if sentiment_checkbox == "Negative, Neutral, or Positive": sentiment_prompt = sentiment_prefix + negative_neutral_positive_sentiment_prompt + sentiment_suffix
+        elif sentiment_checkbox == "Negative or Positive": sentiment_prompt = sentiment_prefix + negative_or_positive_sentiment_prompt + sentiment_suffix
+        elif sentiment_checkbox == "Do not assess sentiment": sentiment_prompt = "" # Just remove line completely. Previous: sentiment_prefix + do_not_assess_sentiment_prompt + sentiment_suffix
+        else: sentiment_prompt = sentiment_prefix + default_sentiment_prompt + sentiment_suffix
         
         topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
         total_batches_to_do = num_batches - latest_batch_completed
@@ -869,7 +893,7 @@ def extract_topics(in_data_file: GradioFileData,
             # Call the function to prepare the input table
             simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, latest_batch_completed, batch_size)
 
-            if batch_basic_response_df.shape[0] == 1: response_reference_format = single_response_reference_format
+            if batch_basic_response_df.shape[0] == 1: response_reference_format = "" # Blank, as the topics will always refer to the single response provided, '1'
             else: response_reference_format = default_response_reference_format
 
             # Conversation history
@@ -925,9 +949,7 @@ def extract_topics(in_data_file: GradioFileData,
                     existing_topic_summary_df["General topic"] = existing_topic_summary_df["General topic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df["Subtopic"] = existing_topic_summary_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df = existing_topic_summary_df.drop_duplicates()
-                    if "Description" in existing_topic_summary_df:
-                        if existing_topic_summary_df['Description'].isnull().all():
-                            existing_topic_summary_df.drop("Description", axis = 1, inplace = True)
+                    
 
                     # If user has chosen to try to force zero shot topics, then the prompt is changed to ask the model not to deviate at all from submitted topic list.
                     keep_cols = [
@@ -941,6 +963,38 @@ def extract_topics(in_data_file: GradioFileData,
                     if "General topic" in topics_df_for_markdown.columns and "Subtopic" in topics_df_for_markdown.columns:
                         topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"])
 
+                    # # Save to json format too
+                    # def create_records(group):
+                    #     # Select and rename columns for clean JSON keys (e.g., 'Subtopic' -> 'subtopic')
+                    #     records_df = group[['Subtopic', 'Description']].rename(columns={
+                    #         'Subtopic': 'subtopic',
+                    #         'Description': 'description'
+                    #     })
+                    #     # Convert this cleaned DataFrame to a list of dictionaries
+                    #     return records_df.to_dict('records')
+
+                    # topics_df_for_json = topics_df_for_markdown.copy()
+
+                    # if not "Description" in topics_df_for_json.columns:
+                    #     topics_df_for_json["Description"] = ""
+                    # if not "General topic" in topics_df_for_json.columns:
+                    #     topics_df_for_json["General topic"] = ""                        
+
+                    # grouped_series = topics_df_for_json.groupby('General topic').apply(create_records)
+
+                    # # --- Step 3: Convert the result to the desired JSON format ---
+                    # # This step remains the same as before.
+                    # json_output = grouped_series.to_json(indent=4)
+
+                    # --- Step 4: Print the result and save to a file ---
+                    # print(json_output)
+                    # with open(output_folder + '/topics_detailed.json', 'w') as f:
+                    #     f.write(json_output)
+
+                    if "Description" in existing_topic_summary_df:
+                        if existing_topic_summary_df['Description'].isnull().all():
+                            existing_topic_summary_df.drop("Description", axis = 1, inplace = True)
+
                     if produce_structures_summary_radio == "Yes":
                         if "General topic" in topics_df_for_markdown.columns:
                             topics_df_for_markdown = topics_df_for_markdown.rename(columns={"General topic":"Main Heading"})
@@ -948,7 +1002,8 @@ def extract_topics(in_data_file: GradioFileData,
                             topics_df_for_markdown = topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"})
 
                     unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
-                    
+                    unique_topics_markdown = normalise_string(unique_topics_markdown)
+
                     if force_zero_shot_radio == "Yes": topic_assignment_prompt = force_existing_topics_prompt
                     else: topic_assignment_prompt = allow_new_topics_prompt  
 
@@ -990,7 +1045,7 @@ def extract_topics(in_data_file: GradioFileData,
                     full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
                     
                     # Write final output to text file and objects for logging purposes
-                    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, response_text, conversation_history, whole_conversation_metadata, log_files_output_paths, task_type=task_type)
+                    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, response_text, whole_conversation, whole_conversation_metadata, log_files_output_paths, task_type=task_type)
 
                     all_prompts_content.append(current_prompt_content_logged)
                     all_summaries_content.append(current_summary_content_logged)
@@ -1074,7 +1129,7 @@ def extract_topics(in_data_file: GradioFileData,
                     # Write final output to text file and objects for logging purposes
                     full_prompt = formatted_system_prompt + "\n" + formatted_initial_table_prompt
 
-                    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, response_text, conversation_history, whole_conversation_metadata, log_files_output_paths, task_type=task_type)
+                    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, response_text, whole_conversation, whole_conversation_metadata, log_files_output_paths, task_type=task_type)
 
                     all_prompts_content.append(current_prompt_content_logged)
                     all_summaries_content.append(current_summary_content_logged)

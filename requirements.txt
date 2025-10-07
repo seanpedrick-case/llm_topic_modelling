@@ -1,6 +1,6 @@
 # Note that this requirements file is optimised for Hugging Face spaces / Python 3.10. Please use requirements_cpu.txt for CPU instances and requirements_gpu.txt for GPU instances using Python 3.11
 pandas==2.3.2
-gradio==5.45.0
+gradio==5.48.0
 transformers==4.56.0
 spaces==0.40.1
 boto3==1.40.22

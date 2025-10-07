@@ -85,7 +85,8 @@ class llama_cpp_init_config_gpu:
                  n_threads=threads,
                  n_batch=batch_size,
                  n_ctx=context_length,
-                 n_gpu_layers=gpu_layers):
+                 n_gpu_layers=gpu_layers,
+                 reset=reset):
 
         self.last_n_tokens = last_n_tokens
         self.seed = seed
@@ -93,6 +94,7 @@ class llama_cpp_init_config_gpu:
         self.n_batch = n_batch
         self.n_ctx = n_ctx
         self.n_gpu_layers = n_gpu_layers
+        self.reset = reset
         # self.stop: list[str] = field(default_factory=lambda: [stop_string])
 
     def update_gpu(self, new_value):
@@ -118,7 +120,8 @@ class LlamaCPPGenerationConfig:
                  repeat_penalty=repetition_penalty,
                  seed=seed,
                  stream=stream,
-                 max_tokens=LLM_MAX_NEW_TOKENS
+                 max_tokens=LLM_MAX_NEW_TOKENS,
+                 reset=reset
                  ):
         self.temperature = temperature
         self.top_k = top_k
@@ -127,7 +130,7 @@ class LlamaCPPGenerationConfig:
         self.seed = seed
         self.max_tokens=max_tokens
         self.stream = stream
-
+        self.reset = reset
     def update_temp(self, new_value):
         self.temperature = new_value
 
@@ -569,6 +572,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
     seed = gen_config.seed
     max_tokens = gen_config.max_tokens
     stream = gen_config.stream
+    reset = gen_config.reset
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -589,7 +593,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
             seed=seed,
             max_tokens=max_tokens,
             stream=True,
-            stop=stop_strings # catching four new lines in sequence by default
+            stop=stop_strings,
         ):
             delta = chunk["choices"][0].get("delta", {})
             token = delta.get("content") or chunk["choices"][0].get("text") or ""
@@ -600,6 +604,10 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
         print()  # newline after stream finishes
 
         text = "".join(final_tokens)
+
+        if reset:
+            model.reset()
+
         return {
             "choices": [
                 {
@@ -626,8 +634,12 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
             seed=seed,
             max_tokens=max_tokens,
             stream=False,
-            stop=stop_strings  # catching four new lines in sequence by default
+            stop=stop_strings,
         )
+
+        if reset:
+            model.reset()
+
         return response
 
 ###
