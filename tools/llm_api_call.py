@@ -324,7 +324,7 @@ def write_llm_output_and_logs(response_text: str,
                               batch_basic_response_df:pd.DataFrame,
                               model_name_map:dict,
                               group_name:str = "All",
-                              produce_structures_summary_radio:str = "No",                      
+                              produce_structured_summary_radio:str = "No",                      
                               first_run: bool = False,
                               return_logs: bool = False,
                               output_folder:str=OUTPUT_FOLDER) -> Tuple:
@@ -349,7 +349,7 @@ def write_llm_output_and_logs(response_text: str,
     - batch_basic_response_df (pd.DataFrame): The dataframe that contains the response data.
     - model_name_map (dict): The dictionary that maps the model choice to the model name.
     - group_name (str, optional): The name of the current group.
-    - produce_structures_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
+    - produce_structured_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
     - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
     - output_folder (str): The name of the folder where output files are saved.
     """
@@ -405,11 +405,14 @@ def write_llm_output_and_logs(response_text: str,
     else:
         # Something went wrong with the table output, so add empty columns
         print("Table output has wrong number of columns, adding with blank values")
-        # Add empty columns if they are not present
-        if "General topic" not in topic_with_response_df.columns:
-            topic_with_response_df["General topic"] = ""
-        if "Subtopic" not in topic_with_response_df.columns:
-            topic_with_response_df["Subtopic"] = ""
+        # First, rename first two columns that should always exist.
+        new_column_names = {
+        topic_with_response_df.columns[0]: "General topic",
+        topic_with_response_df.columns[1]: "Subtopic"
+        }
+        topic_with_response_df.rename(columns=new_column_names, inplace=True)
+
+        # Add empty columns if they are not present        
         if "Sentiment" not in topic_with_response_df.columns:
             topic_with_response_df["Sentiment"] = "Not assessed"
         if "Response References" not in topic_with_response_df.columns:
@@ -443,12 +446,8 @@ def write_llm_output_and_logs(response_text: str,
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
         references = re.findall(r'\d+', str(row.iloc[3])) if pd.notna(row.iloc[3]) else []
-        # If no numbers found in the Response References column, check the Summary column in case reference numbers were put there by mistake
-        ##if not references:
-        #    references = re.findall(r'\d+', str(row.iloc[4])) if pd.notna(row.iloc[4]) else []
-        # If batch size is 1, references will always be 1
-        if batch_size_number == 1:
-            references = "1"
+
+        if batch_size_number == 1: references = "1"
         
         # Filter out references that are outside the valid range
         if references:
@@ -460,32 +459,52 @@ def write_llm_output_and_logs(response_text: str,
                 # If any reference can't be converted to int, skip this row
                 print("Response value could not be converted to number:", references)
                 continue
+        else:
+            references = ""
         
         topic = row.iloc[0] if pd.notna(row.iloc[0]) else ""
         subtopic = row.iloc[1] if pd.notna(row.iloc[1]) else ""
         sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
         summary = row.iloc[4] if pd.notna(row.iloc[4]) else ""
+
         # If the reference response column is very long, and there's nothing in the summary column, assume that the summary was put in the reference column
         if not summary and (len(str(row.iloc[3])) > 30):
-            summary = row.iloc[3]        
+            summary = row.iloc[3]
+        
+        index_row = index 
 
-        if produce_structures_summary_radio != "Yes": summary = row_number_string_start + summary
+        if produce_structured_summary_radio != "Yes": summary = row_number_string_start + summary
 
-        # Create a new entry for each reference number
-        for ref in references:
-            # Add start_row back onto reference_number
-            if batch_basic_response_df.empty:
-                try:
-                    response_ref_no =  str(int(ref) + int(start_row))
-                except ValueError:
-                    print("Reference is not a number")
-                    continue
-            else:
-                try:                    
-                    response_ref_no =  batch_basic_response_df.loc[batch_basic_response_df["Reference"]==str(ref), "Original Reference"].iloc[0]
-                except ValueError:
-                    print("Reference is not a number")
-                    continue
+        if references:
+            existing_reference_numbers = True
+            # Create a new entry for each reference number
+            for ref in references:
+                # Add start_row back onto reference_number
+                if batch_basic_response_df.empty:
+                    try:
+                        response_ref_no =  str(int(ref) + int(start_row))
+                    except ValueError:
+                        print("Reference is not a number")
+                        continue
+                else:
+                    try:                    
+                        response_ref_no =  batch_basic_response_df.loc[batch_basic_response_df["Reference"]==str(ref), "Original Reference"].iloc[0]
+                    except ValueError:
+                        print("Reference is not a number")
+                        continue
+
+                reference_data.append({
+                    'Response References': response_ref_no,
+                    'General topic': topic,
+                    'Subtopic': subtopic,
+                    'Sentiment': sentiment,
+                    'Summary': summary,
+                    "Start row of group": start_row_reported
+                })
+        else:
+            existing_reference_numbers = False
+            # In this case, set to 0 to show that this applies to no specific reference number
+            response_ref_no = 0
 
             reference_data.append({
                 'Response References': response_ref_no,
@@ -512,11 +531,11 @@ def write_llm_output_and_logs(response_text: str,
     out_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     # Try converting response references column to int, keep as string if fails
-    try:
-        out_reference_df["Response References"] = out_reference_df["Response References"].astype(int)
-    except Exception as e:
-        print("Could not convert Response References column to integer due to", e)
-        print("out_reference_df['Response References']:", out_reference_df["Response References"].head())
+    if existing_reference_numbers is True:
+        try:
+            out_reference_df["Response References"] = out_reference_df["Response References"].astype(int)
+        except Exception as e:
+            print("Could not convert Response References column to integer due to", e)
 
     out_reference_df.sort_values(["Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
@@ -706,7 +725,7 @@ def extract_topics(in_data_file: GradioFileData,
               output_folder:str=OUTPUT_FOLDER,
               force_single_topic_prompt:str=force_single_topic_prompt,
               group_name:str="All",
-              produce_structures_summary_radio:str="No",
+              produce_structured_summary_radio:str="No",
               aws_access_key_textbox:str='',
               aws_secret_key_textbox:str='',
               hf_api_key_textbox:str='',
@@ -722,7 +741,7 @@ def extract_topics(in_data_file: GradioFileData,
               assistant_model:object=list(),
               max_rows:int=max_rows,
               original_full_file_name:str="",
-              add_existing_topics_summary_format:str="",
+              additional_instructions_summary_format:str="",
               progress=Progress(track_tqdm=False)):
 
     '''
@@ -760,7 +779,7 @@ def extract_topics(in_data_file: GradioFileData,
     - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - force_single_topic_radio (str, optional): Should the model be forced to assign only one single topic to each response (effectively a classifier).
-    - produce_structures_summary_radio (str, optional): Should the model create a structured summary instead of extracting topics.
+    - produce_structured_summary_radio (str, optional): Should the model create a structured summary instead of extracting topics.
     - output_folder (str, optional): Output folder where results will be stored.
     - force_single_topic_prompt (str, optional): The prompt for forcing the model to assign only one single topic to each response.
     - aws_access_key_textbox (str, optional): AWS access key for account with Bedrock permissions.
@@ -777,7 +796,7 @@ def extract_topics(in_data_file: GradioFileData,
     - assistant_model: Assistant model object for local inference.
     - max_rows: The maximum number of rows to process.
     - original_full_file_name: The original full file name.
-    - add_existing_topics_summary_format: Initial instructions to guide the format for the initial summary of the topics.
+    - additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
     - progress (Progress): A progress tracker.
 
     '''
@@ -881,6 +900,9 @@ def extract_topics(in_data_file: GradioFileData,
         elif sentiment_checkbox == "Negative or Positive": sentiment_prompt = sentiment_prefix + negative_or_positive_sentiment_prompt + sentiment_suffix
         elif sentiment_checkbox == "Do not assess sentiment": sentiment_prompt = "" # Just remove line completely. Previous: sentiment_prefix + do_not_assess_sentiment_prompt + sentiment_suffix
         else: sentiment_prompt = sentiment_prefix + default_sentiment_prompt + sentiment_suffix
+
+        if context_textbox: context_textbox = "The context of this analysis is '" + context_textbox + "'."
+        else: context_textbox = ""
         
         topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
         total_batches_to_do = num_batches - latest_batch_completed
@@ -995,9 +1017,9 @@ def extract_topics(in_data_file: GradioFileData,
                         if existing_topic_summary_df['Description'].isnull().all():
                             existing_topic_summary_df.drop("Description", axis = 1, inplace = True)
 
-                    if produce_structures_summary_radio == "Yes":
+                    if produce_structured_summary_radio == "Yes":
                         if "General topic" in topics_df_for_markdown.columns:
-                            topics_df_for_markdown = topics_df_for_markdown.rename(columns={"General topic":"Main Heading"})
+                            topics_df_for_markdown = topics_df_for_markdown.rename(columns={"General topic":"Main heading"})
                         if "Subtopic" in topics_df_for_markdown.columns:
                             topics_df_for_markdown = topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"})
 
@@ -1013,17 +1035,17 @@ def extract_topics(in_data_file: GradioFileData,
                         topic_assignment_prompt = topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")         
 
                     # Format the summary prompt with the response table and topics
-                    if produce_structures_summary_radio != "Yes":
+                    if produce_structured_summary_radio != "Yes":
                         formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table,
                             topics=unique_topics_markdown,
                             topic_assignment=topic_assignment_prompt,
                             force_single_topic=force_single_topic_prompt,
                             sentiment_choices=sentiment_prompt,
                             response_reference_format=response_reference_format,
-                            add_existing_topics_summary_format=add_existing_topics_summary_format)
+                            add_existing_topics_summary_format=additional_instructions_summary_format)
                     else:
                         formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
-                        topics=unique_topics_markdown)
+                        topics=unique_topics_markdown, summary_format=additional_instructions_summary_format)
                     
                     full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
 
@@ -1040,7 +1062,7 @@ def extract_topics(in_data_file: GradioFileData,
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill,  master = True)
 
                     # Return output tables
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error = write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=False, output_folder=output_folder)  
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error = write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structured_summary_radio, first_run=False, output_folder=output_folder)  
 
                     full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
                     
@@ -1079,7 +1101,14 @@ def extract_topics(in_data_file: GradioFileData,
                     
                     # Outputs for markdown table output
                     unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-                    unique_table_df_display_table_markdown = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]].to_markdown(index=False)
+
+                    if produce_structured_summary_radio == "Yes":
+                        unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Summary"]]
+                        unique_table_df_display_table.rename(columns={"General topic":"Main heading", "Subtopic":"Subheading"}, inplace=True)                    
+                    else:
+                        unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]]
+
+                    unique_table_df_display_table_markdown = unique_table_df_display_table.to_markdown(index=False)
 
                     whole_conversation_metadata_str = ' '.join(whole_conversation_metadata)
 
@@ -1106,9 +1135,9 @@ def extract_topics(in_data_file: GradioFileData,
                         #print("Using AWS Bedrock model:", model_choice)
 
                     # Format the summary prompt with the response table and topics
-                    if produce_structures_summary_radio != "Yes":
+                    if produce_structured_summary_radio != "Yes":
                         formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt,
-                        response_reference_format=response_reference_format, add_existing_topics_summary_format=add_existing_topics_summary_format)
+                        response_reference_format=response_reference_format, add_existing_topics_summary_format=additional_instructions_summary_format)
                     else:
                         unique_topics_markdown="No suggested headings for this summary"
                         formatted_initial_table_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown)
@@ -1121,7 +1150,7 @@ def extract_topics(in_data_file: GradioFileData,
 
                     responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, tokenizer,bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
                     
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structures_summary_radio, first_run=True, output_folder=output_folder)
+                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structured_summary_radio, first_run=True, output_folder=output_folder)
 
                     # If error in table parsing, leave function
                     if is_error == True: raise Exception("Error in output table parsing")  
@@ -1243,7 +1272,14 @@ def extract_topics(in_data_file: GradioFileData,
 
         # Outputs for markdown table output
         unique_table_df_display_table = final_out_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-        unique_table_df_display_table_markdown = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
+
+        if produce_structured_summary_radio == "Yes":
+            unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Summary"]]
+            unique_table_df_display_table.rename(columns={"General topic":"Main heading", "Subtopic":"Subheading"}, inplace=True)                     
+        else:
+            unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary"]]
+
+        unique_table_df_display_table_markdown = unique_table_df_display_table.to_markdown(index=False)
 
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if '_final_' in x]
@@ -1312,14 +1348,14 @@ def wrapper_extract_topics_per_column_value(
     force_zero_shot_radio: str = "No",
     in_excel_sheets: List[str] = list(),
     force_single_topic_radio: str = "No",
-    produce_structures_summary_radio: str = "No",
+    produce_structured_summary_radio: str = "No",
     aws_access_key_textbox:str="",
     aws_secret_key_textbox:str="",
     hf_api_key_textbox:str="",
     azure_api_key_textbox:str="",
     output_folder: str = OUTPUT_FOLDER,
     existing_logged_content:list=list(),
-    add_existing_topics_summary_format:str="",
+    additional_instructions_summary_format:str="",
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
@@ -1330,7 +1366,7 @@ def wrapper_extract_topics_per_column_value(
     tokenizer:object=None,
     assistant_model:object=None,
     max_rows:int=max_rows,    
-    progress=Progress(track_tqdm=False) # type: ignore
+    progress=Progress(track_tqdm=True) # type: ignore
 ) -> Tuple: # Mimicking the return tuple structure of extract_topics
     """
     A wrapper function that iterates through unique values in a specified grouping column
@@ -1366,7 +1402,7 @@ def wrapper_extract_topics_per_column_value(
     :param force_zero_shot_radio: Option to force responses into zero-shot topics.
     :param in_excel_sheets: List of Excel sheet names if applicable.
     :param force_single_topic_radio: Option to force a single topic per response.
-    :param produce_structures_summary_radio: Option to produce a structured summary.
+    :param produce_structured_summary_radio: Option to produce a structured summary.
     :param aws_access_key_textbox: AWS access key for Bedrock.
     :param aws_secret_key_textbox: AWS secret key for Bedrock.
     :param hf_api_key_textbox: Hugging Face API key for local models.
@@ -1374,7 +1410,7 @@ def wrapper_extract_topics_per_column_value(
     :param output_folder: The folder where output files will be saved.
     :param existing_logged_content: A list of existing logged content.
     :param force_single_topic_prompt: Prompt for forcing a single topic.
-    :param add_existing_topics_summary_format: Initial instructions to guide the format for the initial summary of the topics.
+    :param additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
     :param max_tokens: Maximum tokens for LLM generation.
     :param model_name_map: Dictionary mapping model names to their properties.
     :param max_time_for_loop: Maximum time allowed for the processing loop.
@@ -1452,12 +1488,13 @@ def wrapper_extract_topics_per_column_value(
     wrapper_first_loop = initial_first_loop_state
 
     if len(unique_values) == 1:
-        loop_object = enumerate(unique_values)
+        # If only one unique value, no need for progress bar, iterate directly
+        loop_object = unique_values
     else:
-        loop_object = tqdm(enumerate(unique_values), desc=f"Analysing group", total=len(unique_values), unit="groups")
+        # If multiple unique values, use tqdm progress bar
+        loop_object = progress.tqdm(unique_values, desc=f"Analysing group", total=len(unique_values), unit="groups")
 
-
-    for i, group_value in loop_object:
+    for i, group_value in enumerate(loop_object):
         print(f"\nProcessing group: {grouping_col} = {group_value} ({i+1}/{len(unique_values)})")
         
         filtered_file_data = file_data.copy()
@@ -1543,7 +1580,7 @@ def wrapper_extract_topics_per_column_value(
                 output_folder=output_folder,
                 force_single_topic_prompt=force_single_topic_prompt,
                 group_name=group_value,
-                produce_structures_summary_radio=produce_structures_summary_radio,
+                produce_structured_summary_radio=produce_structured_summary_radio,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
                 hf_api_key_textbox=hf_api_key_textbox,
@@ -1559,7 +1596,7 @@ def wrapper_extract_topics_per_column_value(
                 max_rows=max_rows,
                 existing_logged_content=all_logged_content,
                 original_full_file_name=original_file_name,
-                add_existing_topics_summary_format=add_existing_topics_summary_format,
+                additional_instructions_summary_format=additional_instructions_summary_format,
                 progress=progress
             )
 
@@ -1598,8 +1635,7 @@ def wrapper_extract_topics_per_column_value(
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     column_clean = clean_column_name(chosen_cols, max_length=20)
     
-    if "Group" in acc_reference_df.columns:
-        
+    if "Group" in acc_reference_df.columns:        
         
         acc_reference_df_path = output_folder + overall_file_name + "_col_" + column_clean + "_all_final_reference_table_" + model_choice_clean_short + ".csv"
         acc_topic_summary_df_path = output_folder + overall_file_name + "_col_" + column_clean +  "_all_final_unique_topics_" + model_choice_clean_short + ".csv"
@@ -1624,7 +1660,13 @@ def wrapper_extract_topics_per_column_value(
 
         # Outputs for markdown table output
         unique_table_df_display_table = acc_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
-        acc_markdown_output = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
+        if produce_structured_summary_radio == "Yes":
+            unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Summary", "Group"]]
+            unique_table_df_display_table.rename(columns={"General topic":"Main heading", "Subtopic":"Subheading"}, inplace=True)
+            acc_markdown_output = unique_table_df_display_table.to_markdown(index=False)
+        else:    
+            acc_markdown_output = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
+            
 
     acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(acc_whole_conversation_metadata, model_choice, model_name_map)
 
@@ -1814,7 +1856,7 @@ def all_in_one_pipeline(
     model_name_map_state: dict = model_name_map,
     usage_logs_location: str = "",
     existing_logged_content:list=list(),
-    add_existing_topics_summary_format:str="",
+    additional_instructions_summary_format:str="",
     model: object = None,
     tokenizer: object = None,
     assistant_model: object = None,    
@@ -1869,7 +1911,7 @@ def all_in_one_pipeline(
         model_name_map_state (dict, optional): Mapping of model names. Defaults to model_name_map.
         usage_logs_location (str, optional): Location for usage logs. Defaults to "".
         existing_logged_content (list, optional): Existing logged content. Defaults to list().
-        add_existing_topics_summary_format (str, optional): Summary format for adding existing topics. Defaults to "".
+        additional_instructions_summary_format (str, optional): Summary format for adding existing topics. Defaults to "".
         model (object, optional): Loaded local model object. Defaults to None.
         tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.
         assistant_model (object, optional): Loaded local assistant model object. Defaults to None.
@@ -1947,7 +1989,7 @@ def all_in_one_pipeline(
         force_zero_shot_radio=force_zero_shot_choice,
         in_excel_sheets=in_excel_sheets,
         force_single_topic_radio=force_single_topic_choice,
-        produce_structures_summary_radio=produce_structures_summary_choice,
+        produce_structured_summary_radio=produce_structures_summary_choice,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
         hf_api_key_textbox=hf_api_key_text,
@@ -1959,7 +2001,7 @@ def all_in_one_pipeline(
         tokenizer=tokenizer,
         assistant_model=assistant_model,
         max_rows=max_rows,
-        add_existing_topics_summary_format=add_existing_topics_summary_format
+        additional_instructions_summary_format=additional_instructions_summary_format
     )
 
     total_input_tokens += out_input_tokens
@@ -1972,6 +2014,60 @@ def all_in_one_pipeline(
     topic_extraction_output_files = out_file_paths_1
     text_output_file_list_state = out_file_paths_1
     log_files_output_list_state = out_log_files
+
+    # If producing structured summaries, return the outputs after extraction
+    if produce_structures_summary_choice == "Yes":
+
+        # Write logged content to file
+        column_clean = clean_column_name(chosen_cols, max_length=20)
+        model_choice_clean = model_name_map[model_choice]["short_name"]
+        model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+
+        out_logged_content_df_path = output_folder + original_file_name + "_col_" + column_clean + "_logs_" + model_choice_clean_short + ".json" 
+
+        with open(out_logged_content_df_path, "w", encoding='utf-8-sig', errors='replace') as f:
+            f.write(json.dumps(out_logged_content))
+
+        log_files_output_list_state.append(out_logged_content_df_path)
+        out_log_files.append(out_logged_content_df_path)
+
+        # Map to the UI outputs list expected by the new single-call wiring
+        return (
+            display_markdown,
+            out_topics_table,
+            out_topic_summary_df,
+            out_reference_df,
+            topic_extraction_output_files,
+            text_output_file_list_state,
+            out_latest_batch_completed,
+            out_log_files,
+            log_files_output_list_state,
+            out_conversation_metadata,
+            total_time_taken,
+            out_file_paths_1,
+            list(), # summarisation_input_files is not available yet
+            out_gradio_df,
+            list(), # modification_input_files placeholder
+            out_join_files,
+            out_missing_df,
+            total_input_tokens,
+            total_output_tokens,
+            total_number_of_calls,
+            out_message[0],
+            pd.DataFrame(), # summary_reference_table_sample_state is not available yet
+            "", # summarised_references_markdown is not available yet
+            out_topic_summary_df,
+            out_reference_df,
+            list(), # summary_output_files is not available yet
+            list(), # summarised_outputs_list is not available yet
+            0, # latest_summary_completed_num is not available yet
+            list(), # overall_summarisation_input_files is not available yet
+            list(), # overall_summary_output_files is not available yet
+            "", # overall_summarised_output_markdown is not available yet
+            pd.DataFrame(), # summarised_output_df is not available yet
+            out_logged_content
+        )
+
 
     # 2) Deduplication
     (
@@ -2008,8 +2104,6 @@ def all_in_one_pipeline(
     ) = load_in_previous_data_files(summarisation_input_files)
 
     summary_reference_table_sample_state, summarised_references_markdown = sample_reference_table_summaries(ref_df_after_dedup, random_seed)
-
-    print("model:", model)
 
     (
         _summary_reference_table_sample_state,
@@ -2128,8 +2222,13 @@ def all_in_one_pipeline(
 
 
     # Map to the UI outputs list expected by the new single-call wiring
+    # Use the original markdown with renamed columns if produce_structured_summary_radio is "Yes"
+    final_display_markdown = display_markdown_updated if display_markdown_updated else display_markdown
+    if produce_structures_summary_choice == "Yes":
+        final_display_markdown = unique_table_df_display_table_markdown
+    
     return (
-        display_markdown_updated if display_markdown_updated else display_markdown,
+        final_display_markdown,
         out_topics_table,
         unique_df_after_dedup,
         ref_df_after_dedup,

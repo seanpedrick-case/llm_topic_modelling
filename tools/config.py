@@ -429,7 +429,7 @@ S3_ALLOW_LIST_PATH = get_or_create_env_var('S3_ALLOW_LIST_PATH', '') # default_a
 if ALLOW_LIST_PATH: OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
 else: OUTPUT_ALLOW_LIST_PATH = 'config/default_allow_list.csv'
 
-FILE_INPUT_HEIGHT = get_or_create_env_var('FILE_INPUT_HEIGHT', '200')
+FILE_INPUT_HEIGHT = int(get_or_create_env_var('FILE_INPUT_HEIGHT', '125'))
 
 SHOW_EXAMPLES = get_or_create_env_var('SHOW_EXAMPLES', 'True')
 

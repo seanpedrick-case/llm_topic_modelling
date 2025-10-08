@@ -1,6 +1,6 @@
 # This Dockerfile is optimised for AWS ECS using Python 3.11, and assumes CPU inference with OpenBLAS for local models.
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm AS builder
+FROM public.ecr.aws/docker/library/python:3.11.13-slim-trixie AS builder
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --target=/install torch==2.7.1+cpu --extra-index-
 RUN rm requirements_no_local.txt
 
 # Stage 2: Final runtime image
-FROM public.ecr.aws/docker/library/python:3.11.13-slim-bookworm
+FROM public.ecr.aws/docker/library/python:3.11.13-slim-trixie
 
 # Install system dependencies.
 RUN apt-get update \

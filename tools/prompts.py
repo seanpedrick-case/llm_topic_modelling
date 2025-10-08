@@ -4,7 +4,7 @@
 
 generic_system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset."""
 
-system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. The context of this analysis is '{consultation_context}'."""
+system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. {consultation_context}"""
 
 markdown_additional_prompt = """ You will be given a request for a markdown table. You must respond with ONLY the markdown table. Do not include any introduction, explanation, or concluding text."""
 
@@ -78,16 +78,17 @@ default_sentiment_prompt = "In the third column named 'Sentiment', write the sen
 
 structured_summary_prompt = """Your task is to write a structured summary for open text responses.  
 
-Create a new markdown table based on the response table below with the headings 'Main heading', 'Subheading', 'Placeholder', 'Response References', and 'Summary'.
+Create a new markdown table based on the response table below with the headings 'Main heading', 'Subheading' and 'Summary'.
 
-For each of the responses in the Response table, you will create a row for each summary associated with each of the Main headings and Subheadings from the Headings table. If there is no Headings table, created your own headings. In the first and second columns, write a Main heading and Subheading from the Headings table. Write the single relevant response reference number in the 'Response References' column. Then in Summary, write a detailed and comprehensive summary that covers all information relevant to the Main heading and Subheading on the same row.
+For each of the responses in the Response table, you will create a row for each summary associated with each of the Main headings and Subheadings from the Headings table. If there is no Headings table, created your own headings. In the first and second columns, write a Main heading and Subheading from the Headings table.  Then in Summary, write a detailed and comprehensive summary that covers all information relevant to the Main heading and Subheading on the same row.
+{summary_format}
 
 Do not add any other columns. Do not add any other text to your response.
 
 Responses are shown in the following Response table: 
 {response_table}
 
-Headings with which to structure the summary are in the following Headings table: 
+Headings to structure the summary are in the following table: 
 {topics}
 
 New table:"""

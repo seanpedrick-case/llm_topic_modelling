@@ -955,7 +955,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     tic = time.perf_counter()
 
     if (model_choice == CHOSEN_LOCAL_MODEL_TYPE) & (RUN_LOCAL_MODEL == "1") & (not local_model):
-        progress(0.1, f"Using global model: {CHOSEN_LOCAL_MODEL_TYPE}")
+        progress(0.1, f"Using model: {CHOSEN_LOCAL_MODEL_TYPE}")
         local_model = get_model()
         tokenizer = get_tokenizer()
         assistant_model = get_assistant_model()
