@@ -21,6 +21,7 @@ def add_cover_sheet(
     llm_call_number:int,
     input_tokens:int,
     output_tokens:int,
+    time_taken:float,
     file_name:str,
     column_name:str,
     number_of_responses_with_topic_assignment:int,
@@ -57,6 +58,7 @@ def add_cover_sheet(
         "Number of LLM calls": llm_call_number,
         "Total number of input tokens from LLM calls": input_tokens,
         "Total number of output tokens from LLM calls": output_tokens,
+        "Total time taken for all LLM calls (seconds)": time_taken,
     }
 
     for i, (label, value) in enumerate(metadata.items()):
@@ -84,6 +86,7 @@ def csvs_to_excel(
     llm_call_number:int=0,
     input_tokens:int=0,
     output_tokens:int=0,
+    time_taken:float=0,
     number_of_responses:int=0,
     number_of_responses_with_text:int=0,
     number_of_responses_with_text_five_plus_words:int=0,
@@ -152,6 +155,7 @@ def csvs_to_excel(
         llm_call_number = llm_call_number,
         input_tokens = input_tokens,
         output_tokens = output_tokens,
+        time_taken = time_taken,
         file_name=file_name,
         column_name=column_name,
         number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment
@@ -166,7 +170,7 @@ def csvs_to_excel(
 ###
 # Run the functions
 ###
-def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:list[str], reference_data_file_name_textbox:str, in_group_col:str, model_choice:str, master_reference_df_state:pd.DataFrame, master_unique_topics_df_state:pd.DataFrame, summarised_output_df:pd.DataFrame, missing_df_state:pd.DataFrame, excel_sheets:str, usage_logs_location:str="", model_name_map:dict={}, output_folder:str=OUTPUT_FOLDER, structured_summaries:str="No"):
+def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:list[str], reference_data_file_name_textbox:str, in_group_col:str, model_choice:str, master_reference_df_state:pd.DataFrame, master_unique_topics_df_state:pd.DataFrame, summarised_output_df:pd.DataFrame, missing_df_state:pd.DataFrame, excel_sheets:str="", usage_logs_location:str="", model_name_map:dict=dict(), output_folder:str=OUTPUT_FOLDER, structured_summaries:str="No"):
     '''
     Collect together output CSVs from various output boxes and combine them into a single output Excel file.
 
@@ -226,7 +230,6 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         # Create structured summary from master_unique_topics_df_state
         structured_summary_data = list()
         
-        print("master_unique_topics_df_state:", master_unique_topics_df_state)
         # Group by 'Group' column
         for group_name, group_df in master_unique_topics_df_state.groupby('Group'):
             group_summary = f"## {group_name}\n\n"
@@ -267,7 +270,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     else:
         # Use original summarised_output_df 
         structured_summary_df = summarised_output_df      
-        structured_summary_df.to_csv(overall_summary_csv_path, index = None)
+        structured_summary_df.to_csv(overall_summary_csv_path, index = None)  
 
     if not structured_summary_df.empty:
         csv_files.append(overall_summary_csv_path)
@@ -410,22 +413,27 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     if usage_logs_location:
         try:
             usage_logs = pd.read_csv(usage_logs_location)
-            relevant_logs = usage_logs.loc[(usage_logs["Reference data file name"] == reference_data_file_name_textbox) & (usage_logs["LLM model"]==model_choice) & (usage_logs["Select the open text column of interest. In an Excel file, this shows columns across all sheets."]==chosen_cols),:]
+
+            relevant_logs = usage_logs.loc[(usage_logs["Reference data file name"] == reference_data_file_name_textbox) & (usage_logs["Large language model for topic extraction and summarisation"]==model_choice) & (usage_logs["Select the open text column of interest. In an Excel file, this shows columns across all sheets."]==chosen_cols),:]
+
             llm_call_number = sum(relevant_logs["Total LLM calls"].astype(int))
             input_tokens = sum(relevant_logs["Total input tokens"].astype(int))
             output_tokens = sum(relevant_logs["Total output tokens"].astype(int))
+            time_taken = sum(relevant_logs["Estimated time taken (seconds)"].astype(float))
         except Exception as e:
             print("Could not obtain usage logs due to:", e)
             usage_logs = pd.DataFrame()
             llm_call_number = 0
             input_tokens = 0
             output_tokens = 0
+            time_taken = 0
     else:
         print("LLM call logs location not provided")
         usage_logs = pd.DataFrame()
         llm_call_number = 0
         input_tokens = 0
         output_tokens = 0
+        time_taken = 0
 
     # Create short filename:
     model_choice_clean_short = clean_column_name(model_name_map[model_choice]["short_name"], max_length=20, front_characters=False)
@@ -449,6 +457,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         llm_call_number = llm_call_number,
         input_tokens = input_tokens,
         output_tokens = output_tokens,
+        time_taken = time_taken,
         number_of_responses = number_of_responses,
         number_of_responses_with_text = number_of_responses_with_text,
         number_of_responses_with_text_five_plus_words = number_of_responses_with_text_five_plus_words,

@@ -59,7 +59,7 @@ else: default_model_choice = "gemini-2.5-flash"
 in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
 context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
-topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file", scale=1, interactive=False, file_count="multiple")
+topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file. CSV outputs are available on the 'Advanced' tab.", scale=1, interactive=False, file_count="multiple")
 display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
 output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
 candidate_topics = gr.File(height=FILE_INPUT_HEIGHT, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.", file_count="single")
@@ -162,7 +162,7 @@ with app:
 
     gr.Markdown("""# Large language model topic modelling
 
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets under 'Test with an example dataset' below, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
+    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets below. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
 
     NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
 
@@ -190,7 +190,7 @@ with app:
 
         example_labels=["Main Street construction consultation", "Case notes for young people", "Main Street construction consultation with suggested topics", "Case notes grouped by person with suggested topics", "Case notes structured summary with suggested topics"],
 
-        label="Try topic extraction and summarisation with an example dataset",
+        label="Try topic extraction and summarisation with an example dataset. Example outputs are displayed. Click the 'Extract topics...' button below to rerun the analysis.",
 
         fn=show_info_box_on_click,
         run_on_click=True,
@@ -206,7 +206,7 @@ with app:
             in_excel_sheets = gr.Dropdown(multiselect = False, label="Select the Excel sheet of interest.", visible=False, allow_custom_value=True)
             in_colnames.render()
 
-        with gr.Accordion("Group analysis by values in another column", open=False):            
+        with gr.Accordion("Group analysis by values in another column", open=False):
             in_group_col.render()
         
         with gr.Accordion("Provide list of suggested topics", open = False):

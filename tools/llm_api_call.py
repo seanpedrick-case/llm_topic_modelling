@@ -1488,12 +1488,13 @@ def wrapper_extract_topics_per_column_value(
     wrapper_first_loop = initial_first_loop_state
 
     if len(unique_values) == 1:
-        loop_object = enumerate(unique_values)
+        # If only one unique value, no need for progress bar, iterate directly
+        loop_object = unique_values
     else:
-        loop_object = tqdm(enumerate(unique_values), desc=f"Analysing group", total=len(unique_values), unit="groups")
+        # If multiple unique values, use tqdm progress bar
+        loop_object = progress.tqdm(unique_values, desc=f"Analysing group", total=len(unique_values), unit="groups")
 
-
-    for i, group_value in loop_object:
+    for i, group_value in enumerate(loop_object):
         print(f"\nProcessing group: {grouping_col} = {group_value} ({i+1}/{len(unique_values)})")
         
         filtered_file_data = file_data.copy()

@@ -4,7 +4,7 @@
 
 generic_system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset."""
 
-system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. {consultation_context}."""
+system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. {consultation_context}"""
 
 markdown_additional_prompt = """ You will be given a request for a markdown table. You must respond with ONLY the markdown table. Do not include any introduction, explanation, or concluding text."""
 
