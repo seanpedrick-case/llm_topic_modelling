@@ -21,7 +21,7 @@ Basic use:
 2. Select the relevant open text column from the dropdown.
 3. If you have your own suggested (zero shot) topics, upload this (see examples folder for an example file)
 4. Write a one sentence description of the consultation/context of the open text.
-5. Click 'All in one - Extract topics, deduplicate, and summarise'. This will run through the whole analysis process from topic extraction, to topic deduplication, to topic-level and overall summaries.
+5. Click 'Extract topics, deduplicate, and summarise'. This will run through the whole analysis process from topic extraction, to topic deduplication, to topic-level and overall summaries.
 6. A summary xlsx file workbook will be created on the front page in the box 'Overall summary xlsx file'. This will combine all the results from the different processes into one workbook.
 
 # Installation guide

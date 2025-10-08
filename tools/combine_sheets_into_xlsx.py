@@ -93,7 +93,7 @@ def csvs_to_excel(
     unique_reference_numbers:list=[]
 ):
     if intro_text is None:
-        intro_text = []
+        intro_text = list()
 
     wb = Workbook()
     # Remove default sheet
@@ -166,10 +166,36 @@ def csvs_to_excel(
 ###
 # Run the functions
 ###
-def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:list[str], reference_data_file_name_textbox:str, in_group_col:str, model_choice:str, master_reference_df_state:pd.DataFrame, master_unique_topics_df_state:pd.DataFrame, summarised_output_df:pd.DataFrame, missing_df_state:pd.DataFrame, excel_sheets:str, usage_logs_location:str="", model_name_map:dict={}, output_folder:str=OUTPUT_FOLDER):
+def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:list[str], reference_data_file_name_textbox:str, in_group_col:str, model_choice:str, master_reference_df_state:pd.DataFrame, master_unique_topics_df_state:pd.DataFrame, summarised_output_df:pd.DataFrame, missing_df_state:pd.DataFrame, excel_sheets:str, usage_logs_location:str="", model_name_map:dict={}, output_folder:str=OUTPUT_FOLDER, structured_summaries:str="No"):
     '''
-    Collect together output csvs from various output boxes and combine into a single output Excel file.
+    Collect together output CSVs from various output boxes and combine them into a single output Excel file.
+
+    Args:
+        in_data_files (List): A list of paths to the input data files.
+        chosen_cols (list[str]): A list of column names selected for analysis.
+        reference_data_file_name_textbox (str): The name of the reference data file.
+        in_group_col (str): The column used for grouping the data.
+        model_choice (str): The LLM model chosen for the analysis.
+        master_reference_df_state (pd.DataFrame): The master DataFrame containing reference data.
+        master_unique_topics_df_state (pd.DataFrame): The master DataFrame containing unique topics data.
+        summarised_output_df (pd.DataFrame): DataFrame containing the summarised output.
+        missing_df_state (pd.DataFrame): DataFrame containing information about missing data.
+        excel_sheets (str): Information regarding Excel sheets, typically sheet names or structure.
+        usage_logs_location (str, optional): Path to the usage logs CSV file. Defaults to "".
+        model_name_map (dict, optional): A dictionary mapping model choices to their display names. Defaults to {}.
+        output_folder (str, optional): The directory where the output Excel file will be saved. Defaults to OUTPUT_FOLDER.
+        structured_summaries (str, optional): Indicates whether structured summaries are being produced ("Yes" or "No"). Defaults to "No".
+
+    Returns:
+        tuple: A tuple containing:
+            - list: A list of paths to the generated Excel output files.
+            - list: A duplicate of the list of paths to the generated Excel output files (for UI compatibility).
     '''
+
+    if structured_summaries == "Yes":
+        structured_summaries = True
+    else:
+        structured_summaries = False
 
     if not chosen_cols:
         raise Exception("Could not find chosen column")
@@ -177,10 +203,10 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     today_date = datetime.today().strftime('%Y-%m-%d')
     original_data_file_path = os.path.abspath(in_data_files[0])
     
-    csv_files = []
-    sheet_names = []
-    column_widths = {}
-    wrap_text_columns = {}
+    csv_files = list()
+    sheet_names = list()
+    column_widths = dict()
+    wrap_text_columns = dict()
     short_file_name = os.path.basename(reference_data_file_name_textbox)
     reference_pivot_table = pd.DataFrame()
     reference_table_csv_path = ""
@@ -191,20 +217,63 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     number_of_responses_with_topic_assignment = 0
 
     if in_group_col: group = in_group_col
-    else: group = "All"
+    else: group = "All"       
 
-    if not summarised_output_df.empty:
+    overall_summary_csv_path = output_folder + "overall_summary_for_xlsx.csv"
+        
+    if structured_summaries is True and not master_unique_topics_df_state.empty:
+        print("Producing overall summary based on structured summaries.")
+        # Create structured summary from master_unique_topics_df_state
+        structured_summary_data = list()
+        
+        print("master_unique_topics_df_state:", master_unique_topics_df_state)
+        # Group by 'Group' column
+        for group_name, group_df in master_unique_topics_df_state.groupby('Group'):
+            group_summary = f"## {group_name}\n\n"
+            
+            # Group by 'General topic' within each group
+            for general_topic, topic_df in group_df.groupby('General topic'):
+                group_summary += f"### {general_topic}\n\n"
+                
+                # Add subtopics under each general topic
+                for _, row in topic_df.iterrows():
+                    subtopic = row['Subtopic']
+                    summary = row['Summary']
+                    # sentiment = row.get('Sentiment', '')
+                    # num_responses = row.get('Number of responses', '')
+                    
+                    # Create subtopic entry
+                    subtopic_entry = f"**{subtopic}**"
+                    # if sentiment:
+                    #     subtopic_entry += f" ({sentiment})"
+                    # if num_responses:
+                    #     subtopic_entry += f" - {num_responses} responses"
+                    subtopic_entry += "\n\n"
+                    
+                    if summary and pd.notna(summary):
+                        subtopic_entry += f"{summary}\n\n"
+                    
+                    group_summary += subtopic_entry
+            
+            # Add to structured summary data
+            structured_summary_data.append({
+                'Group': group_name,
+                'Summary': group_summary.strip()
+            })
+        
+        # Create DataFrame for structured summary
+        structured_summary_df = pd.DataFrame(structured_summary_data)
+        structured_summary_df.to_csv(overall_summary_csv_path, index=False)
+    else:
+        # Use original summarised_output_df 
+        structured_summary_df = summarised_output_df      
+        structured_summary_df.to_csv(overall_summary_csv_path, index = None)
 
-        overall_summary_csv_path = output_folder + "overall_summary_for_xlsx.csv"
-        summarised_output_df.to_csv(overall_summary_csv_path, index = None)
-
-        #overall_summary_csv_path = [x for x in file_output_list if "overall" in x][0]
+    if not structured_summary_df.empty:
         csv_files.append(overall_summary_csv_path)
         sheet_names.append("Overall summary")
         column_widths["Overall summary"] = {"A": 20, "B": 100}
         wrap_text_columns["Overall summary"] = ['B']
-
-    file_output_list = []
 
     if not master_reference_df_state.empty:
         # Simplify table to just responses column and the Response reference number
@@ -234,50 +303,62 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
         master_unique_topics_df_state.to_csv(unique_topic_table_csv_path, index = None)
 
     if unique_topic_table_csv_path:
-        #unique_topic_table_csv_path = unique_topic_table_csv_path[0]
         csv_files.append(unique_topic_table_csv_path)
         sheet_names.append("Topic summary")
         column_widths["Topic summary"] = {"A": 25, "B": 25, "C": 15, "D": 15, "F":100}
         wrap_text_columns["Topic summary"] = ["B", "F"]
     else:
-        raise Exception("Could not find unique topic files to put into Excel format")
+        print("Relevant unique topic files not found, excluding from xlsx output.")
+
     if reference_table_csv_path:
-        csv_files.append(reference_table_csv_path)
-        sheet_names.append("Response level data")
-        column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "H":100}
-        wrap_text_columns["Response level data"] = ["C", "G"]        
+        if structured_summaries:
+            print("Structured summaries are being produced, excluding response level data from xlsx output.")
+        else:
+            csv_files.append(reference_table_csv_path)
+            sheet_names.append("Response level data")
+            column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "H":100}
+            wrap_text_columns["Response level data"] = ["C", "G"]        
     else:
-        raise Exception("Could not find any reference files to put into Excel format")
+        print("Relevant reference files not found, excluding from xlsx output.")
 
     if reference_pivot_table_csv_path:
-        csv_files.append(reference_pivot_table_csv_path)
-        sheet_names.append("Topic response pivot table")
+        if structured_summaries:
+            print("Structured summaries are being produced, excluding topic response pivot table from xlsx output.")
+        else:
+            csv_files.append(reference_pivot_table_csv_path)
+            sheet_names.append("Topic response pivot table")
 
-        if reference_pivot_table.empty:
-            reference_pivot_table = pd.read_csv(reference_pivot_table_csv_path)
+            if reference_pivot_table.empty:
+                reference_pivot_table = pd.read_csv(reference_pivot_table_csv_path)
 
-        # Base widths and wrap
-        column_widths["Topic response pivot table"] = {"A": 25, "B": 100}
-        wrap_text_columns["Topic response pivot table"] = ["B"]
+            # Base widths and wrap
+            column_widths["Topic response pivot table"] = {"A": 25, "B": 100}
+            wrap_text_columns["Topic response pivot table"] = ["B"]
 
-        num_cols = len(reference_pivot_table.columns)
-        col_letters = [get_column_letter(i) for i in range(3, num_cols + 1)]
+            num_cols = len(reference_pivot_table.columns)
+            col_letters = [get_column_letter(i) for i in range(3, num_cols + 1)]
 
-        for col_letter in col_letters:
-            column_widths["Topic response pivot table"][col_letter] = 25
+            for col_letter in col_letters:
+                column_widths["Topic response pivot table"][col_letter] = 25
 
-        wrap_text_columns["Topic response pivot table"].extend(col_letters)
+            wrap_text_columns["Topic response pivot table"].extend(col_letters)
+    else:
+        print("Relevant reference pivot table files not found, excluding from xlsx output.")
     
     if not missing_df_state.empty:
         missing_df_state_csv_path = output_folder + "missing_df_state_df_for_xlsx.csv"
         missing_df_state.to_csv(missing_df_state_csv_path, index = None)
 
     if missing_df_state_csv_path:
-        #missing_references_table_csv_path = missing_references_table_csv_path[0]
-        csv_files.append(missing_df_state_csv_path)
-        sheet_names.append("Missing responses")
-        column_widths["Missing responses"] = {"A": 25, "B": 30, "C": 50}
-        wrap_text_columns["Missing responses"] = ["C"]
+        if structured_summaries:
+            print("Structured summaries are being produced, excluding missing responses from xlsx output.")
+        else:
+            csv_files.append(missing_df_state_csv_path)
+            sheet_names.append("Missing responses")
+            column_widths["Missing responses"] = {"A": 25, "B": 30, "C": 50}
+            wrap_text_columns["Missing responses"] = ["C"]
+    else:
+        print("Relevant missing responses files not found, excluding from xlsx output.")
 
     new_csv_files = csv_files.copy()
 
@@ -353,7 +434,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
 
     # Save outputs for each batch. If master file created, label file as master
     file_path_details = f"{file_name_cleaned}_col_{in_column_cleaned}_{model_choice_clean_short}"
-    output_xlsx_filename = output_folder + file_path_details + "_topic_analysis.xlsx"
+    output_xlsx_filename = output_folder + file_path_details + ("_structured_summaries" if structured_summaries else "_topic_analysis") + ".xlsx"
 
     xlsx_output_filename = csvs_to_excel(
         csv_files = csv_files,
