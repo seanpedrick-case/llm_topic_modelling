@@ -18,7 +18,7 @@ GradioFileData = gr.FileData
 from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page, generate_zero_shot_topics_df
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
+from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_OPENAI_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary, process_debug_output_iteration
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
@@ -620,6 +620,7 @@ def extract_topics(in_data_file: GradioFileData,
               aws_secret_key_textbox:str='',
               hf_api_key_textbox:str='',
               azure_api_key_textbox:str='',
+              azure_endpoint_textbox:str='',
               max_tokens:int=max_tokens,
               model_name_map:dict=model_name_map,
               existing_logged_content:list=list(),            
@@ -635,7 +636,7 @@ def extract_topics(in_data_file: GradioFileData,
               progress=Progress(track_tqdm=False)):
 
     '''
-    Query an LLM (local, (Gemma/GPT-OSS if local, Gemini, AWS Bedrock or Azure AI Inference) with up to three prompts about a table of open text data. Up to 'batch_size' rows will be queried at a time.
+    Query an LLM (local, (Gemma/GPT-OSS if local, Gemini, AWS Bedrock or Azure/OpenAI AI Inference) with up to three prompts about a table of open text data. Up to 'batch_size' rows will be queried at a time.
 
     Parameters:
     - in_data_file (gr.File): Gradio file object containing input data
@@ -693,8 +694,8 @@ def extract_topics(in_data_file: GradioFileData,
 
     tic = time.perf_counter()
 
-    google_client = list()
-    google_config = {}
+    client = list()
+    client_config = {}
     final_time = 0.0
     whole_conversation_metadata = list()
     is_error = False
@@ -822,13 +823,13 @@ def extract_topics(in_data_file: GradioFileData,
                     # Prepare clients before query       
                     if "Gemini" in model_source:
                         #print("Using Gemini model:", model_choice)
-                        google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
-                    elif "Azure" in model_source:
-                        #print("Using Azure AI Inference model:", model_choice)
+                        client, client_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
+                    elif "Azure/OpenAI" in model_source:
+                        #print("Using Azure/OpenAI AI Inference model:", model_choice)
                         # If provided, set env for downstream calls too
                         if azure_api_key_textbox:
                             os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
-                        google_client, google_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=AZURE_INFERENCE_ENDPOINT)
+                        client, client_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox)
                     elif "anthropic.claude" in model_choice:
                         #print("Using AWS Bedrock model:", model_choice)
                         pass
@@ -949,7 +950,7 @@ def extract_topics(in_data_file: GradioFileData,
                     whole_conversation = list()
 
                     # Process requests to large language model
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill,  master = True)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill,  master = True)
 
                     # Return output tables
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error = write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structured_summary_radio, first_run=False, output_folder=output_folder)  
@@ -1011,12 +1012,12 @@ def extract_topics(in_data_file: GradioFileData,
                     # Prepare Gemini models before query       
                     if model_source == "Gemini":
                         print("Using Gemini model:", model_choice)
-                        google_client, google_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
-                    elif model_source == "Azure":
-                        print("Using Azure AI Inference model:", model_choice)
+                        client, client_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
+                    elif model_source == "Azure/OpenAI":
+                        print("Using Azure/OpenAI AI Inference model:", model_choice)
                         if azure_api_key_textbox:
                             os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
-                        google_client, google_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=AZURE_INFERENCE_ENDPOINT)
+                        client, client_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox)
                     elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
                         pass
                         #print("Using local model:", model_choice)
@@ -1038,7 +1039,7 @@ def extract_topics(in_data_file: GradioFileData,
                     
                     whole_conversation = list()
 
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, reported_batch_no, local_model, tokenizer,bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
+                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, reported_batch_no, local_model, tokenizer,bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
                     
                     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structured_summary_radio, first_run=True, output_folder=output_folder)
 
@@ -1243,6 +1244,7 @@ def wrapper_extract_topics_per_column_value(
     aws_secret_key_textbox:str="",
     hf_api_key_textbox:str="",
     azure_api_key_textbox:str="",
+    azure_endpoint_textbox:str="",
     output_folder: str = OUTPUT_FOLDER,
     existing_logged_content:list=list(),
     additional_instructions_summary_format:str="",
@@ -1296,7 +1298,7 @@ def wrapper_extract_topics_per_column_value(
     :param aws_access_key_textbox: AWS access key for Bedrock.
     :param aws_secret_key_textbox: AWS secret key for Bedrock.
     :param hf_api_key_textbox: Hugging Face API key for local models.
-    :param azure_api_key_textbox: Azure API key for Azure AI Inference.
+    :param azure_api_key_textbox: Azure/OpenAI API key for Azure/OpenAI AI Inference.
     :param output_folder: The folder where output files will be saved.
     :param existing_logged_content: A list of existing logged content.
     :param force_single_topic_prompt: Prompt for forcing a single topic.
@@ -1475,6 +1477,7 @@ def wrapper_extract_topics_per_column_value(
                 aws_secret_key_textbox=aws_secret_key_textbox,
                 hf_api_key_textbox=hf_api_key_textbox,
                 azure_api_key_textbox=azure_api_key_textbox,
+                azure_endpoint_textbox=azure_endpoint_textbox,
                 max_tokens=max_tokens,
                 model_name_map=model_name_map,
                 max_time_for_loop=max_time_for_loop,
@@ -1736,6 +1739,7 @@ def all_in_one_pipeline(
     aws_secret_key_text: str,
     hf_api_key_text: str,
     azure_api_key_text: str,
+    azure_endpoint_text: str,
     output_folder: str = OUTPUT_FOLDER,
     merge_sentiment: str = "No",
     merge_general_topics: str = "Yes",
@@ -1790,7 +1794,7 @@ def all_in_one_pipeline(
         aws_access_key_text (str): AWS access key.
         aws_secret_key_text (str): AWS secret key.
         hf_api_key_text (str): Hugging Face API key.
-        azure_api_key_text (str): Azure API key.
+        azure_api_key_text (str): Azure/OpenAI API key.
         output_folder (str, optional): Folder to save output files. Defaults to OUTPUT_FOLDER.
         merge_sentiment (str, optional): Whether to merge sentiment. Defaults to "No".
         merge_general_topics (str, optional): Whether to merge general topics. Defaults to "Yes".
@@ -1884,6 +1888,7 @@ def all_in_one_pipeline(
         aws_secret_key_textbox=aws_secret_key_text,
         hf_api_key_textbox=hf_api_key_text,
         azure_api_key_textbox=azure_api_key_text,
+        azure_endpoint_textbox=azure_endpoint_text,
         output_folder=output_folder,
         existing_logged_content=existing_logged_content,
         model_name_map=model_name_map_state,        

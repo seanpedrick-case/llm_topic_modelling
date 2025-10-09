@@ -6,8 +6,9 @@ import pandas as pd
 import numpy as np
 from typing import List
 import math
+import codecs
 from botocore.exceptions import ClientError
-from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, CUSTOM_HEADER, CUSTOM_HEADER_VALUE, AWS_USER_POOL_ID, MAXIMUM_ZERO_SHOT_TOPICS
+from tools.config import OUTPUT_FOLDER, INPUT_FOLDER, SESSION_OUTPUT_FOLDER, CUSTOM_HEADER, CUSTOM_HEADER_VALUE, AWS_USER_POOL_ID, MAXIMUM_ZERO_SHOT_TOPICS, model_name_map, model_full_names
 
 def empty_output_vars_extract_topics():
     # Empty output objects before processing a new file
@@ -745,8 +746,6 @@ def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost
                     raise Exception("Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions.")
     return
 
-import codecs
-
 def _get_env_list(env_var_name: str, strip_strings:bool=True) -> List[str]:
     """Parses a comma-separated environment variable into a list of strings."""
     value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
@@ -899,3 +898,12 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                 })
         
         return zero_shot_topics_df
+
+def update_model_choice(model_source):
+    # Filter models by source and return the first matching model name
+    matching_models = [model_name for model_name, model_info in model_name_map.items() 
+                    if model_info["source"] == model_source]
+                    
+    output_model = matching_models[0] if matching_models else model_full_names[0]
+
+    return gr.Dropdown(value = output_model, choices = matching_models, label="Large language model for topic extraction and summarisation", multiselect=False)

@@ -11,10 +11,10 @@ from tqdm import tqdm
 import os
 from tools.llm_api_call import generate_zero_shot_topics_df
 from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group, summary_assistant_prefill, llm_deduplication_system_prompt, llm_deduplication_prompt, llm_deduplication_prompt_with_candidates
-from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, send_request, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
+from tools.llm_funcs import construct_gemini_generative_model, process_requests, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details, read_file
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_OPENAI_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -393,7 +393,8 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
                           in_data_files:List[str]=list(),
                           chosen_cols:List[str]="",
                           output_folder:str=OUTPUT_FOLDER,
-                          candidate_topics=None
+                          candidate_topics=None,
+                          azure_endpoint:str=""
                           ):
     '''
     Deduplicate topics using LLM semantic understanding to identify and merge similar topics.
@@ -501,7 +502,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
     
     # Set up model clients based on model source
     if "Gemini" in model_source:
-        google_client, config = construct_gemini_generative_model(
+        client, config = construct_gemini_generative_model(
             in_api_key, temperature, model_choice, llm_deduplication_system_prompt, 
             max_tokens, LLM_SEED
         )
@@ -509,13 +510,13 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
     elif "AWS" in model_source:
         if not bedrock_runtime:
             bedrock_runtime = boto3.client('bedrock-runtime')
-        google_client = None
+        client = None
         config = None
-    elif "Azure" in model_source:
-        google_client, config = construct_azure_client(in_api_key, "")
+    elif "Azure/OpenAI" in model_source:
+        client, config = construct_azure_client(in_api_key, azure_endpoint)
         bedrock_runtime = None
     elif "Local" in model_source:
-        google_client = None
+        client = None
         config = None
         bedrock_runtime = None
     else:
@@ -531,8 +532,8 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
         conversation_history=conversation_history,
         whole_conversation=whole_conversation,
         whole_conversation_metadata=whole_conversation_metadata,
-        google_client=google_client,
-        google_config=config,
+        client=client,
+        client_config=config,
         model_choice=model_choice,
         temperature=temperature,
         reported_batch_no=1,
@@ -758,7 +759,7 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     return sampled_reference_table_df, summarised_references_markdown#, reference_df, topic_summary_df
 
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list(), tokenizer=list(), assistant_model=list()):
+def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list(), tokenizer=list(), assistant_model=list(), azure_endpoint:str=""):
     """
     Query an LLM to generate a summary of topics based on the provided prompts.
 
@@ -780,16 +781,15 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     """
     conversation_history = list()
     whole_conversation_metadata = list()
-    google_client = list()
-    google_config = {}
+    client = list()
+    client_config = {}
 
     # Prepare Gemini models before query      
     if "Gemini" in model_source:
         #print("Using Gemini model:", model_choice)
-        google_client, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
-    elif "Azure" in model_source:
-        # Azure client (endpoint from env/config)
-        google_client, config = construct_azure_client(in_api_key=os.environ.get("AZURE_INFERENCE_CREDENTIAL", ""), endpoint=AZURE_INFERENCE_ENDPOINT)
+        client, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
+    elif "Azure/OpenAI" in model_source:
+        client, config = construct_azure_client(in_api_key=os.environ.get("AZURE_INFERENCE_CREDENTIAL", ""), endpoint=azure_endpoint)
     elif "Local" in model_source:
         pass
         #print("Using local model: ", model_choice)
@@ -800,7 +800,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation = [summarise_topic_descriptions_system_prompt] 
 
     # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, google_client, google_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=summary_assistant_prefill)
+    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=summary_assistant_prefill)
 
     summarised_output = re.sub(r'\n{2,}', '\n', response_text)  # Replace multiple line breaks with a single line break
     summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
@@ -898,6 +898,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             aws_secret_key_textbox:str='',
                             model_name_map:dict=model_name_map,
                             hf_api_key_textbox:str='',
+                            azure_endpoint_textbox:str='',
                             existing_logged_content:list=list(),
                             output_debug_files:str=output_debug_files,
                             reasoning_suffix:str=reasoning_suffix,
@@ -1041,7 +1042,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_topic_descriptions_system_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + reasoning_suffix
 
             try:
-                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model)
+                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model, azure_endpoint=azure_endpoint_textbox)
                 summarised_output = response_text
             except Exception as e:
                 print("Creating summary failed:", e)
@@ -1183,6 +1184,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     aws_secret_key_textbox:str='',
                     model_name_map:dict=model_name_map,
                     hf_api_key_textbox:str='',
+                    azure_endpoint_textbox:str='',
                     existing_logged_content:list=list(),
                     output_debug_files:str=output_debug_files,
                     log_output_files:list=list(),                    
@@ -1313,7 +1315,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_everything_system_prompt = formatted_summarise_everything_system_prompt + "\n" + reasoning_suffix
             
             try:
-                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model)
+                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model, azure_endpoint=azure_endpoint_textbox)
                 summarised_output_for_df = response_text
                 summarised_output = response
             except Exception as e:

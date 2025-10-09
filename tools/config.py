@@ -2,6 +2,8 @@ import os
 import tempfile
 import socket
 import logging
+import codecs
+from typing import List
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -217,10 +219,10 @@ RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
-# Azure AI Inference settings
-RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "0")
-AZURE_API_KEY = get_or_create_env_var('AZURE_API_KEY', '')
-AZURE_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_INFERENCE_ENDPOINT', '')
+# Azure/OpenAI AI Inference settings
+RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
+AZURE_OPENAI_API_KEY = get_or_create_env_var('AZURE_OPENAI_API_KEY', '')
+AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_OPENAI_INFERENCE_ENDPOINT', '')
 
 # Build up options for models
 
@@ -236,26 +238,47 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_source.append("Local")
 
 if RUN_AWS_BEDROCK_MODELS == "1":
-    model_full_names.extend(["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0", "amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0"])
-    model_short_names.extend(["haiku", "sonnet", "nova_micro", "nova_lite", "nova_pro"])
-    model_source.extend(["AWS", "AWS", "AWS", "AWS", "AWS"])
+    amazon_models = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0", "anthropic.claude-sonnet-4-5-20250929-v1:0", "amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0",  "deepseek.v3-v1:0", "openai.gpt-oss-20b-1:0", "openai.gpt-oss-120b-1:0"]
+    model_full_names.extend(amazon_models)
+    model_short_names.extend(["haiku", "sonnet_3_7", "sonnet_4_5", "nova_micro", "nova_lite", "nova_pro", "deepseek_v3", "gpt_oss_20b_aws", "gpt_oss_120b_aws"])
+    model_source.extend(["AWS"] * len(amazon_models))
 
 if RUN_GEMINI_MODELS == "1":
-    model_full_names.extend(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"])
+    gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+    model_full_names.extend(gemini_models)
     model_short_names.extend(["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"])
-    model_source.extend(["Gemini", "Gemini", "Gemini"])
+    model_source.extend(["Gemini"] * len(gemini_models))
 
-# Register Azure AI models (model names must match your Azure deployments)
+# Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)
 if RUN_AZURE_MODELS == "1":
-    # Example deployments; adjust to the deployments you actually create in Azure
-    model_full_names.extend(["gpt-5-mini"])
-    model_short_names.extend(["gpt-5-mini"])
-    model_source.extend(["Azure"])
+    # Example deployments; adjust to the deployments you actually create in Azure/OpenAI
+    azure_models = ["gpt-5-mini", "gpt-4o-mini"]
+    model_full_names.extend(azure_models)
+    model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
+    model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
 model_name_map = {
     full: {"short_name": short, "source": source}
     for full, short, source in zip(model_full_names, model_short_names, model_source)
 }
+
+if RUN_LOCAL_MODEL == "1": default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
+elif RUN_AWS_FUNCTIONS == "1": default_model_choice = amazon_models[0]
+else: default_model_choice = gemini_models[0]
+
+default_model_source = model_name_map[default_model_choice]["source"]
+model_sources = list(set([model_name_map[model]["source"] for model in model_full_names]))
+
+def update_model_choice_config(default_model_source, model_name_map):
+    # Filter models by source and return the first matching model name
+    matching_models = [model_name for model_name, model_info in model_name_map.items() 
+                    if model_info["source"] == default_model_source]
+
+    output_model = matching_models[0] if matching_models else model_full_names[0]
+
+    return output_model, matching_models
+
+default_model_choice, default_source_models = update_model_choice_config(default_model_source, model_name_map)
 
 #print("model_name_map:", model_name_map)
 
@@ -454,3 +477,43 @@ else: OUTPUT_COST_CODES_PATH = 'config/cost_codes.csv'
 ENFORCE_COST_CODES = get_or_create_env_var('ENFORCE_COST_CODES', 'False') # If you have cost codes listed, is it compulsory to choose one before redacting?
 
 if ENFORCE_COST_CODES == 'True': GET_COST_CODES = 'True'
+
+###
+# VALIDATE FOLDERS AND CONFIG OPTIONS
+###
+
+def ensure_folder_exists(output_folder:str):
+    """Checks if the specified folder exists, creates it if not."""   
+
+    if not os.path.exists(output_folder):
+        # Create the folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        pass
+            #print(f"The {output_folder} folder already exists.")
+
+def _get_env_list(env_var_name: str, strip_strings:bool=True) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('\"', '').replace("\'","")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    if strip_strings:
+        return [s.strip() for s in value.split(',') if s.strip()]
+    else:
+        return [codecs.decode(s, 'unicode_escape') for s in value.split(',') if s]
+
+# Convert string environment variables to string or list
+if SAVE_LOGS_TO_CSV == "True": SAVE_LOGS_TO_CSV = True 
+else: SAVE_LOGS_TO_CSV = False
+if SAVE_LOGS_TO_DYNAMODB == "True": SAVE_LOGS_TO_DYNAMODB = True 
+else: SAVE_LOGS_TO_DYNAMODB = False
+
+if CSV_ACCESS_LOG_HEADERS: CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
+if CSV_FEEDBACK_LOG_HEADERS: CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
+if CSV_USAGE_LOG_HEADERS: CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
+
+if DYNAMODB_ACCESS_LOG_HEADERS: DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
+if DYNAMODB_FEEDBACK_LOG_HEADERS: DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+if DYNAMODB_USAGE_LOG_HEADERS: DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
