@@ -1,9 +1,9 @@
-# Note that this requirements file is optimised for Hugging Face spaces / Python 3.10. Please use requirements_cpu.txt for CPU instances and requirements_gpu.txt for GPU instances using Python 3.11
-pandas==2.3.2
-gradio==5.48.0
+# Note that this requirements file is optimised for Hugging Face spaces / Python 3.10. Please use requirements_no_local.txt for installation without local model inference (simplest approach to get going). Please use requirements_cpu.txt for CPU instances and requirements_gpu.txt for GPU instances using Python 3.11
+pandas==2.3.3
+gradio==5.49.1
 transformers==4.56.0
-spaces==0.40.1
-boto3==1.40.22
+spaces==0.42.1
+boto3==1.40.48
 pyarrow==21.0.0
 openpyxl==3.1.5
 markdown==3.7
@@ -23,11 +23,7 @@ torch==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu124
 unsloth[cu124-torch260]==2025.9.4
 unsloth_zoo==2025.9.5
 timm==1.0.19
-https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl
-
-# CPU only (for e.g. Hugging Face CPU instances)
-#torch==2.8.0 --extra-index-url https://download.pytorch.org/whl/cpu
-# For Hugging Face, need a python 3.10 compatible wheel for llama-cpp-python to avoid build timeouts
-#https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl
+# llama-cpp-python direct wheel link for GPU compatible version 3.16 for use with Python 3.10 and Hugging Face
+llama-cpp-python==0.3.16 @ https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl
 
 

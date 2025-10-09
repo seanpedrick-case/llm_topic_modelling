@@ -16,7 +16,7 @@ from io import StringIO
 GradioFileData = gr.FileData
 
 from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt
-from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page, generate_zero_shot_topics_df
 from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
 from tools.aws_functions import connect_to_bedrock_runtime
@@ -578,117 +578,7 @@ def write_llm_output_and_logs(response_text: str,
 
     return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
-def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
-                                 force_zero_shot_radio:str="No",
-                                 create_revised_general_topics:bool=False,
-                                 max_topic_no:int=maximum_zero_shot_topics):
-    """
-    Preprocesses a DataFrame of zero-shot topics, cleaning and formatting them
-    for use with a large language model. It handles different column configurations
-    (e.g., only subtopics, general topics and subtopics, or subtopics with descriptions)
-    and enforces a maximum number of topics.
 
-    Args:
-        zero_shot_topics (pd.DataFrame): A DataFrame containing the initial zero-shot topics.
-                                         Expected columns can vary, but typically include
-                                         "General topic", "Subtopic", and/or "Description".
-        force_zero_shot_radio (str, optional): A string indicating whether to force
-                                               the use of zero-shot topics. Defaults to "No".
-                                               (Currently not used in the function logic, but kept for signature consistency).
-        create_revised_general_topics (bool, optional): A boolean indicating whether to
-                                                        create revised general topics. Defaults to False.
-                                                        (Currently not used in the function logic, but kept for signature consistency).
-        max_topic_no (int, optional): The maximum number of topics allowed to fit within
-                                      LLM context limits. If `zero_shot_topics` exceeds this,
-                                      it will be truncated. Defaults to 120.
-
-    Returns:
-        tuple: A tuple containing:
-            - zero_shot_topics_gen_topics_list (list): A list of cleaned general topics.
-            - zero_shot_topics_subtopics_list (list): A list of cleaned subtopics.
-            - zero_shot_topics_description_list (list): A list of cleaned topic descriptions.
-    """
-
-    zero_shot_topics_gen_topics_list = list()
-    zero_shot_topics_subtopics_list = list()
-    zero_shot_topics_description_list = list()
-
-    # Max 120 topics allowed
-    if zero_shot_topics.shape[0] > max_topic_no:
-        out_message = "Maximum " + str(max_topic_no) + " zero-shot topics allowed according to application configuration."
-        print(out_message)
-        raise Exception(out_message)        
-
-    # Forward slashes in the topic names seems to confuse the model
-    if zero_shot_topics.shape[1] >= 1:  # Check if there is at least one column                       
-        for x in zero_shot_topics.columns:
-            if not zero_shot_topics[x].isnull().all():
-                zero_shot_topics[x] = zero_shot_topics[x].apply(initial_clean)
-
-                zero_shot_topics.loc[:, x] = (
-                zero_shot_topics.loc[:, x]
-                .str.strip()
-                .str.replace('\n', ' ')
-                .str.replace('\r', ' ')
-                .str.replace('/', ' or ')
-                .str.lower()
-                .str.capitalize())
-
-        # If number of columns is 1, keep only subtopics
-        if zero_shot_topics.shape[1] == 1 and "General topic" not in zero_shot_topics.columns:
-            print("Found only Subtopic in zero shot topics")
-            zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
-            zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])                    
-        # Allow for possibility that the user only wants to set general topics and not subtopics
-        elif zero_shot_topics.shape[1] == 1 and "General topic" in zero_shot_topics.columns: 
-            print("Found only General topic in zero shot topics")
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
-            zero_shot_topics_subtopics_list = [""] * zero_shot_topics.shape[0]
-        # If general topic and subtopic are specified
-        elif set(["General topic", "Subtopic"]).issubset(zero_shot_topics.columns):
-            print("Found General topic and Subtopic in zero shot topics")
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
-            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
-        # If subtopic and description are specified
-        elif set(["Subtopic", "Description"]).issubset(zero_shot_topics.columns):
-            print("Found Subtopic and Description in zero shot topics")
-            zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
-            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
-            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
-
-        # If number of columns is at least 2, keep general topics and subtopics
-        elif zero_shot_topics.shape[1] >= 2 and "Description" not in zero_shot_topics.columns: 
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics.iloc[:, 0])
-            zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 1])
-        else:
-            # If there are more columns, just assume that the first column was meant to be a subtopic
-            zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
-            zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 0])
-
-        # Add a description if column is present 
-        if not zero_shot_topics_description_list:
-            if "Description" in zero_shot_topics.columns:
-                zero_shot_topics_description_list = list(zero_shot_topics["Description"])
-                #print("Description found in topic title. List is:", zero_shot_topics_description_list)        
-            elif zero_shot_topics.shape[1] >= 3:
-                zero_shot_topics_description_list = list(zero_shot_topics.iloc[:, 2]) # Assume the third column is description
-            else:
-                zero_shot_topics_description_list = [""] * zero_shot_topics.shape[0]
-
-        # If the responses are being forced into zero shot topics, allow an option for nothing relevant
-        if force_zero_shot_radio == "Yes":
-            zero_shot_topics_gen_topics_list.append("")
-            zero_shot_topics_subtopics_list.append("No relevant topic")
-            zero_shot_topics_description_list.append("")
-        
-        # Add description or not
-        zero_shot_topics_df = pd.DataFrame(data={
-                "General topic":zero_shot_topics_gen_topics_list,
-                "Subtopic":zero_shot_topics_subtopics_list,
-                "Description": zero_shot_topics_description_list
-                })
-        
-        return zero_shot_topics_df
 
 
 def extract_topics(in_data_file: GradioFileData,

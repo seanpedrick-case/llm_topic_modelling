@@ -26,7 +26,7 @@ Basic use:
 
 # Installation guide
 
-Here is a step-by-step guide to clone the repository, create a virtual environment, and install dependencies from a relevant `requirements` file. This guide assumes you have **Git** and **Python 3.11** installed.
+Here is a step-by-step guide to clone the repository, create a virtual environment, and install dependencies from the relevant `requirements` file. This guide assumes you have **Git** and **Python 3.11** installed.
 
 -----
 
@@ -37,10 +37,8 @@ First, you need to copy the project files to your local machine. Navigate to the
 1.  **Clone the repo:**
 
     ```bash
-    git clone https://github.com/example-user/example-repo.git
+    git clone https://github.com/seanpedrick-case/llm_topic_modelling/example-repo.git
     ```
-
-    *Replace the URL with your repository's URL.*
 
 2.  **Navigate into the new project folder:**
 
@@ -91,20 +89,26 @@ Now that your virtual environment is active, you can install all the required pa
 
 1. **Choose the relevant requirements file**
 
+****NOTE:** To start, I advise installing using the **requirements_no_local.txt** file, which installs the app without local model inference. This approach is much simpler as a first step, and avoids issues with potentially complicated llama-cpp-python installation and GPU management described below.
+
 Llama-cpp-python version 3.16 is compatible with Gemma 3 and GPT-OSS models, but does not at the time of writing have relevant wheels for CPU inference or for Windows. A sister repository contains [llama-cpp-python 3.16 wheels for Python version 3.11/10](https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/tag/v0.1.0) so that users can avoid having to build the package from source. If you prefer to build from source, then please refer to the llama-cpp-python documentation [here](https://github.com/abetlen/llama-cpp-python). I also have a guide to building the package on a Windows system [here](https://github.com/seanpedrick-case/llm_topic_modelling/blob/main/windows_install_llama-cpp-python.txt).
 
 The repo provides several requirements files that are relevant for different situations. I would advise using requirements_gpu.txt for GPU environments, and requirements_cpu.txt for CPU environments:
 
-- **requirements_no_local**: Can be used to install the app without local model inference for a more lightweight installation.
+- **requirements_no_local.txt**: Can be used to install the app without local model inference for a more lightweight installation.
 - **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the requirements under 'Windows' for Windows compatibility (CUDA 12.4).
 - **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the requirements under 'Windows' for Windows compatibility. Make sure you have [Openblas](https://github.com/OpenMathLib/OpenBLAS) installed!
 - **requirements.txt**: Used for the Python 3.10 GPU-enabled environment on Hugging Face spaces (CUDA 12.4).
+
+The below instructions will guide you in how to install the GPU-enabled version of the app for local inference.
 
 2.  **Install packages from the requirements file:**
     ```bash
     pip install -r requirements_gpu.txt
     ```
     *This command reads every package name listed in the file and installs it into your `.venv` environment.*
+
+NOTE: If default llama-cpp-python installation does not work when installing from the above, go into the requirements_gpu.txt file and uncomment the lines to install a wheel for llama-cpp-python 0.3.16 relevant to your system.
 
 You're all set\! ✅ Your project is cloned, and all dependencies are installed in an isolated environment.
 

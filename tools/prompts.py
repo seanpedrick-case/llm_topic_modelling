@@ -183,3 +183,62 @@ New Topics table:"""
 # Text: {text}<end_of_turn>
 # <start_of_turn>model
 # Category:"""
+
+###
+# LLM-BASED TOPIC DEDUPLICATION PROMPTS
+###
+
+llm_deduplication_system_prompt = """You are an expert at analysing and consolidating topic categories. Your task is to identify semantically similar topics that should be merged together, even if they use different wording or synonyms."""
+
+llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
+
+Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
+- "Transportation issues" and "Public transport problems" 
+- "Housing costs" and "Rent prices"
+- "Environmental concerns" and "Green issues"
+
+Create a markdown table with the following columns:
+1. 'Original General topic' - The current general topic name
+2. 'Original Subtopic' - The current subtopic name  
+3. 'Original Sentiment' - The current sentiment
+4. 'Merged General topic' - The consolidated general topic name (use the most descriptive)
+5. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive)
+6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
+7. 'Merge Reason' - Brief explanation of why these topics should be merged
+
+Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table.
+
+Topics to analyse:
+{topics_table}
+
+Merged topics table:"""
+
+llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together, even if they use different wording.
+
+Additionally, you have been provided with a list of candidate topics that represent preferred topic categories. When merging topics, prioritise fitting similar topics into these existing candidate categories rather than creating new ones. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
+
+Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
+- "Transportation issues" and "Public transport problems" 
+- "Housing costs" and "Rent prices"
+- "Environmental concerns" and "Green issues"
+
+When merging topics, consider the candidate topics provided below and try to map similar topics to these preferred categories when possible.
+
+Create a markdown table with the following columns:
+1. 'Original General topic' - The current general topic name
+2. 'Original Subtopic' - The current subtopic name  
+3. 'Original Sentiment' - The current sentiment
+4. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar)
+5. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar)
+6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
+7. 'Merge Reason' - Brief explanation of why these topics should be merged
+
+Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table.
+
+Topics to analyse:
+{topics_table}
+
+Candidate topics to consider for mapping:
+{candidate_topics_table}
+
+Merged topics table:"""

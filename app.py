@@ -6,7 +6,7 @@ from datetime import datetime
 from tools.helper_functions import put_columns_in_df, get_connection_params, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, _get_env_list, move_overall_summary_output_files_to_front_page
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3
 from tools.llm_api_call import modify_existing_output_tables, wrapper_extract_topics_per_column_value, all_in_one_pipeline
-from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary
+from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, deduplicate_topics_llm, overall_summary
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
@@ -171,7 +171,7 @@ with app:
                     in_data_files, in_colnames, context_textbox, original_data_file_name_textbox, topic_extraction_output_files_xlsx, display_topic_table_markdown, output_messages_textbox, candidate_topics, produce_structured_summary_radio, in_group_col, batch_size_number,
                 ):
                     gr.Info(
-                        "Example data loaded. Now click on the 'All in one...' button below to run the full suite of topic extraction, deduplication, and summarisation."
+                        "Example data loaded. Now click on the 'Extract topics...' button below to run the full suite of topic extraction, deduplication, and summarisation."
                     )
 
         examples = gr.Examples(examples=\
@@ -251,24 +251,23 @@ with app:
 
     with gr.Tab(label="Advanced - Step by step topic extraction and summarisation"):
 
-        with gr.Accordion("1. Extract topics - go to first tab for file upload, model choice, and other settings before clicking this button", open = True):
+        with gr.Accordion("1. Extract topics - go to first tab for file upload, model choice, and other settings before clicking this button", open = False):
             context_textbox.render()
             extract_topics_btn = gr.Button("1. Extract topics", variant="secondary")
-            topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=False)
+            topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=False, height=FILE_INPUT_HEIGHT)
 
         with gr.Accordion("2. Modify topics from topic extraction", open = False):
             gr.Markdown("""Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to modify topics, deduplicate topics, or summarise the outputs. If you want pivot table outputs, please load in the original data file along with the selected open text column on the first tab before deduplicating or summarising.""")
 
-
-            modification_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to modify topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
+            modification_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload reference and unique topic files to modify topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
             modifiable_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=(4, "fixed"), row_count = (1, "fixed"), visible=True, type="pandas")
 
             save_modified_files_button = gr.Button(value="Save modified topic names")
 
-        with gr.Accordion("3. Deduplicate topics - upload reference data file and unique data files", open = False):            
+        with gr.Accordion("3. Deduplicate topics using fuzzy matching or LLMs", open = False):            
             ### DEDUPLICATION
-            deduplication_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to deduplicate topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
+            deduplication_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload reference and unique topic files to deduplicate topics. Optionally upload suggested topics on the first tab to match to these where possible with LLM deduplication", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
             deduplication_input_files_status = gr.Textbox(value = "", label="Previous file input", visible=False)
 
             with gr.Row():
@@ -276,11 +275,13 @@ with app:
                 merge_sentiment_drop = gr.Dropdown(label="Merge sentiment values together for duplicate subtopics.", value="No", choices=["Yes", "No"])                
                 deduplicate_score_threshold = gr.Number(label="Similarity threshold with which to determine duplicates.", value = 90, minimum=5, maximum=100, precision=0)
 
-            deduplicate_previous_data_btn = gr.Button("3. Deduplicate topics", variant="primary")
+            with gr.Row():
+                deduplicate_previous_data_btn = gr.Button("3. Deduplicate topics (Fuzzy matching)", variant="primary")
+                deduplicate_llm_previous_data_btn = gr.Button("3b. Deduplicate topics (LLM semantic)", variant="secondary")
 
         with gr.Accordion("4. Summarise topics", open = False):
             ### SUMMARISATION
-            summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
+            summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload reference and unique topic files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
             summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt])
             
@@ -475,6 +476,15 @@ with app:
     # When button pressed, deduplicate data
     deduplicate_previous_data_btn.click(load_in_previous_data_files, inputs=[deduplication_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
         success(deduplicate_topics, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, deduplicate_score_threshold, in_data_files, in_colnames, output_folder_state], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown], scroll_to_output=True, api_name="deduplicate_topics")
+    
+    # When LLM deduplication button pressed, deduplicate data using LLM
+    def deduplicate_topics_llm_wrapper(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics=None):
+        model_source = model_name_map[model_choice]["source"]
+        return deduplicate_topics_llm(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, model_source, None, None, None, None, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics)
+    
+    deduplicate_llm_previous_data_btn.click(load_in_previous_data_files, inputs=[deduplication_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
+        success(deduplicate_topics_llm_wrapper, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, model_choice, google_api_key_textbox, temperature_slide, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, in_data_files, in_colnames, output_folder_state, candidate_topics], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="deduplicate_topics_llm").\
+        success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs_llm_dedup")
     
     # When button pressed, summarise previous data
     summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, overall_summarisation_input_files]).\
