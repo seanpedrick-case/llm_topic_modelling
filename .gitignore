@@ -17,3 +17,4 @@ test_code/*
 config/*
 tmp/*
 unsloth_compiled_cache/*
+.vscode/*

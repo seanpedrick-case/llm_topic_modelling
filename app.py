@@ -314,8 +314,9 @@ with app:
             google_api_key_textbox = gr.Textbox(value = GEMINI_API_KEY, label="Enter Gemini API key (only if using Google API models)", lines=1, type="password")
 
         with gr.Accordion("Azure/OpenAI Inference", open = False):
-            azure_api_key_textbox = gr.Textbox(value = AZURE_OPENAI_API_KEY, label="Enter Azure/OpenAI Inference API key (only if using Azure/OpenAI models)", lines=1, type="password")
-            azure_endpoint_textbox = gr.Textbox(value = AZURE_OPENAI_INFERENCE_ENDPOINT, label="Enter Azure/OpenAI Inference endpoint URL (only if using Azure/OpenAI models)", lines=1)
+            with gr.Row():
+                azure_api_key_textbox = gr.Textbox(value = AZURE_OPENAI_API_KEY, label="Enter Azure/OpenAI Inference API key (only if using Azure/OpenAI models)", lines=1, type="password")
+                azure_endpoint_textbox = gr.Textbox(value = AZURE_OPENAI_INFERENCE_ENDPOINT, label="Enter Azure Inference endpoint URL (only if using Azure models)", lines=1)
 
         with gr.Accordion("Hugging Face token for downloading gated models", open = False):
             hf_api_key_textbox = gr.Textbox(value = HF_TOKEN, label="Enter Hugging Face API key (only for gated models that need a token to download)", lines=1, type="password")

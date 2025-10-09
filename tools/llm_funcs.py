@@ -685,13 +685,18 @@ def construct_azure_client(in_api_key: str, endpoint: str) -> Tuple[object, dict
         if not endpoint:
             endpoint = os.environ.get("AZURE_OPENAI_INFERENCE_ENDPOINT", "")
             if not endpoint:
-                raise Warning("No Azure/OpenAI inference endpoint found.")
+                # Assume using OpenAI API
+                client = OpenAI(
+                api_key=key,
+                )
+            else:
+                # Use the provided endpoint
+                client = OpenAI(
+                api_key=key,
+                base_url=f"{endpoint}",
+                )
 
-        # Use the provided endpoint instead of hardcoded value
-        client = OpenAI(
-        api_key=key,
-        base_url=f"{endpoint}",
-        )
+        
 
         return client, dict()
     except Exception as e:

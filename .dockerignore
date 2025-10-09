@@ -15,6 +15,7 @@ usage/*
 feedback/*
 test_code/*
 unsloth_compiled_cache/*
+.vscode/*
 input/
 output/
 logs/
