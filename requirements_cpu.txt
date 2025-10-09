@@ -19,7 +19,7 @@ torch==2.8.0 --extra-index-url https://download.pytorch.org/whl/cpu
 llama-cpp-python==0.3.16 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS"
 # Direct wheel links if above doesn't work
 # I have created CPU Linux, Python 3.11 compatible wheels:
-# llama-cpp-python==0.3.16 @ https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
+# https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
 # Windows, Python 3.11 compatible CPU wheels available:
-# llama-cpp-python==0.3.16 @ https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-win_amd64_cpu_openblas.whl
+# https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-win_amd64_cpu_openblas.whl
 # If above doesn't work for Windows, try looking at'windows_install_llama-cpp-python.txt' for instructions on how to build from source

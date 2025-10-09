@@ -29,6 +29,6 @@ llama-cpp-python==0.3.16 -C cmake.args="-DGGML_CUDA=on"
 # For Linux:
 # See files in https://github.com/abetlen/llama-cpp-python/releases/tag/v0.3.16-cu124 for different python versions
 # Python 3.11 compatible wheel: 
-# llama-cpp-python==0.3.16 @ https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
+# https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
 # For Windows, not available at above link. I have made a GPU Windows wheel for Python 3.11:
-# llama-cpp-python==0.3.16 @ https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-win_amd64.whl
+# https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-win_amd64.whl
