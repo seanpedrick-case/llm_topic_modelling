@@ -10,10 +10,7 @@ from typing import List, Tuple, TypeVar
 from google import genai as ai
 from google.genai import types
 from gradio import Progress
-
-from azure.ai.inference import ChatCompletionsClient
-from azure.core.credentials import AzureKeyCredential
-from azure.ai.inference.models import SystemMessage, UserMessage
+from openai import OpenAI
 
 model_type = None # global variable setup
 full_text = "" # Define dummy source text (full text) just to enable highlight function to load
@@ -674,27 +671,31 @@ def construct_gemini_generative_model(in_api_key: str, temperature: float, model
 
 def construct_azure_client(in_api_key: str, endpoint: str) -> Tuple[object, dict]:
     """
-    Constructs a ChatCompletionsClient for Azure AI Inference.
+    Constructs an OpenAI client for Azure/OpenAI AI Inference.
     """
     try:
         key = None
         if in_api_key:
             key = in_api_key
-        elif os.environ.get("AZURE_INFERENCE_CREDENTIAL"):
-            key = os.environ["AZURE_INFERENCE_CREDENTIAL"]
-        elif os.environ.get("AZURE_API_KEY"):
-            key = os.environ["AZURE_API_KEY"]
+        elif os.environ.get("AZURE_OPENAI_API_KEY"):
+            key = os.environ["AZURE_OPENAI_API_KEY"]
         if not key:
-            raise Warning("No Azure API key found.")
+            raise Warning("No Azure/OpenAI API key found.")
 
         if not endpoint:
-            endpoint = os.environ.get("AZURE_INFERENCE_ENDPOINT", "")
+            endpoint = os.environ.get("AZURE_OPENAI_INFERENCE_ENDPOINT", "")
             if not endpoint:
-                raise Warning("No Azure inference endpoint found.")
-        client = ChatCompletionsClient(endpoint=endpoint, credential=AzureKeyCredential(key))
-        return client, {}
+                raise Warning("No Azure/OpenAI inference endpoint found.")
+
+        # Use the provided endpoint instead of hardcoded value
+        client = OpenAI(
+        api_key=key,
+        base_url=f"{endpoint}",
+        )
+
+        return client, dict()
     except Exception as e:
-        print("Error constructing Azure ChatCompletions client:", e)
+        print("Error constructing Azure/OpenAI client:", e)
         raise
 
 def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice:str, bedrock_runtime:boto3.Session.client, assistant_prefill:str="") -> ResponseObject:
@@ -756,7 +757,15 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     )
 
     output_message = api_response['output']['message']
-    text = assistant_prefill + output_message['content'][0]['text']
+
+    if 'reasoningContent' in output_message['content'][0]:
+        # Extract the reasoning text
+        reasoning_text = output_message['content'][0]['reasoningContent']['reasoningText']['text']
+
+        # Extract the output text
+        text = assistant_prefill + output_message['content'][1]['text']
+    else:
+        text = assistant_prefill + output_message['content'][0]['text']
 
     # The usage statistics are neatly provided in the 'usage' key.
     usage = api_response['usage']
@@ -803,9 +812,6 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt}
         ]
-    #print("Conversation:", conversation)
-    #import pprint
-    #pprint.pprint(conversation)
 
     # 2. Apply the chat template
     # This function formats the conversation into the exact string Gemma 3 expects.
@@ -820,9 +826,6 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
             ).to("cuda")
     except Exception as e:
         print("Error applying chat template:", e)
-        print("Conversation type:", type(conversation))
-        for turn in conversation:
-            print("Turn type:", type(turn), "Content type:", type(turn.get("content")))
         raise
 
     # Map LlamaCPP parameters to transformers parameters
@@ -850,7 +853,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
 
     # Use speculative decoding if assistant model is available
     if speculative_decoding and assistant_model is not None:
-        print("Using speculative decoding with assistant model")
+        #print("Using speculative decoding with assistant model")
         outputs = model.generate(
             input_ids,
             assistant_model=assistant_model,
@@ -858,7 +861,7 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         streamer = streamer
         )
     else:
-        print("Generating without speculative decoding")
+        #print("Generating without speculative decoding")
         outputs = model.generate(
             input_ids,
             **generation_kwargs,
@@ -868,11 +871,9 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     end_time = time.time()
 
     # --- Decode and Display Results ---
-    #generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    # To get only the model's reply, we can decode just the newly generated tokens
     new_tokens = outputs[0][input_ids.shape[-1]:]
     assistant_reply = tokenizer.decode(new_tokens, skip_special_tokens=True)
-    #print("Assistant reply:", assistant_reply)
+
 
     num_input_tokens = input_ids.shape[-1]  # This gets the sequence length (number of tokens)
     num_generated_tokens = len(new_tokens)
@@ -887,12 +888,32 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     return assistant_reply, num_input_tokens, num_generated_tokens
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], google_client: ai.Client, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_model=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
-    """
-    This function sends a request to a language model with the given prompt, conversation history, model configuration, model choice, system prompt, and temperature.
-    It constructs the full prompt by appending the new user prompt to the conversation history, generates a response from the model, and updates the conversation history with the new prompt and response.
-    If the model choice is specific to AWS Claude, it calls the `call_aws_claude` function; otherwise, it uses the `client.models.generate_content` method.
-    The function returns the response text and the updated conversation history.
+def send_request(prompt: str, conversation_history: List[dict], client: ai.Client | OpenAI, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_model=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+    """Sends a request to a language model and manages the conversation history.
+
+    This function constructs the full prompt by appending the new user prompt to the conversation history,
+    generates a response from the model, and updates the conversation history with the new prompt and response.
+    It handles different model sources (Gemini, AWS, Local) and includes retry logic for API calls.
+
+    Args:
+        prompt (str): The user's input prompt to be sent to the model.
+        conversation_history (List[dict]): A list of dictionaries representing the ongoing conversation.
+                                           Each dictionary should have 'role' and 'parts' keys.
+        client (ai.Client): The API client object for the chosen model (e.g., Gemini `ai.Client`, or Azure/OpenAI `OpenAI`).
+        config (types.GenerateContentConfig): Configuration settings for content generation (e.g., Gemini `types.GenerateContentConfig`).
+        model_choice (str): The specific model identifier to use (e.g., "gemini-pro", "claude-v2").
+        system_prompt (str): An optional system-level instruction or context for the model.
+        temperature (float): Controls the randomness of the model's output, with higher values leading to more diverse responses.
+        bedrock_runtime (boto3.Session.client): The boto3 Bedrock runtime client object for AWS models.
+        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local").
+        local_model (list, optional): A list containing the local model and its tokenizer (if `model_source` is "Local"). Defaults to [].
+        tokenizer (object, optional): The tokenizer object for local models. Defaults to None.
+        assistant_model (object, optional): An optional assistant model used for speculative decoding with local models. Defaults to None.
+        assistant_prefill (str, optional): A string to pre-fill the assistant's response, useful for certain models like Claude. Defaults to "".
+        progress (Progress, optional): A progress object for tracking the operation, typically from `tqdm`. Defaults to Progress(track_tqdm=True).
+
+    Returns:
+        Tuple[str, List[dict]]: A tuple containing the model's response text and the updated conversation history.
     """
     # Constructing the full prompt from the conversation history
     full_prompt = "Conversation history:\n"
@@ -920,7 +941,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
             try:
                 print("Calling Gemini model, attempt", i + 1)
 
-                response = google_client.models.generate_content(model=model_choice, contents=full_prompt, config=config)
+                response = client.models.generate_content(model=model_choice, contents=full_prompt, config=config)
 
                 #print("Successful call to Gemini model.")
                 break
@@ -948,18 +969,29 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
-    elif "Azure" in model_source:
+    elif "Azure/OpenAI" in model_source:
         for i in progress_bar:
             try:
-                print("Calling Azure AI Inference model, attempt", i + 1)
-                # Use structured messages for Azure
-                response_raw = google_client.complete(
-                    messages=[
-                        SystemMessage(content=system_prompt),
-                        UserMessage(content=prompt),
-                    ],
-                    model=model_choice
+                print("Calling Azure/OpenAI inference model, attempt", i + 1)
+                
+                messages=[
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt,
+                            },
+                        ]
+
+                response_raw = client.chat.completions.create(
+                messages=messages,
+                model=model_choice,
+                temperature=temperature,
+                max_completion_tokens=max_tokens
                 )
+
                 response_text = response_raw.choices[0].message.content
                 usage = getattr(response_raw, "usage", None)
                 input_tokens = 0
@@ -973,7 +1005,7 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                 )
                 break
             except Exception as e:
-                print("Call to Azure model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
+                print("Call to Azure/OpenAI model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
                 time.sleep(timeout_wait)
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
@@ -993,7 +1025,6 @@ def send_request(prompt: str, conversation_history: List[dict], google_client: a
                     response, num_transformer_input_tokens, num_transformer_generated_tokens = call_transformers_model(prompt, system_prompt, gen_config, model=local_model, tokenizer=tokenizer, assistant_model=assistant_model)
                     response_text = response
 
-                #print("Successful call to local model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
@@ -1035,7 +1066,7 @@ system_prompt: str,
 conversation_history: List[dict],
 whole_conversation: List[str],
 whole_conversation_metadata: List[str],
-google_client: ai.Client,
+client: ai.Client | OpenAI,
 config: types.GenerateContentConfig,
 model_choice: str,
 temperature: float,
@@ -1056,7 +1087,7 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
         conversation_history (List[dict]): The history of the conversation.
         whole_conversation (List[str]): The complete conversation including prompts and responses.
         whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-        google_client (object): The google_client to use for processing the prompts.
+        client (object): The client to use for processing the prompts, from either Gemini or OpenAI client.
         config (dict): Configuration for the model.
         model_choice (str): The choice of model to use.        
         temperature (float): The temperature parameter for the model.
@@ -1077,22 +1108,15 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
 
     for prompt in prompts:
 
-        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, google_client=google_client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
+        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, client=client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
 
         responses.append(response)
         whole_conversation.append(system_prompt)
         whole_conversation.append(prompt)
         whole_conversation.append(response_text)
 
-        # Create conversation metadata
-        # if master == False:
-        #     whole_conversation_metadata.append(f"Batch {batch_no}:")
-        # else:
-        #     #whole_conversation_metadata.append(f"Query summary metadata:")
-
         whole_conversation_metadata.append(f"Batch {batch_no}:")
 
-        # if not isinstance(response, str):
         try:
             if "AWS" in model_source:
                 output_tokens = response.usage_metadata.get('outputTokens', 0)
@@ -1102,7 +1126,7 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
                 output_tokens = response.usage_metadata.candidates_token_count
                 input_tokens = response.usage_metadata.prompt_token_count
 
-            elif "Azure" in model_source:
+            elif "Azure/OpenAI" in model_source:
                 input_tokens = response.usage_metadata.get('inputTokens', 0)
                 output_tokens = response.usage_metadata.get('outputTokens', 0)
 
@@ -1123,9 +1147,6 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
 
         except KeyError as e:
             print(f"Key error: {e} - Check the structure of response.usage_metadata")
-        # else:
-        #     print("Response is a string object.")
-        #     whole_conversation_metadata.append("Length prompt: " + str(len(prompt)) + ". Length response: " + str(len(response)))
 
     return responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text
 
@@ -1134,8 +1155,8 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         conversation_history: List[dict],
                                         whole_conversation: List[str], 
                                         whole_conversation_metadata: List[str],
-                                        google_client: ai.Client,
-                                        google_config: types.GenerateContentConfig,
+                                        client: ai.Client | OpenAI,
+                                        client_config: types.GenerateContentConfig,
                                         model_choice: str, 
                                         temperature: float,
                                         reported_batch_no: int,
@@ -1157,8 +1178,8 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     - conversation_history (List[dict]): The history of the conversation.
     - whole_conversation (List[str]): The complete conversation including prompts and responses.
     - whole_conversation_metadata (List[str]): Metadata about the whole conversation.
-    - google_client (ai.Client): The Google client object for running Gemini API calls.
-    - google_config (types.GenerateContentConfig): Configuration for the model.
+    - client (ai.Client | OpenAI): The client object for running Gemini or Azure/OpenAI API calls.
+    - client_config (types.GenerateContentConfig): Configuration for the model.
     - model_choice (str): The choice of model to use.        
     - temperature (float): The temperature parameter for the model.
     - reported_batch_no (int): The reported batch number.
@@ -1179,13 +1200,13 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     call_temperature = temperature  # This is correct now with the fixed parameter name
 
     # Update Gemini config with the new temperature settings
-    google_config = types.GenerateContentConfig(temperature=call_temperature, max_output_tokens=max_tokens, seed=random_seed)
+    client_config = types.GenerateContentConfig(temperature=call_temperature, max_output_tokens=max_tokens, seed=random_seed)
 
     for attempt in range(MAX_OUTPUT_VALIDATION_ATTEMPTS):
         # Process requests to large language model
         responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
             batch_prompts, system_prompt, conversation_history, whole_conversation, 
-            whole_conversation_metadata, google_client, google_config, model_choice, 
+            whole_conversation_metadata, client, client_config, model_choice, 
             call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, tokenizer=tokenizer, master=master, assistant_prefill=assistant_prefill
         )
 
