@@ -37,7 +37,7 @@ First, you need to copy the project files to your local machine. Navigate to the
 1.  **Clone the repo:**
 
     ```bash
-    git clone https://github.com/seanpedrick-case/llm_topic_modelling/example-repo.git
+    git clone https://github.com/seanpedrick-case/llm_topic_modelling.git
     ```
 
 2.  **Navigate into the new project folder:**
