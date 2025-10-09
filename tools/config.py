@@ -76,7 +76,7 @@ if AWS_CONFIG_PATH:
         load_dotenv(AWS_CONFIG_PATH)
     else: print("AWS config file not found at location:", AWS_CONFIG_PATH)
 
-RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "1")
+RUN_AWS_FUNCTIONS = get_or_create_env_var("RUN_AWS_FUNCTIONS", "0")
 
 AWS_REGION = get_or_create_env_var('AWS_REGION', '')
 
@@ -210,7 +210,7 @@ DEDUPLICATION_THRESHOLD = int(get_or_create_env_var('DEDUPLICATION_THRESHOLD', '
 # Model options
 ###
 
-RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "1")
+RUN_LOCAL_MODEL = get_or_create_env_var("RUN_LOCAL_MODEL", "0")
 
 RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 
@@ -262,7 +262,7 @@ model_name_map = {
 # HF token may or may not be needed for downloading models from Hugging Face
 HF_TOKEN = get_or_create_env_var('HF_TOKEN', '')
 
-LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', 'True')
+LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', 'False')
 
 # If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
 LOW_VRAM_SYSTEM = get_or_create_env_var('LOW_VRAM_SYSTEM', 'False')
