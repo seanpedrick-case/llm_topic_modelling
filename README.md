@@ -43,13 +43,15 @@ First, you need to copy the project files to your local machine. Navigate to the
 2.  **Navigate into the new project folder:**
 
     ```bash
-    cd example-repo
+    cd llm_topic_modelling
     ```
 -----
 
 ### Step 2: Create and Activate a Virtual Environment
 
 A virtual environment is a self-contained directory that holds a specific Python interpreter and its own set of installed packages. This is crucial for isolating your project's dependencies.
+
+NOTE: Alternatively you could also create and activate a Conda environment instead of using venv below.
 
 1.  **Create the virtual environment:** We'll use Python's built-in `venv` module. It's common practice to name the environment folder `.venv`.
 
