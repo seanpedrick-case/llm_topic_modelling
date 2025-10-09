@@ -9,12 +9,12 @@ import markdown
 import boto3
 from tqdm import tqdm
 import os
-
-from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group, summary_assistant_prefill
-from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
-from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details
+from tools.llm_api_call import generate_zero_shot_topics_df
+from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_descriptions_system_prompt, system_prompt, summarise_everything_prompt, comprehensive_summary_format_prompt, summarise_everything_system_prompt, comprehensive_summary_format_prompt_by_group, summary_assistant_prefill, llm_deduplication_system_prompt, llm_deduplication_prompt, llm_deduplication_prompt_with_candidates
+from tools.llm_funcs import construct_gemini_generative_model, process_requests, ResponseObject, load_model, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, send_request, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
+from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details, read_file
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -156,17 +156,16 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
 
+
     if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic_number"].unique()) == 1):
         print("Data file outputs are too short for deduplicating. Returning original data.")
 
-        reference_file_out_path = output_folder + reference_table_file_name
+        reference_file_out_path = output_folder + reference_table_file_name 
         unique_topics_file_out_path = output_folder + unique_topics_table_file_name
 
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
-        return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown                   
-
-    
+        return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown
 
     # For checking that data is not lost during the process
     initial_unique_references = len(reference_df["Response References"].unique())
@@ -375,6 +374,341 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(index=False)
 
     return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown
+
+def deduplicate_topics_llm(reference_df:pd.DataFrame,
+                          topic_summary_df:pd.DataFrame,
+                          reference_table_file_name:str,
+                          unique_topics_table_file_name:str,
+                          model_choice:str,
+                          in_api_key:str,
+                          temperature:float,
+                          model_source:str,
+                          bedrock_runtime=None,
+                          local_model=None,
+                          tokenizer=None,
+                          assistant_model=None,
+                          in_excel_sheets:str="",
+                          merge_sentiment:str="No",
+                          merge_general_topics:str="No",
+                          in_data_files:List[str]=list(),
+                          chosen_cols:List[str]="",
+                          output_folder:str=OUTPUT_FOLDER,
+                          candidate_topics=None
+                          ):
+    '''
+    Deduplicate topics using LLM semantic understanding to identify and merge similar topics.
+
+    Args:
+        reference_df (pd.DataFrame): DataFrame containing reference data with topics.
+        topic_summary_df (pd.DataFrame): DataFrame summarizing unique topics.
+        reference_table_file_name (str): Base file name for the output reference table.
+        unique_topics_table_file_name (str): Base file name for the output unique topics table.
+        model_choice (str): The LLM model to use for deduplication.
+        in_api_key (str): API key for the LLM service.
+        temperature (float): Temperature setting for the LLM.
+        model_source (str): Source of the model (AWS, Gemini, Local, etc.).
+        bedrock_runtime: AWS Bedrock runtime client (if using AWS).
+        local_model: Local model instance (if using local model).
+        tokenizer: Tokenizer for local model.
+        assistant_model: Assistant model for speculative decoding.
+        in_excel_sheets (str, optional): Comma-separated list of Excel sheet names to load. Defaults to "".
+        merge_sentiment (str, optional): Whether to merge topics regardless of sentiment ("Yes" or "No"). Defaults to "No".
+        merge_general_topics (str, optional): Whether to merge topics across different general topics ("Yes" or "No"). Defaults to "No".
+        in_data_files (List[str], optional): List of input data file paths. Defaults to [].
+        chosen_cols (List[str], optional): List of chosen columns from the input data files. Defaults to "".
+        output_folder (str, optional): Folder path to save output files. Defaults to OUTPUT_FOLDER.
+        candidate_topics (optional): Candidate topics file for zero-shot guidance. Defaults to None.
+    '''
+
+    
+    output_files = list()
+    log_output_files = list()
+    file_data = pd.DataFrame()
+    deduplicated_unique_table_markdown = ""
+
+    # Check if data is too short for deduplication
+    if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic_number"].unique()) == 1):
+        print("Data file outputs are too short for deduplicating. Returning original data.")
+
+        #print("reference_df:", reference_df)
+        #print("topic_summary_df:", topic_summary_df)
+        
+        reference_file_out_path = output_folder + reference_table_file_name
+        unique_topics_file_out_path = output_folder + unique_topics_table_file_name
+        
+        output_files.append(reference_file_out_path)
+        output_files.append(unique_topics_file_out_path)
+        return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown
+
+    # For checking that data is not lost during the process
+    initial_unique_references = len(reference_df["Response References"].unique())
+
+    # Create topic summary if it doesn't exist
+    if topic_summary_df.empty:
+        topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
+        
+        # Merge topic numbers back to the original dataframe
+        reference_df = reference_df.merge(
+            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            on=['General topic', 'Subtopic', 'Sentiment'],
+            how='left'
+        )
+
+    # Load data files if provided
+    if in_data_files and chosen_cols:
+        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(in_data_files, chosen_cols, 1, in_excel_sheets)
+    else:
+        out_message = "No file data found, pivot table output will not be created."
+        print(out_message)
+
+    # Process candidate topics if provided
+    candidate_topics_table = ""
+    if candidate_topics is not None:
+        try:
+            
+            
+            # Read and process candidate topics
+            candidate_topics_df = read_file(candidate_topics.name)
+            candidate_topics_df = candidate_topics_df.fillna("")
+            candidate_topics_df = candidate_topics_df.astype(str)
+            
+            # Generate zero-shot topics DataFrame
+            zero_shot_topics_df = generate_zero_shot_topics_df(candidate_topics_df, "No", False)
+            
+            if not zero_shot_topics_df.empty:
+                candidate_topics_table = zero_shot_topics_df[['General topic', 'Subtopic']].to_markdown(index=False)
+                print(f"Found {len(zero_shot_topics_df)} candidate topics to consider during deduplication")
+        except Exception as e:
+            print(f"Error processing candidate topics: {e}")
+            candidate_topics_table = ""
+
+    # Prepare topics table for LLM analysis
+    topics_table = topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Number of responses']].to_markdown(index=False)
+    
+    # Format the prompt with candidate topics if available
+    if candidate_topics_table:
+        formatted_prompt = llm_deduplication_prompt_with_candidates.format(
+            topics_table=topics_table, 
+            candidate_topics_table=candidate_topics_table
+        )
+    else:
+        formatted_prompt = llm_deduplication_prompt.format(topics_table=topics_table)
+    
+    # Initialise conversation history
+    conversation_history = []
+    whole_conversation = []
+    whole_conversation_metadata = []
+    
+    # Set up model clients based on model source
+    if "Gemini" in model_source:
+        google_client, config = construct_gemini_generative_model(
+            in_api_key, temperature, model_choice, llm_deduplication_system_prompt, 
+            max_tokens, LLM_SEED
+        )
+        bedrock_runtime = None
+    elif "AWS" in model_source:
+        if not bedrock_runtime:
+            bedrock_runtime = boto3.client('bedrock-runtime')
+        google_client = None
+        config = None
+    elif "Azure" in model_source:
+        google_client, config = construct_azure_client(in_api_key, "")
+        bedrock_runtime = None
+    elif "Local" in model_source:
+        google_client = None
+        config = None
+        bedrock_runtime = None
+    else:
+        raise ValueError(f"Unsupported model source: {model_source}")
+
+    # Call LLM to get deduplication suggestions
+    print("Calling LLM for topic deduplication analysis...")
+    
+    # Use the existing call_llm_with_markdown_table_checks function
+    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(
+        batch_prompts=[formatted_prompt],
+        system_prompt=llm_deduplication_system_prompt,
+        conversation_history=conversation_history,
+        whole_conversation=whole_conversation,
+        whole_conversation_metadata=whole_conversation_metadata,
+        google_client=google_client,
+        google_config=config,
+        model_choice=model_choice,
+        temperature=temperature,
+        reported_batch_no=1,
+        local_model=local_model,
+        tokenizer=tokenizer,
+        bedrock_runtime=bedrock_runtime,
+        model_source=model_source,
+        MAX_OUTPUT_VALIDATION_ATTEMPTS=3,
+        assistant_prefill="",
+        master=False,
+        CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
+        random_seed=LLM_SEED
+    )
+
+    # Generate debug files if enabled
+    if OUTPUT_DEBUG_FILES == "True":
+        try:
+            # Create batch file path details for debug files
+            batch_file_path_details = get_file_name_no_ext(reference_table_file_name) + "_llm_dedup"
+            model_choice_clean_short = model_choice.replace("/", "_").replace(":", "_").replace(".", "_")
+            
+            # Create full prompt for debug output
+            full_prompt = llm_deduplication_system_prompt + "\n" + formatted_prompt
+            
+            # Write debug files
+            current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(
+                OUTPUT_DEBUG_FILES, 
+                output_folder, 
+                batch_file_path_details, 
+                model_choice_clean_short, 
+                full_prompt, 
+                response_text, 
+                whole_conversation, 
+                whole_conversation_metadata, 
+                log_output_files, 
+                task_type="llm_deduplication"
+            )
+            
+            print(f"Debug files written for LLM deduplication analysis")
+            
+        except Exception as e:
+            print(f"Error writing debug files for LLM deduplication: {e}")
+
+    # Parse the LLM response to extract merge suggestions
+    merge_suggestions_df = pd.DataFrame()  # Initialize empty DataFrame for analysis results
+    num_merges_applied = 0
+    
+    try:
+        # Extract the markdown table from the response
+        table_match = re.search(r'\|.*\|.*\n\|.*\|.*\n(\|.*\|.*\n)*', response_text, re.MULTILINE)
+        if table_match:
+            table_text = table_match.group(0)
+            
+            # Convert markdown table to DataFrame
+            from io import StringIO
+            merge_suggestions_df = pd.read_csv(StringIO(table_text), sep='|', skipinitialspace=True)
+            
+            # Clean up the DataFrame
+            merge_suggestions_df = merge_suggestions_df.dropna(axis=1, how='all')  # Remove empty columns
+            merge_suggestions_df.columns = merge_suggestions_df.columns.str.strip()
+            
+            # Remove rows where all values are NaN
+            merge_suggestions_df = merge_suggestions_df.dropna(how='all')
+            
+            if not merge_suggestions_df.empty:
+                print(f"LLM identified {len(merge_suggestions_df)} potential topic merges")
+                
+                # Apply the merges to the reference_df
+                for _, row in merge_suggestions_df.iterrows():
+                    original_general = row.get('Original General topic', '').strip()
+                    original_subtopic = row.get('Original Subtopic', '').strip()
+                    original_sentiment = row.get('Original Sentiment', '').strip()
+                    merged_general = row.get('Merged General topic', '').strip()
+                    merged_subtopic = row.get('Merged Subtopic', '').strip()
+                    merged_sentiment = row.get('Merged Sentiment', '').strip()
+                    
+                    if all([original_general, original_subtopic, original_sentiment, 
+                           merged_general, merged_subtopic, merged_sentiment]):
+                        
+                        # Find matching rows in reference_df
+                        mask = (
+                            (reference_df['General topic'] == original_general) &
+                            (reference_df['Subtopic'] == original_subtopic) &
+                            (reference_df['Sentiment'] == original_sentiment)
+                        )
+                        
+                        if mask.any():
+                            # Update the matching rows
+                            reference_df.loc[mask, 'General topic'] = merged_general
+                            reference_df.loc[mask, 'Subtopic'] = merged_subtopic
+                            reference_df.loc[mask, 'Sentiment'] = merged_sentiment
+                            num_merges_applied += 1
+                            print(f"Merged: {original_general} | {original_subtopic} | {original_sentiment} -> {merged_general} | {merged_subtopic} | {merged_sentiment}")
+            else:
+                print("No merge suggestions found in LLM response")
+        else:
+            print("No markdown table found in LLM response")
+            
+    except Exception as e:
+        print(f"Error parsing LLM response: {e}")
+        print("Continuing with original data...")
+
+    # Update reference summary column with all summaries
+    reference_df["Summary"] = reference_df.groupby(
+        ["Response References", "General topic", "Subtopic", "Sentiment"]
+    )["Summary"].transform(' <br> '.join)
+
+    # Check that we have not inadvertently removed some data during the process
+    end_unique_references = len(reference_df["Response References"].unique())
+
+    if initial_unique_references != end_unique_references:
+        raise Exception(f"Number of unique references changed during processing: Initial={initial_unique_references}, Final={end_unique_references}")
+    
+    # Drop duplicates in the reference table
+    reference_df.drop_duplicates(['Response References', 'General topic', 'Subtopic', 'Sentiment'], inplace=True)
+
+    # Remake topic_summary_df based on new reference_df
+    topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
+
+    # Merge the topic numbers back to the original dataframe
+    reference_df = reference_df.merge(
+        topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic_number']],
+        on=['General topic', 'Subtopic', 'Sentiment', 'Group'],
+        how='left'
+    )
+
+    # Create pivot table if file data is available
+    if not file_data.empty:
+        basic_response_data = get_basic_response_data(file_data, chosen_cols)            
+        reference_df_pivot = convert_reference_table_to_pivot_table(reference_df, basic_response_data)
+
+        reference_pivot_file_path = output_folder + get_file_name_no_ext(reference_table_file_name) + "_pivot_dedup.csv"
+        reference_df_pivot.to_csv(reference_pivot_file_path, index=None, encoding='utf-8-sig')
+        log_output_files.append(reference_pivot_file_path)
+
+    # Save analysis results CSV if merge suggestions were found
+    if not merge_suggestions_df.empty:
+        analysis_results_file_path = output_folder + get_file_name_no_ext(reference_table_file_name) + "_llm_analysis_results.csv"
+        merge_suggestions_df.to_csv(analysis_results_file_path, index=None, encoding='utf-8-sig')
+        log_output_files.append(analysis_results_file_path)
+        print(f"Analysis results saved to: {analysis_results_file_path}")
+
+    # Save output files
+    reference_file_out_path = output_folder + get_file_name_no_ext(reference_table_file_name) + "_dedup.csv"
+    unique_topics_file_out_path = output_folder + get_file_name_no_ext(unique_topics_table_file_name) + "_dedup.csv"
+    reference_df.to_csv(reference_file_out_path, index=None, encoding='utf-8-sig')
+    topic_summary_df.to_csv(unique_topics_file_out_path, index=None, encoding='utf-8-sig')
+
+    output_files.append(reference_file_out_path)
+    output_files.append(unique_topics_file_out_path)
+
+    # Outputs for markdown table output
+    topic_summary_df_revised_display = topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+    deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(index=False)
+
+    # Calculate token usage and timing information for logging
+    total_input_tokens = 0
+    total_output_tokens = 0
+    number_of_calls = 1  # Single LLM call for deduplication
+    
+    # Extract token usage from conversation metadata
+    if whole_conversation_metadata:
+        for metadata in whole_conversation_metadata:
+            if "input_tokens:" in metadata and "output_tokens:" in metadata:
+                try:
+                    input_tokens = int(metadata.split("input_tokens: ")[1].split(" ")[0])
+                    output_tokens = int(metadata.split("output_tokens: ")[1].split(" ")[0])
+                    total_input_tokens += input_tokens
+                    total_output_tokens += output_tokens
+                except (ValueError, IndexError):
+                    pass
+
+    # Calculate estimated time taken (rough estimate based on token usage)
+    estimated_time_taken = (total_input_tokens + total_output_tokens) / 1000  # Rough estimate in seconds
+
+    return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown, total_input_tokens, total_output_tokens, number_of_calls, estimated_time_taken#, num_merges_applied
 
 def sample_reference_table_summaries(reference_df:pd.DataFrame,
                                      random_seed:int,
