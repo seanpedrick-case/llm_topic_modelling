@@ -435,7 +435,8 @@ with app:
                 azure_endpoint_textbox,
                 output_folder_state,
                 logged_content_df,
-                additional_summary_instructions_textbox],
+                additional_summary_instructions_textbox,
+                additional_validation_issues_textbox],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -611,7 +612,8 @@ with app:
                 model_name_map_state,
                 usage_logs_state,
                 logged_content_df,
-                additional_summary_instructions_textbox
+                additional_summary_instructions_textbox,
+                additional_validation_issues_textbox
             ],
             outputs=[
                 display_topic_table_markdown,

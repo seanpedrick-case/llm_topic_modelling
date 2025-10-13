@@ -1042,24 +1042,40 @@ def write_llm_output_and_logs(response_text: str,
 
         if produce_structured_summary_radio != "Yes": summary = row_number_string_start + summary
 
+        # Check if the 'references' list exists and is not empty
+
         if references:
             existing_reference_numbers = True
-            # Create a new entry for each reference number
+            
+            # We process one reference at a time to create one dictionary entry per reference.
             for ref in references:
-                # Add start_row back onto reference_number
-                if batch_basic_response_df.empty:
-                    try:
-                        response_ref_no =  str(int(ref) + int(start_row))
-                    except ValueError:
-                        print("Reference is not a number")
-                        continue
-                else:
-                    try:                    
-                        response_ref_no =  batch_basic_response_df.loc[batch_basic_response_df["Reference"]==str(ref), "Original Reference"].iloc[0]
-                    except ValueError:
-                        print("Reference is not a number")
-                        continue
+                # This variable will hold the final reference number for the current 'ref'
+                response_ref_no = None 
 
+                # Now, we decide how to calculate 'response_ref_no' for the current 'ref'
+                if batch_basic_response_df.empty:
+                    # --- Scenario 1: The DataFrame is empty, so we calculate the reference ---
+                    try:
+                        response_ref_no = str(int(ref) + int(start_row))
+                    except ValueError:
+                        print(f"Reference '{ref}' is not a number and was skipped.")
+                        continue # Skip to the next 'ref' in the loop
+                
+                else:
+                    # --- Scenario 2: The DataFrame is NOT empty, so we look up the reference ---
+                    matching_series = batch_basic_response_df.loc[batch_basic_response_df["Reference"] == str(ref), "Original Reference"]
+
+                    if not matching_series.empty:
+                        # If found, get the first match
+                        response_ref_no = matching_series.iloc[0]
+                    else:
+                        # If not found, report it and skip this reference
+                        print(f"Reference '{ref}' not found in the DataFrame.")
+                        continue # Skip to the next 'ref' in the loop
+
+
+                # This code runs for every *valid* reference that wasn't skipped by 'continue'.
+                # It uses the 'response_ref_no' calculated in the if/else block above.
                 reference_data.append({
                     'Response References': response_ref_no,
                     'General topic': topic,
@@ -1068,10 +1084,12 @@ def write_llm_output_and_logs(response_text: str,
                     'Summary': summary,
                     "Start row of group": start_row_reported
                 })
+
+        # This 'else' corresponds to the 'if references:' at the top
         else:
+            # This block runs only if the 'references' list was empty or None to begin with
             existing_reference_numbers = False
-            # In this case, set to 0 to show that this applies to no specific reference number
-            response_ref_no = 0
+            response_ref_no = 0 # Default value when no references are provided
 
             reference_data.append({
                 'Response References': response_ref_no,
@@ -1372,6 +1390,7 @@ def extract_topics(in_data_file: gr.FileData,
               max_rows:int=max_rows,
               original_full_file_name:str="",
               additional_instructions_summary_format:str="",
+              additional_validation_issues_provided:str="",
               output_debug_files:str=output_debug_files,
               progress=Progress(track_tqdm=True)):
 
@@ -1428,6 +1447,7 @@ def extract_topics(in_data_file: gr.FileData,
     - max_rows: The maximum number of rows to process.
     - original_full_file_name: The original full file name.
     - additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
+    - additional_validation_issues_provided: Additional validation issues provided by the user.
     - output_debug_files (str, optional): Flag indicating whether to output debug files ("True" or "False").
     - progress (Progress): A progress tracker.
 
@@ -1878,6 +1898,7 @@ def extract_topics(in_data_file: gr.FileData,
                 force_single_topic_radio=force_single_topic_radio,
                 context_textbox=context_textbox,
                 additional_instructions_summary_format=additional_instructions_summary_format,
+                additional_validation_issues_provided=additional_validation_issues_provided,
                 output_folder=output_folder,
                 output_debug_files=output_debug_files,
                 original_full_file_name=original_full_file_name,
@@ -2013,6 +2034,7 @@ def wrapper_extract_topics_per_column_value(
     output_folder: str = OUTPUT_FOLDER,
     existing_logged_content:list=list(),
     additional_instructions_summary_format:str="",
+    additional_validation_issues_provided:str="",
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
@@ -2068,6 +2090,7 @@ def wrapper_extract_topics_per_column_value(
     :param existing_logged_content: A list of existing logged content.
     :param force_single_topic_prompt: Prompt for forcing a single topic.
     :param additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
+    :param additional_validation_issues_provided: Additional validation issues provided by the user.
     :param max_tokens: Maximum tokens for LLM generation.
     :param model_name_map: Dictionary mapping model names to their properties.
     :param max_time_for_loop: Maximum time allowed for the processing loop.
@@ -2255,6 +2278,7 @@ def wrapper_extract_topics_per_column_value(
                 existing_logged_content=all_groups_logged_content,
                 original_full_file_name=original_file_name,
                 additional_instructions_summary_format=additional_instructions_summary_format,
+                additional_validation_issues_provided=additional_validation_issues_provided,
                 progress=progress
             )
 
@@ -2529,6 +2553,7 @@ def all_in_one_pipeline(
     usage_logs_location: str = "",
     existing_logged_content:list=list(),
     additional_instructions_summary_format:str="",
+    additional_validation_issues_provided:str="",
     model: object = None,
     tokenizer: object = None,
     assistant_model: object = None,    
@@ -2584,6 +2609,7 @@ def all_in_one_pipeline(
         usage_logs_location (str, optional): Location for usage logs. Defaults to "".
         existing_logged_content (list, optional): Existing logged content. Defaults to list().
         additional_instructions_summary_format (str, optional): Summary format for adding existing topics. Defaults to "".
+        additional_validation_issues_provided (str, optional): Additional validation issues provided by the user. Defaults to "".
         model (object, optional): Loaded local model object. Defaults to None.
         tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.
         assistant_model (object, optional): Loaded local assistant model object. Defaults to None.
@@ -2674,7 +2700,8 @@ def all_in_one_pipeline(
         tokenizer=tokenizer,
         assistant_model=assistant_model,
         max_rows=max_rows,
-        additional_instructions_summary_format=additional_instructions_summary_format
+        additional_instructions_summary_format=additional_instructions_summary_format,
+        additional_validation_issues_provided=additional_validation_issues_provided
     )
 
     total_input_tokens += out_input_tokens
@@ -2817,6 +2844,8 @@ def all_in_one_pipeline(
         aws_secret_key_textbox=aws_secret_key_text,
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
+        azure_endpoint_textbox=azure_endpoint_text,
+        additional_summary_instructions_provided=additional_instructions_summary_format,
         local_model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,
@@ -2863,6 +2892,7 @@ def all_in_one_pipeline(
         aws_secret_key_textbox=aws_secret_key_text,
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
+        azure_endpoint_textbox=azure_endpoint_text,
         local_model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,

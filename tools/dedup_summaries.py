@@ -967,6 +967,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             hf_api_key_textbox:str='',
                             azure_endpoint_textbox:str='',
                             existing_logged_content:list=list(),
+                            additional_summary_instructions_provided:str="",
                             output_debug_files:str=output_debug_files,
                             reasoning_suffix:str=reasoning_suffix,
                             local_model:object=None, 
@@ -1001,6 +1002,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
         model_name_map (dict, optional): Dictionary mapping model choices to their properties. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
+        azure_endpoint_textbox (str, optional): Azure endpoint. Defaults to empty string.
+        additional_summary_instructions_provided (str, optional): Additional summary instructions provided by the user. Defaults to empty string.
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
         output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
@@ -1099,11 +1102,13 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
         model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
 
+        combined_summary_instructions = summarise_format_radio + ". " + additional_summary_instructions_provided
+
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
 
             summary_text = all_summaries[summary_no]
-            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
+            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=combined_summary_instructions)]
 
             formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols,consultation_context=context_textbox)
 
