@@ -17,22 +17,18 @@ initial_table_assistant_prefill = "|"
 
 default_response_reference_format = "In the next column named 'Response References', list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column."
 
-single_response_reference_format = "In the next column named 'Placeholder', write the number 1 alongside each subtopic and no other text." # Deprecated. Instead now, no prompt is provided, and column is filled automatically with '1'
-
-initial_table_prompt = """Your task is to create one new markdown table based on open text responses in the reponse table below.
+initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table based on open text responses in the reponse table below.
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
 In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty.
-{sentiment_choices}
-{response_reference_format}
+{sentiment_choices}{response_reference_format}
 In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Response table: 
 {response_table}
 
-New table:"""
+New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"""
 
-# Return only one table in markdown format containing all relevant topics. Do not repeat Subtopics with the same Sentiment. 
 
 ###
 # Adding existing topics to consultation responses
@@ -44,14 +40,13 @@ add_existing_topics_assistant_prefill = "|"
 
 force_existing_topics_prompt = """Create a new markdown table. In the first column named 'Placeholder', write 'Not assessed'. In the second column named 'Subtopics', assign Topics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
 
-allow_new_topics_prompt = """Create a new markdown table. In the first column named 'General topic', and the second column named 'Subtopic', assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic, Subtopic, or Sentiment for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
+allow_new_topics_prompt = """Create a new markdown table. In the first column named 'General topic', and the second column named 'Subtopic', assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic and Subtopic for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
 
 force_single_topic_prompt = """ Assign each response to one single topic only."""
 
-add_existing_topics_prompt = """Your task is to create one new markdown table, assigning responses from the Response table below to topics.
+add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
-{sentiment_choices}
-{response_reference_format}
+{sentiment_choices}{response_reference_format}
 In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
@@ -61,19 +56,41 @@ Responses are shown in the following Response table:
 Topics known to be relevant to this dataset are shown in the following Topics table: 
 {topics}
 
+New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"""
+
+###
+# VALIDATION PROMPTS
+###
+# These are prompts used to validate previous LLM outputs, and create corrected versions of the outputs if errors are found.
+
+validation_prompt_prefix_default = """The following instructions were previously provided to create an output table:\n'"""
+
+previous_table_introduction_default = """'\n\nThe following output table was created based on the above instructions:\n"""
+
+validation_prompt_suffix_default = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
+
+- Remove rows where topics are not relevant to any responses in the provided response table.
+- Assign responses to topics from the provided suggested topics table if relevant (only choose from the provided list, do not create new topics).
+- Remove Response References for responses that are incorrectly assigned to topics.
+- If a response has no topic assigned, check if there is a relevant topic in the provided suggested topics table. If so, assign the response to the relevant topic.
+- Correct incorrect information in the summary column from the response text.{additional_validation_issues}
+- Any other obvious errors that you can identify.
+
+With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, return the original table.
+
 New table:"""
 
 ###
 # SENTIMENT CHOICES
 ###
 
-negative_neutral_positive_sentiment_prompt = "In the third column named 'Sentiment', write the sentiment of the Subtopic: Negative, Neutral, or Positive"
-negative_or_positive_sentiment_prompt = "In the third column named 'Sentiment', write the sentiment of the Subtopic: Negative or Positive"
-do_not_assess_sentiment_prompt = "In the third column named 'Sentiment', write the text 'Not assessed'" # Not used anymore. Instead, the column is filled in automatically with 'Not assessed'
-default_sentiment_prompt = "In the third column named 'Sentiment', write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+negative_neutral_positive_sentiment_prompt = "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+negative_or_positive_sentiment_prompt = "write the sentiment of the Subtopic: Negative or Positive"
+do_not_assess_sentiment_prompt = "write the text 'Not assessed'" # Not used anymore. Instead, the column is filled in automatically with 'Not assessed'
+default_sentiment_prompt = "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
 
 ###
-# STRUCTURE SUMMARY PROMPT
+# STRUCTURED SUMMARY PROMPT
 ###
 
 structured_summary_prompt = """Your task is to write a structured summary for open text responses.  
@@ -125,15 +142,76 @@ Your task is to summarise the above table. {summary_format}. Return only the sum
 
 Summary:"""
 
-comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table. Structure the summary with General Topics as headings, with significant Subtopics described in bullet points below them in order of relative significance. Do not explicitly mention the Sentiment, Number of responses, or Group values. Do not use the words 'General topic' or 'Subtopic' directly in the summary."
+comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table. Structure the summary with General Topics as headings, with significant Subtopics described in bullet points below them in order of relative significance. Do not explicitly mention the Sentiment, Number of responses, or Group values. Do not use the words 'General topic' or 'Subtopic' directly in the summary. Format the output for Excel display using: **bold text** for main headings, • bullet points for sub-items, and line breaks between sections. Avoid markdown symbols like # or ##."
 
-comprehensive_summary_format_prompt_by_group = "Return a comprehensive summary that covers all the important topics and themes described in the table. Structure the summary with General Topics as headings, with significant Subtopics described in bullet points below them in order of relative significance. Do not explicitly mention the Sentiment, Number of responses, or Group values. Do not use the words 'General topic' or 'Subtopic' directly in the summary. Compare and contrast differences between the topics and themes from each Group."
+comprehensive_summary_format_prompt_by_group = "Return a comprehensive summary that covers all the important topics and themes described in the table. Structure the summary with General Topics as headings, with significant Subtopics described in bullet points below them in order of relative significance. Do not explicitly mention the Sentiment, Number of responses, or Group values. Do not use the words 'General topic' or 'Subtopic' directly in the summary. Compare and contrast differences between the topics and themes from each Group. Format the output for Excel display using: **bold text** for main headings, • bullet points for sub-items, and line breaks between sections. Avoid markdown symbols like # or ##."
 
+# Alternative Excel formatting options
+excel_rich_text_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table. Structure the summary with General Topics as headings, with significant Subtopics described in bullet points below them in order of relative significance. Do not explicitly mention the Sentiment, Number of responses, or Group values. Do not use the words 'General topic' or 'Subtopic' directly in the summary. Format for Excel using: BOLD for main headings, bullet points (•) for sub-items, and line breaks between sections. Use simple text formatting that Excel can interpret."
 
-
+excel_plain_text_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the table. Structure the summary with General Topics as headings, with significant Subtopics described in bullet points below them in order of relative significance. Do not explicitly mention the Sentiment, Number of responses, or Group values. Do not use the words 'General topic' or 'Subtopic' directly in the summary. Format as plain text with clear structure: use ALL CAPS for main headings, bullet points (•) for sub-items, and line breaks between sections. Avoid any special formatting symbols."
 
 ###
-# VERIFY EXISTING DESCRIPTIONS/TITLES
+# LLM-BASED TOPIC DEDUPLICATION PROMPTS
+###
+
+llm_deduplication_system_prompt = """You are an expert at analysing and consolidating topic categories. Your task is to identify semantically similar topics that should be merged together, even if they use different wording or synonyms."""
+
+llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
+
+Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
+- "Transportation issues" and "Public transport problems" 
+- "Housing costs" and "Rent prices"
+- "Environmental concerns" and "Green issues"
+
+Create a markdown table with the following columns:
+1. 'Original General topic' - The current general topic name
+2. 'Original Subtopic' - The current subtopic name  
+3. 'Original Sentiment' - The current sentiment
+4. 'Merged General topic' - The consolidated general topic name (use the most descriptive)
+5. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive)
+6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
+7. 'Merge Reason' - Brief explanation of why these topics should be merged
+
+Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
+
+Topics to analyse:
+{topics_table}
+
+Merged topics table:"""
+
+llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together, even if they use different wording.
+
+Additionally, you have been provided with a list of candidate topics that represent preferred topic categories. When merging topics, prioritise fitting similar topics into these existing candidate categories rather than creating new ones. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
+
+Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
+- "Transportation issues" and "Public transport problems" 
+- "Housing costs" and "Rent prices"
+- "Environmental concerns" and "Green issues"
+
+When merging topics, consider the candidate topics provided below and try to map similar topics to these preferred categories when possible.
+
+Create a markdown table with the following columns:
+1. 'Original General topic' - The current general topic name
+2. 'Original Subtopic' - The current subtopic name  
+3. 'Original Sentiment' - The current sentiment
+4. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar)
+5. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar)
+6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
+7. 'Merge Reason' - Brief explanation of why these topics should be merged
+
+Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
+
+Topics to analyse:
+{topics_table}
+
+Candidate topics to consider for mapping:
+{candidate_topics_table}
+
+Merged topics table:"""
+
+###
+# VERIFY EXISTING DESCRIPTIONS/TITLES - Currently not used
 ###
 
 verify_assistant_prefill = "|"
@@ -166,79 +244,3 @@ Your task is to create a General topic name for each Subtopic. The new Topics ta
 
 New Topics table:"""
 
-# example_instruction_prompt_llama3 = """<|start_header_id|>system<|end_header_id|>\n
-# You are an AI assistant that follows instruction extremely well. Help as much as you can.<|eot_id|><|start_header_id|>user<|end_header_id|>\n
-# Summarise the following text in less than {length} words: "{text}"\n
-# Summary:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"""
-
-# example_instruction_prompt_phi3 = """<|user|>\n
-# Answer the QUESTION using information from the following CONTENT. Respond with short answers that directly answer the question.\n
-# CONTENT: {summaries}\n
-# QUESTION: {question}\n
-# Answer:<|end|>\n
-# <|assistant|>"""
-
-# example_instruction_prompt_gemma = """<start_of_turn>user
-# Categorise the following text into only one of the following categories that seems most relevant: 'cat1', 'cat2', 'cat3', 'cat4'. Answer only with the choice of category. Do not add any other text. Do not explain your choice.
-# Text: {text}<end_of_turn>
-# <start_of_turn>model
-# Category:"""
-
-###
-# LLM-BASED TOPIC DEDUPLICATION PROMPTS
-###
-
-llm_deduplication_system_prompt = """You are an expert at analysing and consolidating topic categories. Your task is to identify semantically similar topics that should be merged together, even if they use different wording or synonyms."""
-
-llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
-
-Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
-- "Transportation issues" and "Public transport problems" 
-- "Housing costs" and "Rent prices"
-- "Environmental concerns" and "Green issues"
-
-Create a markdown table with the following columns:
-1. 'Original General topic' - The current general topic name
-2. 'Original Subtopic' - The current subtopic name  
-3. 'Original Sentiment' - The current sentiment
-4. 'Merged General topic' - The consolidated general topic name (use the most descriptive)
-5. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive)
-6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
-7. 'Merge Reason' - Brief explanation of why these topics should be merged
-
-Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table.
-
-Topics to analyse:
-{topics_table}
-
-Merged topics table:"""
-
-llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together, even if they use different wording.
-
-Additionally, you have been provided with a list of candidate topics that represent preferred topic categories. When merging topics, prioritise fitting similar topics into these existing candidate categories rather than creating new ones. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
-
-Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
-- "Transportation issues" and "Public transport problems" 
-- "Housing costs" and "Rent prices"
-- "Environmental concerns" and "Green issues"
-
-When merging topics, consider the candidate topics provided below and try to map similar topics to these preferred categories when possible.
-
-Create a markdown table with the following columns:
-1. 'Original General topic' - The current general topic name
-2. 'Original Subtopic' - The current subtopic name  
-3. 'Original Sentiment' - The current sentiment
-4. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar)
-5. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar)
-6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
-7. 'Merge Reason' - Brief explanation of why these topics should be merged
-
-Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table.
-
-Topics to analyse:
-{topics_table}
-
-Candidate topics to consider for mapping:
-{candidate_topics_table}
-
-Merged topics table:"""

@@ -3,17 +3,16 @@ import os
 import gradio as gr
 import pandas as pd
 from datetime import datetime
-from tools.helper_functions import put_columns_in_df, get_connection_params, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, _get_env_list, move_overall_summary_output_files_to_front_page, update_model_choice
+from tools.helper_functions import put_columns_in_df, get_connection_params, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, move_overall_summary_output_files_to_front_page, update_model_choice
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3
-from tools.llm_api_call import modify_existing_output_tables, wrapper_extract_topics_per_column_value, all_in_one_pipeline
+from tools.llm_api_call import modify_existing_output_tables, wrapper_extract_topics_per_column_value, all_in_one_pipeline, validate_topics_wrapper
 from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, deduplicate_topics_llm, overall_summary
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
 from tools.example_table_outputs import dummy_consultation_table, case_notes_table, dummy_consultation_table_zero_shot, case_notes_table_grouped, case_notes_table_structured_summary
 from tools.prompts import initial_table_prompt, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
-# from tools.verify_titles import verify_titles
-from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, FILE_INPUT_HEIGHT, GEMINI_API_KEY, BATCH_SIZE_DEFAULT, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY, SHOW_EXAMPLES, HF_TOKEN, AZURE_OPENAI_API_KEY, AZURE_OPENAI_INFERENCE_ENDPOINT, LLM_TEMPERATURE, model_name_map, default_model_choice, default_source_models, default_model_source, model_sources, ensure_folder_exists
+from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, FILE_INPUT_HEIGHT, GEMINI_API_KEY, BATCH_SIZE_DEFAULT, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY, SHOW_EXAMPLES, HF_TOKEN, AZURE_OPENAI_API_KEY, AZURE_OPENAI_INFERENCE_ENDPOINT, LLM_TEMPERATURE, model_name_map, default_model_choice, default_source_models, default_model_source, model_sources, ensure_folder_exists, SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES
 
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
@@ -29,7 +28,10 @@ today_rev = datetime.now().strftime("%Y%m%d")
 # Placeholders for example variables
 in_data_files = gr.File(height=FILE_INPUT_HEIGHT, label="Choose Excel or csv files", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the open text column of interest. In an Excel file, this shows columns across all sheets.", allow_custom_value=True, interactive=True)
-context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')")
+if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
+    context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')", visible=True)
+else:
+    context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')", visible=False)
 topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file. CSV outputs are available on the 'Advanced' tab.", scale=1, interactive=False, file_count="multiple")
 display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
 output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
@@ -90,6 +92,12 @@ with app:
     input_tokens_num = gr.Textbox('0', visible=False, label="Total input tokens")
     output_tokens_num = gr.Textbox('0', visible=False, label="Total output tokens")
     number_of_calls_num = gr.Textbox('0', visible=False, label="Total LLM calls")
+    
+    # Additional UI components for validation
+    max_tokens_num = gr.Number(value=8192, visible=False, label="Max tokens")
+    reasoning_suffix_textbox = gr.Textbox(value="", visible=False, label="Reasoning suffix")
+    output_debug_files_radio = gr.Radio(value="False", choices=["True", "False"], visible=False, label="Output debug files")
+    max_time_for_loop_num = gr.Number(value=99999, visible=False, label="Max time for loop")
 
     # Summary state objects
     summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="summary_reference_table_sample_state", visible=False, type="pandas")
@@ -99,7 +107,6 @@ with app:
     summarised_references_markdown = gr.Markdown("", visible=False)
     summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of summarised outputs", allow_custom_value=True)
     latest_summary_completed_num = gr.Number(0, visible=False)
-    add_existing_topics_summary_format_textbox = gr.Textbox(value="", visible=False, label="Add existing topics summary format")
 
     summary_xlsx_output_files_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of xlsx summary output files", allow_custom_value=True)
 
@@ -125,7 +132,7 @@ with app:
 
     latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
     # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
-    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)   
+    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
 
     ###
     # UI LAYOUT
@@ -191,8 +198,7 @@ with app:
                 produce_structured_summary_radio.render()
         
         with gr.Accordion("Response sentiment analysis", open = False):
-            sentiment_checkbox = gr.Radio(label="Response sentiment analysis", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])
-        
+            sentiment_checkbox = gr.Radio(label="Response sentiment analysis", value="Negative or Positive", choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"])     
 
         if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
             with gr.Accordion("Assign task to cost code", open = True, visible=True):
@@ -208,7 +214,7 @@ with app:
         all_in_one_btn = gr.Button("Extract topics, deduplicate, and summarise", variant="primary")
         
         with gr.Row(equal_height=True):
-            output_messages_textbox.render()       
+            output_messages_textbox.render()     
                                    
             topic_extraction_output_files_xlsx.render()               
 
@@ -218,17 +224,30 @@ with app:
         data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the topic extraction.",
                 choices=["The results were good", "The results were not good"], visible=False)
         data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
-        data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)        
+        data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
 
         with gr.Row():
             s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
 
     with gr.Tab(label="Advanced - Step by step topic extraction and summarisation"):
 
-        with gr.Accordion("1. Extract topics - go to first tab for file upload, model choice, and other settings before clicking this button", open = False):
+        with gr.Accordion("1. Extract topics - go to first tab for file upload, model choice, and other settings before clicking this button", open = True):
             context_textbox.render()
+            if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":                
+                additional_summary_instructions_textbox = gr.Textbox(value="", visible=True, label="Additional summary instructions")
+            else:
+                additional_summary_instructions_textbox = gr.Textbox(value="", visible=False, label="Additional summary instructions")
+
             extract_topics_btn = gr.Button("1. Extract topics", variant="secondary")
             topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=False, height=FILE_INPUT_HEIGHT)
+            
+        with gr.Accordion("1b. Validate topics - run validation on previously extracted topics", open = False):
+            if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":                
+                additional_validation_issues_textbox = gr.Textbox(value="", visible=True, label="Additional validation issues for the model to consider (bullet-point list)")
+            else:
+                additional_validation_issues_textbox = gr.Textbox(value="", visible=False, label="Additional validation issues for the model to consider (bullet-point list)")
+            validate_topics_btn = gr.Button("1b. Validate topics", variant="secondary")
+            validation_output_files = gr.File(label="Validation output files", scale=1, interactive=False, height=FILE_INPUT_HEIGHT)
 
         with gr.Accordion("2. Modify topics from topic extraction", open = False):
             gr.Markdown("""Load in previously completed Extract Topics output files ('reference_table', and 'unique_topics' files) to modify topics, deduplicate topics, or summarise the outputs. If you want pivot table outputs, please load in the original data file along with the selected open text column on the first tab before deduplicating or summarising.""")
@@ -257,7 +276,7 @@ with app:
             ### SUMMARISATION
             summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload reference and unique topic files to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
-            summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt])
+            summarise_format_radio = gr.Radio(label="Choose summary type (Note: this will also use the custom summary instructions from step 1 above if provided)", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt])
             
             summarise_previous_data_btn = gr.Button("4. Summarise topics", variant="primary")
             with gr.Row():
@@ -341,7 +360,7 @@ with app:
 
         with gr.Accordion("Export output files to xlsx format", open = False, visible=False):
             export_xlsx_btn = gr.Button("Export output files to xlsx format", variant="primary")
-            out_xlsx_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx files will go here.")        
+            out_xlsx_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx files will go here.")
 
         # Invisible text box to hold the session hash/username just for logging purposes
         session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible=False) 
@@ -371,6 +390,8 @@ with app:
 
         cost_code_choice_drop.select(update_cost_code_dataframe_from_dropdown_select, inputs=[cost_code_choice_drop, cost_code_dataframe_base], outputs=[cost_code_dataframe])
     
+    
+
     # Extract topics
     extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, working_data_file_name_textbox, display_topic_table_markdown, summary_output_files, summarisation_input_files, overall_summarisation_input_files, overall_summary_output_files]).\
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
@@ -414,7 +435,7 @@ with app:
                 azure_endpoint_textbox,
                 output_folder_state,
                 logged_content_df,
-                add_existing_topics_summary_format_textbox],
+                additional_summary_instructions_textbox],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -437,8 +458,65 @@ with app:
                 number_of_calls_num,
                 output_messages_textbox,
                 logged_content_df],
-                api_name="extract_topics", show_progress_on=output_messages_textbox).\
+                api_name="extract_topics", show_progress_on=[output_messages_textbox, topic_extraction_output_files]).\
                 success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs").\
+                then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list])
+
+    # Validate topics
+    validate_topics_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
+    success(load_in_data_file, 
+        inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches]).\
+        success(fn=validate_topics_wrapper,
+        inputs=[file_data_state,
+                master_reference_df_state,
+                master_unique_topics_df_state,
+                logged_content_df,
+                working_data_file_name_textbox,
+                in_colnames,
+                batch_size_number,
+                model_choice,
+                google_api_key_textbox,
+                temperature_slide,
+                max_tokens_num,
+                azure_api_key_textbox,
+                azure_endpoint_textbox,
+                reasoning_suffix_textbox,
+                in_group_col,
+                produce_structured_summary_radio,
+                force_zero_shot_radio,
+                force_single_topic_radio,
+                context_textbox,
+                additional_summary_instructions_textbox,
+                output_folder_state,
+                output_debug_files_radio,
+                original_data_file_name_textbox,
+                additional_validation_issues_textbox,
+                max_time_for_loop_num,
+                sentiment_checkbox],
+        outputs=[display_topic_table_markdown,
+                master_topic_df_state,
+                master_unique_topics_df_state,
+                master_reference_df_state,
+                validation_output_files,
+                text_output_file_list_state,
+                latest_batch_completed,
+                log_files_output,
+                log_files_output_list_state,
+                conversation_metadata_textbox,
+                estimated_time_taken_number,
+                deduplication_input_files,
+                summarisation_input_files,
+                modifiable_unique_topics_df_state,
+                modification_input_files,
+                in_join_files,
+                missing_df_state,
+                input_tokens_num,
+                output_tokens_num,
+                number_of_calls_num,
+                output_messages_textbox,
+                logged_content_df],
+                api_name="validate_topics", show_progress_on=[output_messages_textbox, validation_output_files]).\
+                success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs_validation").\
                 then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list])
 
     ###
@@ -459,6 +537,7 @@ with app:
         model_source = model_name_map[model_choice]["source"]
         return deduplicate_topics_llm(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, model_source, None, None, None, None, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics, azure_endpoint)
     
+
     deduplicate_llm_previous_data_btn.click(load_in_previous_data_files, inputs=[deduplication_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
         success(deduplicate_topics_llm_wrapper, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, model_choice, google_api_key_textbox, temperature_slide, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, in_data_files, in_colnames, output_folder_state, candidate_topics, azure_endpoint_textbox], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="deduplicate_topics_llm").\
         success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs_llm_dedup")
@@ -479,12 +558,11 @@ with app:
             success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False).\
             then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list])
 
-    
     # All in one button
     # Extract topics - deduplicate and summarise using default settings
     all_in_one_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, working_data_file_name_textbox, display_topic_table_markdown, summary_output_files, summarisation_input_files, overall_summarisation_input_files, overall_summary_output_files]).\
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
-    success(load_in_data_file,                           
+    success(load_in_data_file,                
         inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches], api_name="load_data").\
         success(fn=all_in_one_pipeline,
             inputs=[
@@ -533,7 +611,7 @@ with app:
                 model_name_map_state,
                 usage_logs_state,
                 logged_content_df,
-                add_existing_topics_summary_format_textbox
+                additional_summary_instructions_textbox
             ],
             outputs=[
                 display_topic_table_markdown,

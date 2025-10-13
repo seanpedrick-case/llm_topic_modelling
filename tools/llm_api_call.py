@@ -1,10 +1,8 @@
 import os
 import pandas as pd
-import numpy as np
 import gradio as gr
 import markdown
 import time
-import boto3
 import json
 import string
 import re
@@ -13,18 +11,13 @@ from tqdm import tqdm
 from gradio import Progress
 from typing import List, Tuple, Any
 from io import StringIO
-GradioFileData = gr.FileData
-
-from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt
-from tools.helper_functions import read_file, put_columns_in_df, wrap_text, initial_clean, load_in_data_file, load_in_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, move_overall_summary_output_files_to_front_page, generate_zero_shot_topics_df
-from tools.llm_funcs import ResponseObject, construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
-from tools.config import RUN_LOCAL_MODEL, AWS_REGION, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, AZURE_OPENAI_INFERENCE_ENDPOINT, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
+from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt, validation_prompt_prefix_default, previous_table_introduction_default, validation_prompt_suffix_default
+from tools.helper_functions import read_file, put_columns_in_df, wrap_text, load_in_data_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, generate_zero_shot_topics_df, clean_column_name, create_topic_summary_df_from_reference_table
+from tools.llm_funcs import construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
+from tools.config import RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, ENABLE_VALIDATION
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary, process_debug_output_iteration
-from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 
-if RUN_LOCAL_MODEL == "1":
-    from tools.llm_funcs import load_model
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -38,6 +31,8 @@ reasoning_suffix = REASONING_SUFFIX
 max_rows = MAX_ROWS
 maximum_zero_shot_topics = MAXIMUM_ZERO_SHOT_TOPICS
 output_debug_files = OUTPUT_DEBUG_FILES
+
+max_text_length = 500
 
 ### HELPER FUNCTIONS
 
@@ -53,6 +48,588 @@ def normalise_string(text:str):
     
     return text
 
+
+def validate_topics(
+    file_data: pd.DataFrame,
+    reference_df: pd.DataFrame,
+    topic_summary_df: pd.DataFrame,
+    logged_content: list,
+    file_name: str,
+    chosen_cols: List[str],
+    batch_size: int,
+    model_choice: str,
+    in_api_key: str,
+    temperature: float,
+    max_tokens: int,
+    azure_api_key_textbox: str = "",
+    azure_endpoint_textbox: str = "",
+    reasoning_suffix: str = "",
+    group_name: str = "All",
+    produce_structured_summary_radio: str = "No",
+    force_zero_shot_radio: str = "No",
+    force_single_topic_radio: str = "No",
+    context_textbox: str = "",
+    additional_instructions_summary_format: str = "",
+    output_folder: str = OUTPUT_FOLDER,
+    output_debug_files: str = "False",
+    original_full_file_name: str = "",
+    additional_validation_issues_provided: str = "",
+    max_time_for_loop: int = MAX_TIME_FOR_LOOP,
+    sentiment_checkbox: str = "Negative or Positive",
+    progress = gr.Progress(track_tqdm=True)
+) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
+    """
+    Validates topics by re-running the topic extraction process on all batches
+    using the consolidated topics from the original run.
+    
+    Parameters:
+    - file_data (pd.DataFrame): The input data to validate
+    - reference_df (pd.DataFrame): The reference dataframe from the original run
+    - topic_summary_df (pd.DataFrame): The topic summary dataframe from the original run
+    - logged_content (list): The logged content from the original run
+    - file_name (str): Name of the file being processed
+    - chosen_cols (List[str]): Columns to process
+    - batch_size (int): Size of each batch
+    - model_choice (str): The model to use for validation
+    - in_api_key (str): API key for the model
+    - temperature (float): Temperature for the model
+    - max_tokens (int): Maximum tokens for the model
+    - azure_api_key_textbox (str): Azure API key if using Azure
+    - azure_endpoint_textbox (str): Azure endpoint if using Azure
+    - reasoning_suffix (str): Suffix for reasoning
+    - group_name (str): Name of the group
+    - produce_structured_summary_radio (str): Whether to produce structured summaries
+    - force_zero_shot_radio (str): Whether to force zero-shot
+    - force_single_topic_radio (str): Whether to force single topic
+    - context_textbox (str): Context for the validation
+    - additional_instructions_summary_format (str): Additional instructions
+    - output_folder (str): Output folder for files
+    - output_debug_files (str): Whether to output debug files
+    - original_full_file_name (str): Original file name
+    - additional_validation_issues_provided (str): Additional validation issues provided
+    - max_time_for_loop (int): Maximum time for the loop
+    - progress: Progress bar object
+    
+    Returns:
+    - Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]: Updated reference_df, topic_summary_df, logged_content, conversation_metadata_str, total_input_tokens, total_output_tokens, total_llm_calls
+    """
+    print("Starting validation process...")
+    
+    # Calculate number of batches
+    num_batches = (len(file_data) + batch_size - 1) // batch_size
+    
+    # Initialize model components
+    model_choice_clean = model_name_map[model_choice]['short_name']
+    model_source = model_name_map[model_choice]["source"]
+    
+    # Initialize model objects
+    local_model = None
+    tokenizer = None
+    bedrock_runtime = None
+    
+    # Load local model if needed
+    if (model_name_map[model_choice]["source"] == "Local") & (RUN_LOCAL_MODEL == "1"):
+        local_model = get_model()
+        tokenizer = get_tokenizer()
+    
+    # Set up bedrock runtime if needed
+    if model_source == "Bedrock":
+        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, "", "")
+    
+    # Clean file name for output
+    file_name_clean = clean_column_name(file_name, max_length=20, front_characters=False)
+    in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+    
+    # Create validation-specific logged content lists
+    validation_all_prompts_content = list()
+    validation_all_summaries_content = list()
+    validation_all_conversation_content = list()
+    validation_all_metadata_content = list()
+    validation_all_groups_content = list()
+    validation_all_batches_content = list()
+    validation_all_model_choice_content = list()
+    validation_all_validated_content = list()
+    validation_all_task_type_content = list()
+    validation_all_file_names_content = list()
+    
+    # Extract previous summaries from logged content for validation
+    all_responses_content = [item.get('response', '') for item in logged_content if 'response' in item]
+    
+    # Initialize validation dataframes
+    validation_reference_df = reference_df.copy()
+    validation_topic_summary_df = topic_summary_df.copy()
+
+    sentiment_prefix = "In the next column named 'Sentiment', "
+    sentiment_suffix = "."
+    if sentiment_checkbox == "Negative, Neutral, or Positive": sentiment_prompt = sentiment_prefix + negative_neutral_positive_sentiment_prompt + sentiment_suffix
+    elif sentiment_checkbox == "Negative or Positive": sentiment_prompt = sentiment_prefix + negative_or_positive_sentiment_prompt + sentiment_suffix
+    elif sentiment_checkbox == "Do not assess sentiment": sentiment_prompt = "" # Just remove line completely. Previous: sentiment_prefix + do_not_assess_sentiment_prompt + sentiment_suffix
+    else: sentiment_prompt = sentiment_prefix + default_sentiment_prompt + sentiment_suffix
+
+    
+    
+    # Validation loop through all batches
+    validation_latest_batch_completed = 0
+    validation_loop = progress.tqdm(range(num_batches), total=num_batches, desc="Validating topic extraction batches", unit="validation batches")
+    
+    tic = time.perf_counter()
+    
+    for validation_i in validation_loop:
+        validation_reported_batch_no = validation_latest_batch_completed + 1
+        print("Running validation batch:", validation_reported_batch_no)
+        
+        # Call the function to prepare the input table for validation
+        validation_simplified_csv_table_path, validation_normalised_simple_markdown_table, validation_start_row, validation_end_row, validation_batch_basic_response_df = data_file_to_markdown_table(
+            file_data, file_name, chosen_cols, validation_latest_batch_completed, batch_size
+        )
+        
+        if validation_batch_basic_response_df.shape[0] == 1: 
+            validation_response_reference_format = ""
+        else: 
+            validation_response_reference_format = "\n" + default_response_reference_format
+        
+        # If the validation batch of responses contains at least one instance of text
+        if not validation_batch_basic_response_df.empty:
+            
+            # Get the previous table from all_responses_content for this batch
+            if validation_latest_batch_completed < len(all_responses_content):
+                previous_table_content = all_responses_content[validation_latest_batch_completed]
+            else:
+                previous_table_content = ""
+            
+            # Always use the consolidated topics from the first run for validation
+            validation_formatted_system_prompt = add_existing_topics_system_prompt.format(
+                consultation_context=context_textbox, column_name=chosen_cols
+            )
+            
+            # Use the accumulated topic summary from previous validation batches (or initial if first batch)
+            validation_existing_topic_summary_df = validation_topic_summary_df.copy()
+            validation_existing_topic_summary_df["Number of responses"] = ""
+            validation_existing_topic_summary_df.fillna("", inplace=True)
+            validation_existing_topic_summary_df["General topic"] = validation_existing_topic_summary_df["General topic"].str.replace('(?i)^Nan$', '', regex=True)
+            validation_existing_topic_summary_df["Subtopic"] = validation_existing_topic_summary_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
+            validation_existing_topic_summary_df = validation_existing_topic_summary_df.drop_duplicates()
+            
+            # Create topics table to be presented to LLM for validation
+            validation_keep_cols = [
+                col for col in ["General topic", "Subtopic", "Description"]
+                if col in validation_existing_topic_summary_df.columns
+                and not validation_existing_topic_summary_df[col].replace(r'^\s*$', pd.NA, regex=True).isna().all()
+            ]
+            
+            validation_topics_df_for_markdown = validation_existing_topic_summary_df[validation_keep_cols].drop_duplicates(validation_keep_cols)
+            if "General topic" in validation_topics_df_for_markdown.columns and "Subtopic" in validation_topics_df_for_markdown.columns:
+                validation_topics_df_for_markdown = validation_topics_df_for_markdown.sort_values(["General topic", "Subtopic"])
+            
+            if "Description" in validation_existing_topic_summary_df:
+                if validation_existing_topic_summary_df['Description'].isnull().all():
+                    validation_existing_topic_summary_df.drop("Description", axis=1, inplace=True)
+            
+            if produce_structured_summary_radio == "Yes":
+                if "General topic" in validation_topics_df_for_markdown.columns:
+                    validation_topics_df_for_markdown = validation_topics_df_for_markdown.rename(columns={"General topic":"Main heading"})
+                if "Subtopic" in validation_topics_df_for_markdown.columns:
+                    validation_topics_df_for_markdown = validation_topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"})
+            
+            validation_unique_topics_markdown = validation_topics_df_for_markdown.to_markdown(index=False)
+            validation_unique_topics_markdown = normalise_string(validation_unique_topics_markdown)
+            
+            if force_zero_shot_radio == "Yes": 
+                validation_topic_assignment_prompt = force_existing_topics_prompt
+            else: 
+                validation_topic_assignment_prompt = allow_new_topics_prompt
+            
+            # Should the outputs force only one single topic assignment per response?
+            if force_single_topic_radio != "Yes": 
+                validation_force_single_topic_prompt = ""
+            else:
+                validation_topic_assignment_prompt = validation_topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")
+
+            # Provide new validation issues on a new line if provided
+            if additional_validation_issues_provided:
+                additional_validation_issues_provided = "\n" + additional_validation_issues_provided
+            
+            # Format the validation prompt with the response table and topics
+            if produce_structured_summary_radio != "Yes":
+                validation_formatted_summary_prompt = add_existing_topics_prompt.format(
+                    validate_prompt_prefix=validation_prompt_prefix_default,
+                    response_table=validation_normalised_simple_markdown_table,
+                    topics=validation_unique_topics_markdown,
+                    topic_assignment=validation_topic_assignment_prompt,
+                    force_single_topic=validation_force_single_topic_prompt,
+                    sentiment_choices=sentiment_prompt,
+                    response_reference_format=validation_response_reference_format,
+                    add_existing_topics_summary_format=additional_instructions_summary_format,
+                    previous_table_introduction=previous_table_introduction_default,
+                    previous_table=previous_table_content,
+                    validate_prompt_suffix=validation_prompt_suffix_default.format(additional_validation_issues=additional_validation_issues_provided)
+                )
+            else:
+                validation_formatted_summary_prompt = structured_summary_prompt.format(
+                    response_table=validation_normalised_simple_markdown_table,
+                    topics=validation_unique_topics_markdown, 
+                    summary_format=additional_instructions_summary_format
+                )
+            
+            validation_batch_file_path_details = f"{file_name_clean}_val_batch_{validation_latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"
+            
+            # Use the helper function to process the validation batch
+            validation_new_topic_df, validation_new_reference_df, validation_new_topic_summary_df, validation_is_error, validation_current_prompt_content_logged, validation_current_summary_content_logged, validation_current_conversation_content_logged, validation_current_metadata_content_logged, validation_topic_table_out_path, validation_reference_table_out_path, validation_topic_summary_df_out_path = process_batch_with_llm(
+                is_first_batch=False,
+                formatted_system_prompt=validation_formatted_system_prompt,
+                formatted_prompt=validation_formatted_summary_prompt,
+                batch_file_path_details=validation_batch_file_path_details,
+                model_source=model_source,
+                model_choice=model_choice,
+                in_api_key=in_api_key,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                azure_api_key_textbox=azure_api_key_textbox,
+                azure_endpoint_textbox=azure_endpoint_textbox,
+                reasoning_suffix=reasoning_suffix,
+                local_model=local_model,
+                tokenizer=tokenizer,
+                bedrock_runtime=bedrock_runtime,
+                reported_batch_no=validation_reported_batch_no,
+                response_text="",
+                whole_conversation=list(),
+                all_metadata_content=list(),
+                start_row=validation_start_row,
+                end_row=validation_end_row,
+                model_choice_clean=model_choice_clean,
+                log_files_output_paths=list(),
+                existing_reference_df=validation_reference_df,
+                existing_topic_summary_df=validation_existing_topic_summary_df,
+                batch_size=batch_size,
+                batch_basic_response_df=validation_batch_basic_response_df,
+                group_name=group_name,
+                produce_structured_summary_radio=produce_structured_summary_radio,
+                output_folder=output_folder,
+                output_debug_files=output_debug_files,
+                task_type="Validation",
+                assistant_prefill=add_existing_topics_assistant_prefill
+            )
+            
+            # Collect conversation metadata from validation batch
+            if validation_current_metadata_content_logged:
+                validation_all_metadata_content.append(validation_current_metadata_content_logged)
+            
+            validation_all_prompts_content.append(validation_current_prompt_content_logged)
+            validation_all_summaries_content.append(validation_current_summary_content_logged)
+            validation_all_conversation_content.append(validation_current_conversation_content_logged)
+            validation_all_groups_content.append(group_name)
+            validation_all_batches_content.append(f"Validation {validation_reported_batch_no}:")
+            validation_all_model_choice_content.append(model_choice_clean_short)
+            validation_all_validated_content.append("Yes")
+            validation_all_task_type_content.append("Validation")
+            validation_all_file_names_content.append(original_full_file_name)
+            
+            # Update validation dataframes with validation results
+            validation_reference_df = validation_new_reference_df.dropna(how='all')
+            validation_topic_summary_df = validation_new_topic_summary_df.dropna(how='all')
+            validation_topics_table = validation_new_topic_df.dropna(how='all')
+            
+        else:
+            print("Current validation batch of responses contains no text, moving onto next. Batch number:", str(validation_latest_batch_completed + 1), ". Start row:", validation_start_row, ". End row:", validation_end_row)
+        
+        # Increase validation batch counter
+        validation_latest_batch_completed += 1
+        
+        # Check if we've exceeded max time for validation loop
+        validation_toc = time.perf_counter()
+        validation_final_time = validation_toc - tic
+        
+        if validation_final_time > max_time_for_loop:
+            print("Max time reached during validation, breaking validation loop.")
+            if progress:
+                validation_loop.close()
+                tqdm._instances.clear()
+            break
+    
+    # Combine validation logged content
+    validation_all_logged_content = [
+        {"prompt": prompt, "response": summary, "metadata": metadata, "batch": batch, "model_choice": model_choice, "validated": validated, "group": group, "task_type": task_type, "file_name": file_name}
+        for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(validation_all_prompts_content, validation_all_summaries_content, validation_all_metadata_content, validation_all_batches_content, validation_all_model_choice_content, validation_all_validated_content, validation_all_groups_content, validation_all_task_type_content, validation_all_file_names_content)
+    ]
+   
+    # Append validation content to original logged content
+    updated_logged_content = list(logged_content) + list(validation_all_logged_content)
+    
+    # Combine validation conversation metadata
+    validation_conversation_metadata_str = ' '.join(validation_all_metadata_content)
+    
+    # Ensure consistent Topic number assignment by recreating topic_summary_df from reference_df
+    if not validation_reference_df.empty:
+        validation_topic_summary_df = create_topic_summary_df_from_reference_table(validation_reference_df)
+    
+    print("Validation process completed.")
+    
+    return validation_reference_df, validation_topic_summary_df, updated_logged_content, validation_conversation_metadata_str
+
+# Define validation wrapper function
+def validate_topics_wrapper(
+    file_data: pd.DataFrame,
+    reference_df: pd.DataFrame,
+    topic_summary_df: pd.DataFrame,
+    logged_content: List[dict],
+    file_name: str,
+    chosen_cols: List[str],
+    batch_size: int,
+    model_choice: str,
+    in_api_key: str,
+    temperature: float,
+    max_tokens: int,
+    azure_api_key_textbox: str,
+    azure_endpoint_textbox: str,
+    reasoning_suffix: str,
+    group_name: str,
+    produce_structured_summary_radio: str,
+    force_zero_shot_radio: str,
+    force_single_topic_radio: str,
+    context_textbox: str,
+    additional_instructions_summary_format: str,
+    output_folder: str,
+    output_debug_files: str,
+    original_full_file_name: str,
+    additional_validation_issues_provided: str,
+    max_time_for_loop: int,
+    sentiment_checkbox: str = "Negative or Positive",
+    progress = gr.Progress(track_tqdm=True)
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
+    """
+    Wrapper function for validate_topics that processes data grouped by Group values and accumulates results,
+    similar to wrapper_extract_topics_per_column_value.
+
+    Args:
+        file_data (pd.DataFrame): The input data to validate.
+        reference_df (pd.DataFrame): The reference dataframe from the original run.
+        topic_summary_df (pd.DataFrame): The topic summary dataframe from the original run.
+        logged_content (List[dict]): The logged content from the original run.
+        file_name (str): Name of the file being processed.
+        chosen_cols (List[str]): Columns to process.
+        batch_size (int): Size of each batch.
+        model_choice (str): The model to use for validation.
+        in_api_key (str): API key for the model.
+        temperature (float): Temperature for the model.
+        max_tokens (int): Maximum tokens for the model.
+        azure_api_key_textbox (str): Azure API key if using Azure.
+        azure_endpoint_textbox (str): Azure endpoint if using Azure.
+        reasoning_suffix (str): Suffix for reasoning.
+        group_name (str): Name of the group.
+        produce_structured_summary_radio (str): Whether to produce structured summaries ("Yes" or "No").
+        force_zero_shot_radio (str): Whether to force zero-shot ("Yes" or "No").
+        force_single_topic_radio (str): Whether to force single topic ("Yes" or "No").
+        context_textbox (str): Context for the validation.
+        additional_instructions_summary_format (str): Additional instructions for summary format.
+        output_folder (str): Output folder for files.
+        output_debug_files (str): Whether to output debug files ("True" or "False").
+        original_full_file_name (str): Original file name.
+        additional_validation_issues_provided (str): Additional validation issues provided.
+        max_time_for_loop (int): Maximum time for the loop.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
+            Accumulated reference_df, topic_summary_df, logged_content, conversation_metadata_str,
+            total_input_tokens, total_output_tokens, total_llm_calls, and a list of output file paths.
+    """
+
+    # Get unique Group values from the input dataframes
+    unique_groups = list()
+    if "Group" in reference_df.columns and not reference_df["Group"].isnull().all():
+        unique_groups = reference_df["Group"].unique()
+    elif "Group" in topic_summary_df.columns and not topic_summary_df["Group"].isnull().all():
+        unique_groups = topic_summary_df["Group"].unique()
+    else:
+        # If no Group column exists, use the provided group_name
+        unique_groups = [group_name]
+    
+    # Limit to MAX_GROUPS if there are too many
+    if len(unique_groups) > MAX_GROUPS:
+        print(f"Warning: More than {MAX_GROUPS} unique groups found. Processing only the first {MAX_GROUPS}.")
+        unique_groups = unique_groups[:MAX_GROUPS]
+    
+    print(f"Processing validation for {len(unique_groups)} groups: {unique_groups}")
+    
+    # Initialize accumulators for results across all groups
+    acc_reference_df = pd.DataFrame()
+    acc_topic_summary_df = pd.DataFrame()
+    acc_logged_content = list()
+    acc_conversation_metadata = ""
+    acc_input_tokens = 0
+    acc_output_tokens = 0
+    acc_llm_calls = 0
+    acc_output_files = list()
+
+    if len(unique_groups) == 1:
+        # If only one unique value, no need for progress bar, iterate directly
+        loop_object = unique_groups
+    else:
+        # If multiple unique values, use tqdm progress bar
+        loop_object = progress.tqdm(unique_groups, desc=f"Validating groups", unit="groups")
+    
+    # Process each group separately
+    for i, current_group in enumerate(loop_object):
+        print(f"\nProcessing validation for group: {current_group} ({i+1}/{len(unique_groups)})")
+        
+        # Filter data for current group
+        if "Group" in reference_df.columns:
+            group_reference_df = reference_df[reference_df["Group"] == current_group].copy()
+        else:
+            group_reference_df = reference_df.copy()
+            
+        if "Group" in topic_summary_df.columns:
+            group_topic_summary_df = topic_summary_df[topic_summary_df["Group"] == current_group].copy()
+        else:
+            group_topic_summary_df = topic_summary_df.copy()
+        
+        # Filter file_data if it has a Group column
+        if "Group" in file_data.columns:
+            group_file_data = file_data[file_data["Group"] == current_group].copy()
+        else:
+            group_file_data = file_data.copy()
+        
+        # Skip if no data for this group
+        if group_reference_df.empty and group_topic_summary_df.empty:
+            print(f"No data for group {current_group}. Skipping.")
+            continue
+        
+        try:
+            # Call validate_topics for this group
+            validation_reference_df, validation_topic_summary_df, updated_logged_content, validation_conversation_metadata_str = validate_topics(
+                file_data=group_file_data,
+                reference_df=group_reference_df,
+                topic_summary_df=group_topic_summary_df,
+                logged_content=logged_content,
+                file_name=file_name,
+                chosen_cols=chosen_cols,
+                batch_size=batch_size,
+                model_choice=model_choice,
+                in_api_key=in_api_key,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                azure_api_key_textbox=azure_api_key_textbox,
+                azure_endpoint_textbox=azure_endpoint_textbox,
+                reasoning_suffix=reasoning_suffix,
+                group_name=current_group,
+                produce_structured_summary_radio=produce_structured_summary_radio,
+                force_zero_shot_radio=force_zero_shot_radio,
+                force_single_topic_radio=force_single_topic_radio,
+                context_textbox=context_textbox,
+                additional_instructions_summary_format=additional_instructions_summary_format,
+                output_folder=output_folder,
+                output_debug_files=output_debug_files,
+                original_full_file_name=original_full_file_name,
+                additional_validation_issues_provided=additional_validation_issues_provided,
+                max_time_for_loop=max_time_for_loop,
+                sentiment_checkbox=sentiment_checkbox
+            )
+            
+            # Accumulate results
+            if not validation_reference_df.empty:
+                acc_reference_df = pd.concat([acc_reference_df, validation_reference_df], ignore_index=True)
+            if not validation_topic_summary_df.empty:
+                acc_topic_summary_df = pd.concat([acc_topic_summary_df, validation_topic_summary_df], ignore_index=True)
+            
+            acc_logged_content.extend(updated_logged_content)
+            acc_conversation_metadata += (("\n---\n" if acc_conversation_metadata else "") +
+                                        f"Validation for group {current_group}:\n" +
+                                        validation_conversation_metadata_str)
+            
+            # Calculate token counts for this group
+            group_input_tokens, group_output_tokens, group_llm_calls = calculate_tokens_from_metadata(
+                validation_conversation_metadata_str, model_choice, model_name_map
+            )
+            acc_input_tokens += group_input_tokens
+            acc_output_tokens += group_output_tokens
+            acc_llm_calls += group_llm_calls
+            
+            print(f"Group {current_group} validation completed.")
+            
+        except Exception as e:
+            print(f"Error processing validation for group {current_group}: {e}")
+            continue
+    
+    # Create consolidated output files
+    file_name_clean = clean_column_name(file_name, max_length=20)
+    in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
+    model_choice_clean = model_name_map[model_choice]['short_name']
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+    
+    # Create consolidated output file paths
+    validation_reference_table_path = f"{output_folder}{file_name_clean}_all_final_reference_table_{model_choice_clean_short}_valid.csv"
+    validation_unique_topics_path = f"{output_folder}{file_name_clean}_all_final_unique_topics_{model_choice_clean_short}_valid.csv"
+
+    # Need to join "Topic number" onto acc_reference_df
+    # If any blanks, there is an issue somewhere, drop and redo
+    if "Topic number" in acc_reference_df.columns:
+        if acc_reference_df["Topic number"].isnull().any():
+            acc_reference_df = acc_reference_df.drop("Topic number", axis=1)
+
+    if "Topic number" not in acc_reference_df.columns:
+        if "Topic number" in acc_topic_summary_df.columns:
+            if "General topic" in acc_topic_summary_df.columns:
+                acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on=["General topic", "Subtopic", "Sentiment"], how="left")
+            elif "Main heading" in acc_topic_summary_df.columns:
+                acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
+    
+    # Save consolidated validation dataframes to CSV
+    if not acc_reference_df.empty:
+        acc_reference_df.to_csv(validation_reference_table_path, index=None, encoding='utf-8-sig')
+        acc_output_files.append(validation_reference_table_path)
+    
+    if not acc_topic_summary_df.empty:
+        acc_topic_summary_df.to_csv(validation_unique_topics_path, index=None, encoding='utf-8-sig')
+        acc_output_files.append(validation_unique_topics_path)
+    
+    # Create display table markdown for validation results
+    if not acc_topic_summary_df.empty:
+        validation_display_table = acc_topic_summary_df.copy()
+        if "Summary" in validation_display_table.columns:
+            validation_display_table = validation_display_table.drop("Summary", axis=1)
+        
+        # Apply text wrapping for display
+        validation_display_table = validation_display_table.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
+        
+        # Handle structured summary format
+        if produce_structured_summary_radio == "Yes":
+            if "General topic" in validation_display_table.columns:
+                validation_display_table = validation_display_table.rename(columns={"General topic": "Main heading"})
+            if "Subtopic" in validation_display_table.columns:
+                validation_display_table = validation_display_table.rename(columns={"Subtopic": "Subheading"})
+            validation_display_table_markdown = validation_display_table.to_markdown(index=False)
+        else:
+            validation_display_table_markdown = validation_display_table.to_markdown(index=False)
+    else:
+        validation_display_table_markdown = "No validation results available."
+    
+    print(f"Validation completed for all groups. Total tokens: {acc_input_tokens} input, {acc_output_tokens} output")
+    
+    # Return the same format as wrapper_extract_topics_per_column_value
+    return (
+        validation_display_table_markdown,  # display_topic_table_markdown
+        acc_topic_summary_df,               # master_unique_topics_df_state
+        acc_topic_summary_df,               # master_unique_topics_df_state (duplicate for compatibility)
+        acc_reference_df,                   # master_reference_df_state
+        acc_output_files,                   # topic_extraction_output_files
+        acc_output_files,                   # text_output_file_list_state
+        0,                                  # latest_batch_completed (reset for validation)
+        [],                                 # log_files_output (empty for validation)
+        [],                                 # log_files_output_list_state (empty for validation)
+        acc_conversation_metadata,          # conversation_metadata_textbox
+        0.0,                                # estimated_time_taken_number (reset for validation)
+        acc_output_files,                   # deduplication_input_files
+        acc_output_files,                   # summarisation_input_files
+        acc_topic_summary_df,               # modifiable_unique_topics_df_state
+        acc_output_files,                   # modification_input_files
+        [],                                 # in_join_files (empty for validation)
+        pd.DataFrame(),                     # missing_df_state (empty for validation)
+        acc_input_tokens,                   # input_tokens_num
+        acc_output_tokens,                  # output_tokens_num
+        acc_llm_calls,                     # number_of_calls_num
+        f"Validation completed for {len(unique_groups)} groups",  # output_messages_textbox
+        acc_logged_content                  # logged_content_df
+    )
 
 def data_file_to_markdown_table(file_data:pd.DataFrame, file_name:str, chosen_cols: List[str], batch_number: int, batch_size: int, verify_titles:bool=False) -> Tuple[str, str, str]:
     """
@@ -309,23 +886,18 @@ def convert_response_text_to_dataframe(response_text:str, table_type:str = "Main
 
 def write_llm_output_and_logs(response_text: str,
                               whole_conversation: List[str],
-                              whole_conversation_metadata: List[str],
-                              file_name: str,
-                              latest_batch_completed: int,
+                              all_metadata_content: List[str],
+                              batch_file_path_details: str,
                               start_row:int,
                               end_row:int,
                               model_choice_clean: str,
-                              temperature: float,
                               log_files_output_paths: List[str],
                               existing_reference_df:pd.DataFrame,
                               existing_topics_df:pd.DataFrame,
                               batch_size_number:int,
-                              in_column:str,
                               batch_basic_response_df:pd.DataFrame,
-                              model_name_map:dict,
                               group_name:str = "All",
                               produce_structured_summary_radio:str = "No",                      
-                              first_run: bool = False,
                               return_logs: bool = False,
                               output_folder:str=OUTPUT_FOLDER) -> Tuple:
     """
@@ -334,23 +906,19 @@ def write_llm_output_and_logs(response_text: str,
     Parameters:
     - response_text (str): The text of the response from the model.
     - whole_conversation (List[str]): A list of strings representing the complete conversation including prompts and responses.
-    - whole_conversation_metadata (List[str]): A list of strings representing metadata about the whole conversation.
-    - file_name (str): The base part of the output file name.
-    - latest_batch_completed (int): The index of the current batch.
+    - all_metadata_content (List[str]): A list of strings representing metadata about the whole conversation.
+    - batch_file_path_details (str): String containing details for constructing batch-specific file paths.
     - start_row (int): Start row of the current batch.
     - end_row (int): End row of the current batch.
     - model_choice_clean (str): The cleaned model choice string.
-    - temperature (float): The temperature parameter used in the model.
     - log_files_output_paths (List[str]): A list of paths to the log files.
     - existing_reference_df (pd.DataFrame): The existing reference dataframe mapping response numbers to topics.
     - existing_topics_df (pd.DataFrame): The existing unique topics dataframe.
     - batch_size_number (int): The size of batches in terms of number of responses.
-    - in_column (str): The name of the open text column that is being analysed.
     - batch_basic_response_df (pd.DataFrame): The dataframe that contains the response data.
-    - model_name_map (dict): The dictionary that maps the model choice to the model name.
     - group_name (str, optional): The name of the current group.
     - produce_structured_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
-    - first_run (bool): A boolean indicating if this is the first run through this function in this process. Defaults to False.
+    - return_logs (bool): A boolean indicating if logs should be returned. Defaults to False.
     - output_folder (str): The name of the folder where output files are saved.
     """
     topic_summary_df_out_path = list()
@@ -364,10 +932,8 @@ def write_llm_output_and_logs(response_text: str,
 
     # Convert conversation to string and add to log outputs
     whole_conversation_str = '\n'.join(whole_conversation)    
-    whole_conversation_metadata_str = '\n'.join(whole_conversation_metadata)
+    all_metadata_content_str = '\n'.join(all_metadata_content)
     start_row_reported = start_row + 1
-
-    batch_file_path_details = create_batch_file_path_details(file_name)
 
     # Need to reduce output file names as full length files may be too long
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
@@ -378,7 +944,7 @@ def write_llm_output_and_logs(response_text: str,
         whole_conversation_path = output_folder + batch_file_path_details + "_full_conversation_" + model_choice_clean_short + ".txt"
         whole_conversation_path_meta = output_folder + batch_file_path_details + "_metadata_" + model_choice_clean_short + ".txt"
         with open(whole_conversation_path, "w", encoding='utf-8-sig', errors='replace') as f: f.write(whole_conversation_str)
-        with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f: f.write(whole_conversation_metadata_str)
+        with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f: f.write(all_metadata_content_str)
         log_files_output_paths.append(whole_conversation_path_meta)
 
     # Convert response text to a markdown table
@@ -440,6 +1006,7 @@ def write_llm_output_and_logs(response_text: str,
 
     # Table to map references to topics
     reference_data = list()
+    existing_reference_numbers = False
 
     batch_basic_response_df["Reference"] = batch_basic_response_df["Reference"].astype(str)
 
@@ -579,9 +1146,181 @@ def write_llm_output_and_logs(response_text: str,
     return topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_with_response_df, out_reference_df, out_topic_summary_df, batch_file_path_details, is_error
 
 
+def process_batch_with_llm(
+    is_first_batch: bool,
+    formatted_system_prompt: str,
+    formatted_prompt: str,
+    batch_file_path_details: str,
+    model_source: str,
+    model_choice: str,
+    in_api_key: str,
+    temperature: float,
+    max_tokens: int,
+    azure_api_key_textbox: str,
+    azure_endpoint_textbox: str,
+    reasoning_suffix: str,
+    local_model: object,
+    tokenizer: object,
+    bedrock_runtime: object,
+    reported_batch_no: int,
+    response_text: str,
+    whole_conversation: list,
+    all_metadata_content: list,
+    start_row: int,
+    end_row: int,
+    model_choice_clean: str,
+    log_files_output_paths: list,
+    existing_reference_df: pd.DataFrame,
+    existing_topic_summary_df: pd.DataFrame,
+    batch_size: int,
+    batch_basic_response_df: pd.DataFrame,
+    group_name: str,
+    produce_structured_summary_radio: str,
+    output_folder: str,
+    output_debug_files: str,
+    task_type: str,
+    assistant_prefill: str = ""
+):
+    """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
+
+    This function orchestrates the interaction with various LLM providers (Gemini, Azure/OpenAI, AWS Bedrock, Local)
+    to process a given batch of data. It constructs the client, calls the LLM with the specified prompts,
+    and then processes the LLM's response to extract topics, references, and summaries, writing them to output files.
+    It also handles error conditions related to LLM output parsing.
+
+    Args:
+        is_first_batch (bool): True if this is the first batch being processed, False otherwise.
+        formatted_system_prompt (str): The system prompt to be sent to the LLM.
+        formatted_prompt (str): The main user prompt for the LLM.
+        batch_file_path_details (str): String containing details for constructing batch-specific file paths.
+        model_source (str): The source of the LLM (e.g., "Gemini", "Azure/OpenAI", "AWS Bedrock", "Local").
+        model_choice (str): The specific model chosen (e.g., "gemini-pro", "gpt-4", "anthropic.claude-v2").
+        in_api_key (str): API key for the chosen model source (if applicable).
+        temperature (float): The sampling temperature for the LLM, controlling randomness.
+        max_tokens (int): The maximum number of tokens to generate in the LLM's response.
+        azure_api_key_textbox (str): API key for Azure OpenAI (if `model_source` is Azure/OpenAI).
+        azure_endpoint_textbox (str): Endpoint URL for Azure OpenAI (if `model_source` is Azure/OpenAI).
+        reasoning_suffix (str): Additional text to append to the system prompt for reasoning (primarily for local models).
+        local_model (object): The loaded local model object (if `model_source` is Local).
+        tokenizer (object): The tokenizer object for local models.
+        bedrock_runtime (object): AWS Bedrock runtime client object (if `model_source` is AWS Bedrock).
+        reported_batch_no (int): The current batch number being processed and reported.
+        response_text (str): The raw text response from the LLM (can be pre-filled or from a previous step).
+        whole_conversation (list): A list representing the entire conversation history.
+        all_metadata_content (list): Metadata associated with each turn in the conversation.
+        start_row (int): The starting row index of the current batch in the original dataset.
+        end_row (int): The ending row index of the current batch in the original dataset.
+        model_choice_clean (str): A cleaned, short name for the chosen model.
+        log_files_output_paths (list): A list of paths to log files generated during processing.
+        existing_reference_df (pd.DataFrame): DataFrame containing existing reference data.
+        existing_topic_summary_df (pd.DataFrame): DataFrame containing existing topic summary data.
+        batch_size (int): The number of items processed in each batch.
+        batch_basic_response_df (pd.DataFrame): DataFrame containing basic responses for the current batch.
+        group_name (str): The name of the group associated with the current batch.
+        produce_structured_summary_radio (str): Indicates whether to produce structured summaries ("Yes" or "No").
+        output_folder (str): The directory where all output files will be saved.
+        output_debug_files (str): Flag indicating whether to output debug files ("Yes" or "No").
+        task_type (str): The type of task being performed (e.g., "topic_extraction", "summarisation").
+        assistant_prefill (str, optional): Optional prefill text for the assistant's response. Defaults to "".
+
+    Returns:
+        tuple: A tuple containing various output paths and DataFrames after processing the batch:
+            - topic_table_out_path (str): Path to the output CSV for the topic table.
+            - reference_table_out_path (str): Path to the output CSV for the reference table.
+            - topic_summary_df_out_path (str): Path to the output CSV for the topic summary DataFrame.
+            - new_topic_df (pd.DataFrame): DataFrame of newly extracted topics.
+            - new_reference_df (pd.DataFrame): DataFrame of newly extracted references.
+            - new_topic_summary_df (pd.DataFrame): DataFrame of the updated topic summary.
+            - batch_file_path_details (str): The batch file path details used.
+            - is_error (bool): True if an error occurred during processing, False otherwise.
+    """
+    client = list()
+    client_config = dict()
+    
+    # Prepare clients before query       
+    if "Gemini" in model_source:
+        print("Using Gemini model:", model_choice)
+        client, client_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
+    elif "Azure/OpenAI" in model_source:
+        print("Using Azure/OpenAI AI Inference model:", model_choice)
+        if azure_api_key_textbox:
+            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
+        client, client_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox)
+    elif "anthropic.claude" in model_choice:
+        print("Using AWS Bedrock model:", model_choice)
+        pass
+    else:
+        print("Using local model:", model_choice)
+        pass
+
+    batch_prompts = [formatted_prompt]
+
+    if "Local" in model_source and reasoning_suffix: 
+        formatted_system_prompt = formatted_system_prompt + "\n" + reasoning_suffix
+    
+    # Check if the input text exceeds the LLM context length
+    from tools.config import LLM_CONTEXT_LENGTH
+    
+    # Combine system prompt and user prompt for token counting
+    full_input_text = formatted_system_prompt + "\n" + formatted_prompt
+    
+    # Count tokens in the input text
+    from tools.dedup_summaries import count_tokens_in_text
+    input_token_count = count_tokens_in_text(full_input_text, tokenizer, model_source)
+    
+    # Check if input exceeds context length
+    if input_token_count > LLM_CONTEXT_LENGTH:
+        error_message = f"Input text exceeds LLM context length. Input tokens: {input_token_count}, Max context length: {LLM_CONTEXT_LENGTH}. Please reduce the input text size."
+        print(error_message)
+        raise ValueError(error_message)
+    
+    print(f"Input token count: {input_token_count} (Max: {LLM_CONTEXT_LENGTH})")
+    
+    conversation_history = list()
+    whole_conversation = list()
+
+    # Process requests to large language model
+    responses, conversation_history, whole_conversation, all_metadata_content, response_text = call_llm_with_markdown_table_checks(
+        batch_prompts, formatted_system_prompt, conversation_history, whole_conversation, 
+        all_metadata_content, client, client_config, model_choice, temperature, 
+        reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, 
+        MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=assistant_prefill, master=not is_first_batch
+    )
+    
+    # Return output tables
+    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, batch_file_path_details, is_error = write_llm_output_and_logs(
+        response_text, whole_conversation, all_metadata_content, batch_file_path_details, 
+        start_row, end_row, model_choice_clean, log_files_output_paths, existing_reference_df, 
+        existing_topic_summary_df, batch_size, batch_basic_response_df, group_name, 
+        produce_structured_summary_radio, output_folder=output_folder
+    )
+
+    # If error in table parsing, leave function
+    if is_error == True:
+        if is_first_batch:
+            raise Exception("Error in output table parsing")
+        else:
+            final_message_out = "Could not complete summary, error in LLM output."
+            raise Exception(final_message_out)
+
+    # Write final output to text file and objects for logging purposes
+    full_prompt = formatted_system_prompt + "\n" + formatted_prompt
+
+    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(
+        output_debug_files, output_folder, batch_file_path_details, 
+        model_choice_clean, full_prompt, response_text, whole_conversation, 
+        all_metadata_content, log_files_output_paths, task_type=task_type
+    )
+
+    return (
+        new_topic_df, new_reference_df, new_topic_summary_df, is_error,
+        current_prompt_content_logged, current_summary_content_logged, 
+        current_conversation_content_logged, current_metadata_content_logged,
+        topic_table_out_path, reference_table_out_path, topic_summary_df_out_path
+    )
 
 
-def extract_topics(in_data_file: GradioFileData,
+def extract_topics(in_data_file: gr.FileData,
               file_data:pd.DataFrame,
               existing_topics_table:pd.DataFrame,
               existing_reference_df:pd.DataFrame,
@@ -593,13 +1332,13 @@ def extract_topics(in_data_file: GradioFileData,
               temperature:float,
               chosen_cols:List[str],
               model_choice:str,
-              candidate_topics: GradioFileData = None,
+              candidate_topics: gr.FileData = None,
               latest_batch_completed:int=0,
               out_message:List= list(),
               out_file_paths:List = list(),
               log_files_output_paths:List = list(),
               first_loop_state:bool=False,
-              whole_conversation_metadata_str:str="",
+              all_metadata_content_str:str="",
               initial_table_prompt:str=initial_table_prompt,
               initial_table_system_prompt:str=initial_table_system_prompt,
               add_existing_topics_system_prompt:str=add_existing_topics_system_prompt,
@@ -633,7 +1372,8 @@ def extract_topics(in_data_file: GradioFileData,
               max_rows:int=max_rows,
               original_full_file_name:str="",
               additional_instructions_summary_format:str="",
-              progress=Progress(track_tqdm=False)):
+              output_debug_files:str=output_debug_files,
+              progress=Progress(track_tqdm=True)):
 
     '''
     Query an LLM (local, (Gemma/GPT-OSS if local, Gemini, AWS Bedrock or Azure/OpenAI AI Inference) with up to three prompts about a table of open text data. Up to 'batch_size' rows will be queried at a time.
@@ -650,14 +1390,14 @@ def extract_topics(in_data_file: GradioFileData,
     - in_api_key (str): The API key for authentication (Google Gemini).
     - temperature (float): The temperature parameter for the model.
     - chosen_cols (List[str]): A list of chosen columns to process.
-    - candidate_topics (GradioFileData): File with a table of existing candidate topics files submitted by the user.
+    - candidate_topics (gr.FileData): File with a table of existing candidate topics files submitted by the user.
     - model_choice (str): The choice of model to use.
     - latest_batch_completed (int): The index of the latest file completed.
     - out_message (list): A list to store output messages.
     - out_file_paths (list): A list to store output file paths.
     - log_files_output_paths (list): A list to store log file output paths.
     - first_loop_state (bool): A flag indicating the first loop state.
-    - whole_conversation_metadata_str (str): A string to store whole conversation metadata.
+    - all_metadata_content_str (str): A string to store whole conversation metadata.
     - initial_table_prompt (str): The first prompt for the model.
     - initial_table_system_prompt (str): The system prompt for the model.
     - add_existing_topics_system_prompt (str): The system prompt for the summary part of the model.
@@ -688,31 +1428,29 @@ def extract_topics(in_data_file: GradioFileData,
     - max_rows: The maximum number of rows to process.
     - original_full_file_name: The original full file name.
     - additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
+    - output_debug_files (str, optional): Flag indicating whether to output debug files ("True" or "False").
     - progress (Progress): A progress tracker.
 
     '''
 
     tic = time.perf_counter()
 
-    client = list()
-    client_config = {}
     final_time = 0.0
-    whole_conversation_metadata = list()
-    is_error = False
+    all_metadata_content = list()
     create_revised_general_topics = False
     local_model = None
     tokenizer = None
     assistant_model = None
     zero_shot_topics_df = pd.DataFrame()
     missing_df = pd.DataFrame()
-    new_reference_df = pd.DataFrame(columns=["Response References",	"General topic",	"Subtopic",	"Sentiment",	"Start row of group",	"Group"	,"Topic_number",	"Summary"])
+    new_reference_df = pd.DataFrame(columns=["Response References",	"General topic",	"Subtopic",	"Sentiment",	"Start row of group",	"Group"	,"Topic number",	"Summary"])
     new_topic_summary_df = pd.DataFrame(columns=["General topic","Subtopic","Sentiment","Group","Number of responses","Summary"])
     new_topic_df = pd.DataFrame()
     task_type = "Topic extraction"
 
     # Logged content
     all_prompts_content = list()
-    all_summaries_content = list()
+    all_responses_content = list()
     all_conversation_content = list()
     all_metadata_content = list()
     all_groups_content = list()
@@ -721,7 +1459,7 @@ def extract_topics(in_data_file: GradioFileData,
     all_validated_content = list()
     all_task_type_content = list()
     all_file_names_content = list()
-    all_logged_content = list()
+    all_groups_logged_content = list()
     # Need to reduce output file names as full length files may be too long
     model_choice_clean = model_name_map[model_choice]["short_name"]
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
@@ -807,10 +1545,7 @@ def extract_topics(in_data_file: GradioFileData,
             simplified_csv_table_path, normalised_simple_markdown_table, start_row, end_row, batch_basic_response_df = data_file_to_markdown_table(file_data, file_name, chosen_cols, latest_batch_completed, batch_size)
 
             if batch_basic_response_df.shape[0] == 1: response_reference_format = "" # Blank, as the topics will always refer to the single response provided, '1'
-            else: response_reference_format = default_response_reference_format
-
-            # Conversation history
-            conversation_history = list()
+            else: response_reference_format = "\n" + default_response_reference_format
 
             # If the latest batch of responses contains at least one instance of text
             if not batch_basic_response_df.empty:
@@ -819,23 +1554,6 @@ def extract_topics(in_data_file: GradioFileData,
                 if latest_batch_completed >= 1 or candidate_topics is not None:
 
                     formatted_system_prompt = add_existing_topics_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
-
-                    # Prepare clients before query       
-                    if "Gemini" in model_source:
-                        #print("Using Gemini model:", model_choice)
-                        client, client_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
-                    elif "Azure/OpenAI" in model_source:
-                        #print("Using Azure/OpenAI AI Inference model:", model_choice)
-                        # If provided, set env for downstream calls too
-                        if azure_api_key_textbox:
-                            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
-                        client, client_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox)
-                    elif "anthropic.claude" in model_choice:
-                        #print("Using AWS Bedrock model:", model_choice)
-                        pass
-                    else:
-                        #print("Using local model:", model_choice)
-                        pass
 
                     # Preparing candidate topics if no topics currently exist
                     if candidate_topics and existing_topic_summary_df.empty:
@@ -876,34 +1594,6 @@ def extract_topics(in_data_file: GradioFileData,
                     if "General topic" in topics_df_for_markdown.columns and "Subtopic" in topics_df_for_markdown.columns:
                         topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"])
 
-                    # # Save to json format too
-                    # def create_records(group):
-                    #     # Select and rename columns for clean JSON keys (e.g., 'Subtopic' -> 'subtopic')
-                    #     records_df = group[['Subtopic', 'Description']].rename(columns={
-                    #         'Subtopic': 'subtopic',
-                    #         'Description': 'description'
-                    #     })
-                    #     # Convert this cleaned DataFrame to a list of dictionaries
-                    #     return records_df.to_dict('records')
-
-                    # topics_df_for_json = topics_df_for_markdown.copy()
-
-                    # if not "Description" in topics_df_for_json.columns:
-                    #     topics_df_for_json["Description"] = ""
-                    # if not "General topic" in topics_df_for_json.columns:
-                    #     topics_df_for_json["General topic"] = ""                        
-
-                    # grouped_series = topics_df_for_json.groupby('General topic').apply(create_records)
-
-                    # # --- Step 3: Convert the result to the desired JSON format ---
-                    # # This step remains the same as before.
-                    # json_output = grouped_series.to_json(indent=4)
-
-                    # --- Step 4: Print the result and save to a file ---
-                    # print(json_output)
-                    # with open(output_folder + '/topics_detailed.json', 'w') as f:
-                    #     f.write(json_output)
-
                     if "Description" in existing_topic_summary_df:
                         if existing_topic_summary_df['Description'].isnull().all():
                             existing_topic_summary_df.drop("Description", axis = 1, inplace = True)
@@ -913,6 +1603,16 @@ def extract_topics(in_data_file: GradioFileData,
                             topics_df_for_markdown = topics_df_for_markdown.rename(columns={"General topic":"Main heading"})
                         if "Subtopic" in topics_df_for_markdown.columns:
                             topics_df_for_markdown = topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"})
+
+                    # Remove duplicate General topic and subtopic names, prioritising topics where a general topic is provided
+                    if "General topic" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"], ascending=[False, True])
+                        topics_df_for_markdown = topics_df_for_markdown.drop_duplicates(["General topic", "Subtopic"], keep="first")
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"], ascending=[True, True])
+                    else:
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["Subtopic"], ascending=[True])
+                        topics_df_for_markdown = topics_df_for_markdown.drop_duplicates(["Subtopic"], keep="first")
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["Subtopic"], ascending=[True])
 
                     unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
                     unique_topics_markdown = normalise_string(unique_topics_markdown)
@@ -927,41 +1627,64 @@ def extract_topics(in_data_file: GradioFileData,
 
                     # Format the summary prompt with the response table and topics
                     if produce_structured_summary_radio != "Yes":
-                        formatted_summary_prompt = add_existing_topics_prompt.format(response_table=normalised_simple_markdown_table,
+                        formatted_summary_prompt = add_existing_topics_prompt.format(
+                            validate_prompt_prefix="",
+                            response_table=normalised_simple_markdown_table,
                             topics=unique_topics_markdown,
                             topic_assignment=topic_assignment_prompt,
                             force_single_topic=force_single_topic_prompt,
                             sentiment_choices=sentiment_prompt,
                             response_reference_format=response_reference_format,
-                            add_existing_topics_summary_format=additional_instructions_summary_format)
+                            add_existing_topics_summary_format=additional_instructions_summary_format,
+                            previous_table_introduction="",
+                            previous_table="",
+                            validate_prompt_suffix=""
+                        )
                     else:
                         formatted_summary_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table,
                         topics=unique_topics_markdown, summary_format=additional_instructions_summary_format)
                     
-                    full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
-
                     batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"
 
-                    summary_prompt_list = [formatted_summary_prompt]
-
-                    if "Local" in model_source and reasoning_suffix: formatted_system_prompt = formatted_system_prompt + "\n" + reasoning_suffix
-
-                    conversation_history = list()
-                    whole_conversation = list()
-
-                    # Process requests to large language model
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(summary_prompt_list, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=add_existing_topics_assistant_prefill,  master = True)
-
-                    # Return output tables
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, master_batch_out_file_part, is_error = write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structured_summary_radio, first_run=False, output_folder=output_folder)  
-
-                    full_prompt = formatted_system_prompt + "\n" + formatted_summary_prompt
-                    
-                    # Write final output to text file and objects for logging purposes
-                    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, response_text, whole_conversation, whole_conversation_metadata, log_files_output_paths, task_type=task_type)
+                    # Use the helper function to process the batch
+                    new_topic_df, new_reference_df, new_topic_summary_df, is_error, current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged, topic_table_out_path, reference_table_out_path, topic_summary_df_out_path = process_batch_with_llm(
+                        is_first_batch=False,
+                        formatted_system_prompt=formatted_system_prompt,
+                        formatted_prompt=formatted_summary_prompt,
+                        batch_file_path_details=batch_file_path_details,
+                        model_source=model_source,
+                        model_choice=model_choice,
+                        in_api_key=in_api_key,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        azure_api_key_textbox=azure_api_key_textbox,
+                        azure_endpoint_textbox=azure_endpoint_textbox,
+                        reasoning_suffix=reasoning_suffix,
+                        local_model=local_model,
+                        tokenizer=tokenizer,
+                        bedrock_runtime=bedrock_runtime,
+                        reported_batch_no=reported_batch_no,
+                        response_text="",
+                        whole_conversation=list(),
+                        all_metadata_content=list(),
+                        start_row=start_row,
+                        end_row=end_row,
+                        model_choice_clean=model_choice_clean,
+                        log_files_output_paths=log_files_output_paths,
+                        existing_reference_df=existing_reference_df,
+                        existing_topic_summary_df=existing_topic_summary_df,
+                        batch_size=batch_size,
+                        batch_basic_response_df=batch_basic_response_df,
+                        group_name=group_name,
+                        produce_structured_summary_radio=produce_structured_summary_radio,
+                        output_folder=output_folder,
+                        output_debug_files=output_debug_files,
+                        task_type=task_type,
+                        assistant_prefill=add_existing_topics_assistant_prefill
+                    )
 
                     all_prompts_content.append(current_prompt_content_logged)
-                    all_summaries_content.append(current_summary_content_logged)
+                    all_responses_content.append(current_summary_content_logged)
                     all_conversation_content.append(current_conversation_content_logged)
                     all_metadata_content.append(current_metadata_content_logged)
                     all_groups_content.append(group_name)
@@ -970,11 +1693,6 @@ def extract_topics(in_data_file: GradioFileData,
                     all_validated_content.append("No")
                     all_task_type_content.append(task_type)
                     all_file_names_content.append(original_full_file_name)
-
-                    # If error in table parsing, leave function
-                    if is_error == True:
-                        final_message_out = "Could not complete summary, error in LLM output."
-                        raise Exception(final_message_out)
 
                     ## Reference table mapping response numbers to topics
                     if output_debug_files == "True":
@@ -991,7 +1709,7 @@ def extract_topics(in_data_file: GradioFileData,
                         out_file_paths.append(topic_summary_df_out_path)
                     
                     # Outputs for markdown table output
-                    unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+                    unique_table_df_display_table = new_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
 
                     if produce_structured_summary_radio == "Yes":
                         unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Summary"]]
@@ -1001,7 +1719,7 @@ def extract_topics(in_data_file: GradioFileData,
 
                     unique_table_df_display_table_markdown = unique_table_df_display_table.to_markdown(index=False)
 
-                    whole_conversation_metadata_str = ' '.join(whole_conversation_metadata)
+                    all_metadata_content_str = ' '.join(all_metadata_content)
 
                     out_file_paths = [col for col in out_file_paths if str(reported_batch_no) in col]
                     log_files_output_paths = [col for col in out_file_paths if str(reported_batch_no) in col]
@@ -1009,50 +1727,63 @@ def extract_topics(in_data_file: GradioFileData,
                 else:
                     formatted_system_prompt = initial_table_system_prompt.format(consultation_context=context_textbox, column_name=chosen_cols)
 
-                    # Prepare Gemini models before query       
-                    if model_source == "Gemini":
-                        print("Using Gemini model:", model_choice)
-                        client, client_config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=formatted_system_prompt, max_tokens=max_tokens)
-                    elif model_source == "Azure/OpenAI":
-                        print("Using Azure/OpenAI AI Inference model:", model_choice)
-                        if azure_api_key_textbox:
-                            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
-                        client, client_config = construct_azure_client(in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox)
-                    elif model_choice == CHOSEN_LOCAL_MODEL_TYPE:
-                        pass
-                        #print("Using local model:", model_choice)
-                    else:
-                        pass
-                        #print("Using AWS Bedrock model:", model_choice)
-
                     # Format the summary prompt with the response table and topics
                     if produce_structured_summary_radio != "Yes":
-                        formatted_initial_table_prompt = initial_table_prompt.format(response_table=normalised_simple_markdown_table, sentiment_choices=sentiment_prompt,
-                        response_reference_format=response_reference_format, add_existing_topics_summary_format=additional_instructions_summary_format)
+                        formatted_initial_table_prompt = initial_table_prompt.format(
+                            validate_prompt_prefix="",
+                            response_table=normalised_simple_markdown_table, 
+                            sentiment_choices=sentiment_prompt,
+                            response_reference_format=response_reference_format, 
+                            add_existing_topics_summary_format=additional_instructions_summary_format,
+                            previous_table_introduction="",
+                            previous_table="",
+                            validate_prompt_suffix="",
+                        )
                     else:
                         unique_topics_markdown="No suggested headings for this summary"
                         formatted_initial_table_prompt = structured_summary_prompt.format(response_table=normalised_simple_markdown_table, topics=unique_topics_markdown)
 
-                    batch_prompts = [formatted_initial_table_prompt]
+                    batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"
 
-                    if "Local" in model_source and reasoning_suffix: formatted_system_prompt = formatted_system_prompt + "\n" + reasoning_suffix
-                    
-                    whole_conversation = list()
-
-                    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(batch_prompts, formatted_system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, reported_batch_no, local_model, tokenizer,bedrock_runtime, model_source, MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=initial_table_assistant_prefill)
-                    
-                    topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, topic_table_df, reference_df, new_topic_summary_df, batch_file_path_details, is_error =  write_llm_output_and_logs(response_text, whole_conversation, whole_conversation_metadata, file_name, latest_batch_completed, start_row, end_row, model_choice_clean, temperature, log_files_output_paths, existing_reference_df, existing_topic_summary_df, batch_size, chosen_cols, batch_basic_response_df, model_name_map, group_name, produce_structured_summary_radio, first_run=True, output_folder=output_folder)
-
-                    # If error in table parsing, leave function
-                    if is_error == True: raise Exception("Error in output table parsing")  
-
-                    # Write final output to text file and objects for logging purposes
-                    full_prompt = formatted_system_prompt + "\n" + formatted_initial_table_prompt
-
-                    current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = process_debug_output_iteration(output_debug_files, output_folder, batch_file_path_details, model_choice_clean_short, full_prompt, response_text, whole_conversation, whole_conversation_metadata, log_files_output_paths, task_type=task_type)
+                    # Use the helper function to process the batch
+                    new_topic_df, new_reference_df, new_topic_summary_df, is_error, current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged, topic_table_out_path, reference_table_out_path, topic_summary_df_out_path = process_batch_with_llm(
+                        is_first_batch=True,
+                        formatted_system_prompt=formatted_system_prompt,
+                        formatted_prompt=formatted_initial_table_prompt,
+                        batch_file_path_details=batch_file_path_details,
+                        model_source=model_source,
+                        model_choice=model_choice,
+                        in_api_key=in_api_key,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        azure_api_key_textbox=azure_api_key_textbox,
+                        azure_endpoint_textbox=azure_endpoint_textbox,
+                        reasoning_suffix=reasoning_suffix,
+                        local_model=local_model,
+                        tokenizer=tokenizer,
+                        bedrock_runtime=bedrock_runtime,
+                        reported_batch_no=reported_batch_no,
+                        response_text="",
+                        whole_conversation=list(),
+                        all_metadata_content=list(),
+                        start_row=start_row,
+                        end_row=end_row,
+                        model_choice_clean=model_choice_clean,
+                        log_files_output_paths=log_files_output_paths,
+                        existing_reference_df=existing_reference_df,
+                        existing_topic_summary_df=existing_topic_summary_df,
+                        batch_size=batch_size,
+                        batch_basic_response_df=batch_basic_response_df,
+                        group_name=group_name,
+                        produce_structured_summary_radio=produce_structured_summary_radio,
+                        output_folder=output_folder,
+                        output_debug_files=output_debug_files,
+                        task_type=task_type,
+                        assistant_prefill=initial_table_assistant_prefill
+                    )
 
                     all_prompts_content.append(current_prompt_content_logged)
-                    all_summaries_content.append(current_summary_content_logged)
+                    all_responses_content.append(current_summary_content_logged)
                     all_conversation_content.append(current_conversation_content_logged)
                     all_metadata_content.append(current_metadata_content_logged)
                     all_groups_content.append(group_name)
@@ -1065,7 +1796,7 @@ def extract_topics(in_data_file: GradioFileData,
                     if output_debug_files == "True":                   
 
                         # Output reference table
-                        reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
+                        new_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
                         out_file_paths.append(reference_table_out_path)
 
                     ## Unique topic list
@@ -1078,11 +1809,8 @@ def extract_topics(in_data_file: GradioFileData,
                         new_topic_summary_df.to_csv(topic_summary_df_out_path, index=None, encoding='utf-8-sig')
                         out_file_paths.append(topic_summary_df_out_path)                    
 
-                    whole_conversation_metadata.append(whole_conversation_metadata_str)
-                    whole_conversation_metadata_str = '. '.join(whole_conversation_metadata)
-
-                    new_topic_df = topic_table_df
-                    new_reference_df = reference_df
+                    all_metadata_content.append(all_metadata_content_str)
+                    all_metadata_content_str = '. '.join(all_metadata_content)
 
             else:
                 print("Current batch of responses contains no text, moving onto next. Batch number:", str(latest_batch_completed + 1), ". Start row:", start_row, ". End row:", end_row)
@@ -1119,6 +1847,48 @@ def extract_topics(in_data_file: GradioFileData,
 
     # If we have extracted topics from the last batch, return the input out_message and file list to the relevant components
     if latest_batch_completed >= num_batches:
+
+        group_combined_logged_content= [
+                {"prompt": prompt, "response": summary, "metadata": metadata, "batch": batch, "model_choice": model_choice, "validated": validated, "group": group, "task_type": task_type, "file_name": file_name}
+                for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(all_prompts_content, all_responses_content, all_metadata_content, all_batches_content, all_model_choice_content, all_validated_content, all_groups_content, all_task_type_content, all_file_names_content)
+            ]
+        
+        # VALIDATION LOOP - Run validation if enabled
+        if ENABLE_VALIDATION == "True":           
+            
+            # Use the standalone validation function
+            existing_reference_df, existing_topic_summary_df, group_combined_logged_content, validation_conversation_metadata_str = validate_topics(
+                file_data=file_data,
+                reference_df=existing_reference_df,
+                topic_summary_df=existing_topic_summary_df,
+                logged_content=group_combined_logged_content,
+                file_name=file_name,
+                chosen_cols=chosen_cols,
+                batch_size=batch_size,
+                model_choice=model_choice,
+                in_api_key=in_api_key,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                azure_api_key_textbox=azure_api_key_textbox,
+                azure_endpoint_textbox=azure_endpoint_textbox,
+                reasoning_suffix=reasoning_suffix,
+                group_name=group_name,
+                produce_structured_summary_radio=produce_structured_summary_radio,
+                force_zero_shot_radio=force_zero_shot_radio,
+                force_single_topic_radio=force_single_topic_radio,
+                context_textbox=context_textbox,
+                additional_instructions_summary_format=additional_instructions_summary_format,
+                output_folder=output_folder,
+                output_debug_files=output_debug_files,
+                original_full_file_name=original_full_file_name,
+                max_time_for_loop=max_time_for_loop,
+                sentiment_checkbox=sentiment_checkbox
+            )
+            
+            # Add validation conversation metadata to the main conversation metadata
+            if validation_conversation_metadata_str:
+                all_metadata_content_str = all_metadata_content_str + ". " + validation_conversation_metadata_str
+            
         print("Last batch reached, returning batch:", str(latest_batch_completed))
 
         join_file_paths = list()
@@ -1130,12 +1900,7 @@ def extract_topics(in_data_file: GradioFileData,
 
         print("All batches completed. Exporting outputs.")
 
-        # Combine the logged content into a list of dictionaries         
-        all_logged_content = [
-            {"prompt": prompt, "response": summary, "metadata": metadata, "batch": batch, "model_choice": model_choice, "validated": validated, "group": group, "task_type": task_type, "file_name": file_name}
-            for prompt, summary, metadata, batch, model_choice, validated, group, task_type, file_name in zip(all_prompts_content, all_summaries_content, all_metadata_content, all_batches_content, all_model_choice_content, all_validated_content, all_groups_content, all_task_type_content, all_file_names_content)
-        ]
-        #all_logged_content = existing_logged_content + all_logged_content
+        all_groups_logged_content = all_groups_logged_content + group_combined_logged_content
 
         file_path_details = create_batch_file_path_details(file_name)
 
@@ -1162,7 +1927,7 @@ def extract_topics(in_data_file: GradioFileData,
         out_file_paths.append(topic_summary_df_out_path)
 
         # Outputs for markdown table output
-        unique_table_df_display_table = final_out_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        unique_table_df_display_table = final_out_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
 
         if produce_structured_summary_radio == "Yes":
             unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Summary"]]
@@ -1204,9 +1969,9 @@ def extract_topics(in_data_file: GradioFileData,
         # The topic table that can be modified does not need the summary column
         modifiable_topic_summary_df = final_out_topic_summary_df.drop("Summary", axis=1)
 
-        return unique_table_df_display_table_markdown, existing_topics_table, final_out_topic_summary_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, final_out_file_paths, final_out_file_paths, modifiable_topic_summary_df, final_out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df, all_logged_content
+        return unique_table_df_display_table_markdown, existing_topics_table, final_out_topic_summary_df, existing_reference_df, final_out_file_paths, final_out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, all_metadata_content_str, final_time, final_out_file_paths, final_out_file_paths, modifiable_topic_summary_df, final_out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df, all_groups_logged_content
 
-    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, whole_conversation_metadata_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df, all_logged_content
+    return unique_table_df_display_table_markdown, existing_topics_table, existing_topic_summary_df, existing_reference_df, out_file_paths, out_file_paths, latest_batch_completed, log_files_output_paths, log_files_output_paths, all_metadata_content_str, final_time, out_file_paths, out_file_paths, modifiable_topic_summary_df, out_file_paths, join_file_paths, existing_reference_df_pivot, missing_df, all_groups_logged_content
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def wrapper_extract_topics_per_column_value(
@@ -1223,9 +1988,9 @@ def wrapper_extract_topics_per_column_value(
     temperature: float,
     chosen_cols: List[str],
     model_choice: str,
-    candidate_topics: GradioFileData = None,
+    candidate_topics: gr.FileData = None,
     initial_first_loop_state: bool = True,
-    initial_whole_conversation_metadata_str: str = '',
+    initial_all_metadata_content_str: str = '',
     initial_latest_batch_completed: int = 0, 
     initial_time_taken: float = 0,
     initial_table_prompt: str = initial_table_prompt,
@@ -1280,7 +2045,7 @@ def wrapper_extract_topics_per_column_value(
     :param model_choice: The chosen LLM model (e.g., "Gemini", "AWS Claude").
     :param candidate_topics: Optional Gradio FileData for candidate topics (zero-shot).
     :param initial_first_loop_state: Boolean indicating if this is the very first loop iteration.
-    :param initial_whole_conversation_metadata_str: Initial metadata string for the whole conversation.
+    :param initial_all_metadata_content_str: Initial metadata string for the whole conversation.
     :param initial_latest_batch_completed: The batch number completed in the previous run.
     :param initial_time_taken: Initial time taken for processing.
     :param initial_table_prompt: The initial prompt for table summarization.
@@ -1322,7 +2087,7 @@ def wrapper_extract_topics_per_column_value(
     out_message = list()
 
     # Logged content
-    all_logged_content = existing_logged_content
+    all_groups_logged_content = existing_logged_content
 
     # If you have a file input but no file data it hasn't yet been loaded. Load it here.
     if file_data.empty:
@@ -1372,7 +2137,7 @@ def wrapper_extract_topics_per_column_value(
     # Single value outputs - typically the last one is most relevant, or sum for time
     acc_markdown_output = initial_unique_table_df_display_table_markdown
     acc_latest_batch_completed = initial_latest_batch_completed # From the last segment processed
-    acc_whole_conversation_metadata = initial_whole_conversation_metadata_str
+    acc_all_metadata_content = initial_all_metadata_content_str
     acc_total_time_taken = float(initial_time_taken)
     acc_gradio_df = gr.Dataframe(value=pd.DataFrame()) # type: ignore # Placeholder for the last Gradio DF
     acc_logged_content = list()
@@ -1384,7 +2149,7 @@ def wrapper_extract_topics_per_column_value(
         loop_object = unique_values
     else:
         # If multiple unique values, use tqdm progress bar
-        loop_object = progress.tqdm(unique_values, desc=f"Analysing group", total=len(unique_values), unit="groups")
+        loop_object = progress.tqdm(unique_values, desc=f"Analysing group", unit="groups")
 
     for i, group_value in enumerate(loop_object):
         print(f"\nProcessing group: {grouping_col} = {group_value} ({i+1}/{len(unique_values)})")
@@ -1456,7 +2221,7 @@ def wrapper_extract_topics_per_column_value(
                 out_file_paths= list(),# Fresh for each call
                 log_files_output_paths= list(),# Fresh for each call                
                 first_loop_state=current_first_loop_state, # True only for the very first iteration of wrapper                
-                whole_conversation_metadata_str="", # Fresh for each call
+                all_metadata_content_str="", # Fresh for each call
                 initial_table_prompt=initial_table_prompt,
                 initial_table_system_prompt=initial_table_system_prompt,
                 add_existing_topics_system_prompt=add_existing_topics_system_prompt,
@@ -1487,7 +2252,7 @@ def wrapper_extract_topics_per_column_value(
                 tokenizer=tokenizer,
                 assistant_model=assistant_model,
                 max_rows=max_rows,
-                existing_logged_content=all_logged_content,
+                existing_logged_content=all_groups_logged_content,
                 original_full_file_name=original_file_name,
                 additional_instructions_summary_format=additional_instructions_summary_format,
                 progress=progress
@@ -1508,7 +2273,7 @@ def wrapper_extract_topics_per_column_value(
 
             acc_markdown_output = seg_markdown # Keep the latest markdown
             acc_latest_batch_completed = seg_batch_completed # Keep latest batch count
-            acc_whole_conversation_metadata += (("\n---\n" if acc_whole_conversation_metadata else "") +
+            acc_all_metadata_content += (("\n---\n" if acc_all_metadata_content else "") +
                                                f"Segment {grouping_col}={group_value}:\n" +
                                                seg_conversation_metadata)
             acc_total_time_taken += float(seg_time_taken)
@@ -1527,6 +2292,19 @@ def wrapper_extract_topics_per_column_value(
     model_choice_clean = model_name_map[model_choice]["short_name"]
     model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
     column_clean = clean_column_name(chosen_cols, max_length=20)
+
+    # Need to join "Topic number" onto acc_reference_df
+    # If any blanks, there is an issue somewhere, drop and redo
+    if "Topic number" in acc_reference_df.columns:
+        if acc_reference_df["Topic number"].isnull().any():
+            acc_reference_df = acc_reference_df.drop("Topic number", axis=1)
+
+    if "Topic number" not in acc_reference_df.columns:
+        if "Topic number" in acc_topic_summary_df.columns:
+            if "General topic" in acc_topic_summary_df.columns:
+                acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on=["General topic", "Subtopic", "Sentiment"], how="left")
+            elif "Main heading" in acc_topic_summary_df.columns:
+                acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
     
     if "Group" in acc_reference_df.columns:        
         
@@ -1552,7 +2330,7 @@ def wrapper_extract_topics_per_column_value(
         acc_out_file_paths.extend([acc_reference_df_path, acc_topic_summary_df_path])
 
         # Outputs for markdown table output
-        unique_table_df_display_table = acc_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        unique_table_df_display_table = acc_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
         if produce_structured_summary_radio == "Yes":
             unique_table_df_display_table = unique_table_df_display_table[["General topic", "Subtopic", "Summary", "Group"]]
             unique_table_df_display_table.rename(columns={"General topic":"Main heading", "Subtopic":"Subheading"}, inplace=True)
@@ -1561,7 +2339,7 @@ def wrapper_extract_topics_per_column_value(
             acc_markdown_output = unique_table_df_display_table[["General topic", "Subtopic", "Sentiment", "Number of responses", "Summary", "Group"]].to_markdown(index=False)
             
 
-    acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(acc_whole_conversation_metadata, model_choice, model_name_map)
+    acc_input_tokens, acc_output_tokens, acc_number_of_calls = calculate_tokens_from_metadata(acc_all_metadata_content, model_choice, model_name_map)
 
     out_message = '\n'.join(out_message)
     out_message = out_message + " " + f"Topic extraction finished processing all groups. Total time: {acc_total_time_taken:.2f}s"
@@ -1586,7 +2364,7 @@ def wrapper_extract_topics_per_column_value(
         acc_latest_batch_completed, # From the last successfully processed segment
         acc_log_files_output_paths, # Slot 1 for log_files_output_paths
         acc_log_files_output_paths, # Slot 2 for log_files_output_paths
-        acc_whole_conversation_metadata,
+        acc_all_metadata_content,
         acc_total_time_taken,
         acc_out_file_paths, # Slot 3
         acc_out_file_paths, # Slot 4
@@ -1609,16 +2387,16 @@ def join_modified_topic_names_to_ref_table(modified_topic_summary_df:pd.DataFram
 
     # Drop rows where Number of responses is either NA or null
     modified_topic_summary_df = modified_topic_summary_df[~modified_topic_summary_df["Number of responses"].isnull()]
-    modified_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
+    modified_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Topic number"], inplace=True)
 
     # First, join the modified topics to the original topics dataframe based on index to have the modified names alongside the original names
-    original_topic_summary_df_m = original_topic_summary_df.merge(modified_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic_number"]], on="Topic_number", how="left", suffixes=("", "_mod"))
+    original_topic_summary_df_m = original_topic_summary_df.merge(modified_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on="Topic number", how="left", suffixes=("", "_mod"))
 
-    original_topic_summary_df_m.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Topic_number"], inplace=True)
+    original_topic_summary_df_m.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Topic number"], inplace=True)
 
 
     # Then, join these new topic names onto the reference_df, merge based on the original names
-    modified_reference_df = reference_df.merge(original_topic_summary_df_m[["Topic_number", "General Topic_mod", "Subtopic_mod", "Sentiment_mod"]], on=["Topic_number"], how="left")
+    modified_reference_df = reference_df.merge(original_topic_summary_df_m[["Topic number", "General Topic_mod", "Subtopic_mod", "Sentiment_mod"]], on=["Topic number"], how="left")
 
     
     modified_reference_df.drop(["General topic", "Subtopic", "Sentiment"], axis=1, inplace=True, errors="ignore")
@@ -1634,7 +2412,7 @@ def join_modified_topic_names_to_ref_table(modified_topic_summary_df:pd.DataFram
 
     modified_reference_df.sort_values(["Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
-    modified_reference_df = modified_reference_df.loc[:, ["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Topic_number"]]
+    modified_reference_df = modified_reference_df.loc[:, ["Response References", "General topic", "Subtopic", "Sentiment", "Summary", "Start row of group", "Topic number"]]
 
     # Drop rows where Response References is either NA or null
     modified_reference_df = modified_reference_df[~modified_reference_df["Response References"].isnull()]
@@ -1697,7 +2475,7 @@ def modify_existing_output_tables(original_topic_summary_df:pd.DataFrame, modifi
         raise Exception("Reference and unique topic tables not found.")
     
     # Outputs for markdown table output
-    unique_table_df_revised_display = modifiable_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+    unique_table_df_revised_display = modifiable_topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
     deduplicated_unique_table_markdown = unique_table_df_revised_display.to_markdown(index=False)
     
 
@@ -1718,7 +2496,7 @@ def all_in_one_pipeline(
     temperature: float,
     chosen_cols: List[str],
     model_choice: str,
-    candidate_topics: GradioFileData,
+    candidate_topics: gr.FileData,
     first_loop_state: bool,
     conversation_metadata_text: str,
     latest_batch_completed: int,
@@ -1774,7 +2552,7 @@ def all_in_one_pipeline(
         temperature (float): Temperature setting for the LLM.
         chosen_cols (List[str]): List of columns chosen for analysis.
         model_choice (str): The chosen LLM model.
-        candidate_topics (GradioFileData): Gradio file data for candidate topics.
+        candidate_topics (gr.FileData): Gradio file data for candidate topics.
         first_loop_state (bool): State indicating if it's the first loop.
         conversation_metadata_text (str): Text containing conversation metadata.
         latest_batch_completed (int): The latest batch number completed.
@@ -1869,7 +2647,7 @@ def all_in_one_pipeline(
         model_choice=model_choice,
         candidate_topics=candidate_topics,
         initial_first_loop_state=first_loop_state,
-        initial_whole_conversation_metadata_str=conversation_metadata_text,
+        initial_all_metadata_content_str=conversation_metadata_text,
         initial_latest_batch_completed=latest_batch_completed,
         initial_time_taken=time_taken_so_far,
         initial_table_prompt=initial_table_prompt_text,
