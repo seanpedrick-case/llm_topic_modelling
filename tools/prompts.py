@@ -50,10 +50,9 @@ add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create o
 In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
-Responses are shown in the following Response table: 
 {response_table}
 
-Topics known to be relevant to this dataset are shown in the following Topics table: 
+Topics that are relevant to this dataset are shown in the following Topics table: 
 {topics}
 
 New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"""
@@ -62,6 +61,7 @@ New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"
 # VALIDATION PROMPTS
 ###
 # These are prompts used to validate previous LLM outputs, and create corrected versions of the outputs if errors are found.
+validation_system_prompt = system_prompt
 
 validation_prompt_prefix_default = """The following instructions were previously provided to create an output table:\n'"""
 
@@ -69,16 +69,13 @@ previous_table_introduction_default = """'\n\nThe following output table was cre
 
 validation_prompt_suffix_default = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
 
-- Remove rows where topics are not relevant to any responses in the provided response table.
-- Assign responses to topics from the provided suggested topics table if relevant (only choose from the provided list, do not create new topics).
-- Remove Response References for responses that are incorrectly assigned to topics.
-- If a response has no topic assigned, check if there is a relevant topic in the provided suggested topics table. If so, assign the response to the relevant topic.
-- Correct incorrect information in the summary column from the response text.{additional_validation_issues}
+- Remove rows where responses are not relevant to the assigned topic, or where responses are not relevant to any topic.
+- Remove rows where a topic is not assigned to any specific response.
+- If the current topic assignment does not cover all information in a response, assign responses to relevant topics from the suggested topics table, or create a new topic if necessary.
+- Correct incorrect information in the summary column, which is a summary of the relevant response text.{additional_validation_issues}
 - Any other obvious errors that you can identify.
 
-With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, return the original table.
-
-New table:"""
+With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change"."""
 
 ###
 # SENTIMENT CHOICES
@@ -102,7 +99,6 @@ For each of the responses in the Response table, you will create a row for each 
 
 Do not add any other columns. Do not add any other text to your response.
 
-Responses are shown in the following Response table: 
 {response_table}
 
 Headings to structure the summary are in the following table: 

@@ -233,16 +233,16 @@ with app:
 
         with gr.Accordion("1. Extract topics - go to first tab for file upload, model choice, and other settings before clicking this button", open = True):
             context_textbox.render()
-            if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":                
+            if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
                 additional_summary_instructions_textbox = gr.Textbox(value="", visible=True, label="Additional summary instructions")
             else:
                 additional_summary_instructions_textbox = gr.Textbox(value="", visible=False, label="Additional summary instructions")
 
             extract_topics_btn = gr.Button("1. Extract topics", variant="secondary")
-            topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=False, height=FILE_INPUT_HEIGHT)
+            topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=True, height=FILE_INPUT_HEIGHT, file_count="multiple")
             
-        with gr.Accordion("1b. Validate topics - run validation on previously extracted topics", open = False):
-            if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":                
+        with gr.Accordion("1b. Validate topics - validate previous results with an LLM", open = False):
+            if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
                 additional_validation_issues_textbox = gr.Textbox(value="", visible=True, label="Additional validation issues for the model to consider (bullet-point list)")
             else:
                 additional_validation_issues_textbox = gr.Textbox(value="", visible=False, label="Additional validation issues for the model to consider (bullet-point list)")
@@ -467,11 +467,11 @@ with app:
     validate_topics_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
     success(load_in_data_file, 
         inputs = [in_data_files, in_colnames, batch_size_number, in_excel_sheets], outputs = [file_data_state, working_data_file_name_textbox, total_number_of_batches]).\
+        success(load_in_previous_data_files, inputs=[topic_extraction_output_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
         success(fn=validate_topics_wrapper,
         inputs=[file_data_state,
                 master_reference_df_state,
                 master_unique_topics_df_state,
-                logged_content_df,
                 working_data_file_name_textbox,
                 in_colnames,
                 batch_size_number,
@@ -493,7 +493,9 @@ with app:
                 original_data_file_name_textbox,
                 additional_validation_issues_textbox,
                 max_time_for_loop_num,
-                sentiment_checkbox],
+                in_data_files,
+                sentiment_checkbox,
+                logged_content_df],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,

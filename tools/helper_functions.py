@@ -374,6 +374,10 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
 
+    # Ensure 'Start row of group' column is numeric to avoid comparison errors
+    if 'Start row of group' in reference_df.columns:
+        reference_df['Start row of group'] = pd.to_numeric(reference_df['Start row of group'], errors='coerce')
+    
     out_topic_summary_df = (reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
             .agg({
                 'Response References': 'size',  # Count the number of references
