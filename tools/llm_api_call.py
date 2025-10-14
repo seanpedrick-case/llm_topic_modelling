@@ -623,7 +623,7 @@ def validate_topics_wrapper(
     
     print(f"Processing validation for {len(unique_groups)} groups: {unique_groups}")
     
-    # Initialize accumulators for results across all groups
+    # Initialise accumulators for results across all groups
     acc_reference_df = pd.DataFrame()
     acc_topic_summary_df = pd.DataFrame()
     acc_logged_content = list()
@@ -762,6 +762,25 @@ def validate_topics_wrapper(
         acc_topic_summary_df.to_csv(validation_unique_topics_path, index=None, encoding='utf-8-sig')
         acc_output_files.append(validation_unique_topics_path)
     
+    if "Group" in acc_reference_df.columns:        
+        # Create missing references dataframe using consolidated data from all groups
+        # This ensures we correctly identify missing references across all groups
+        # Get all basic_response_data from all groups
+        all_basic_response_data = list()
+        for logged_item in acc_logged_content:
+            if 'basic_response_data' in logged_item:
+                all_basic_response_data.extend(logged_item['basic_response_data'])
+        
+        if all_basic_response_data:
+            all_basic_response_df = pd.DataFrame(all_basic_response_data)
+            acc_missing_df = create_missing_references_df(all_basic_response_df, acc_reference_df)
+        else:
+            # Fallback: if no logged content, create empty missing_df
+            acc_missing_df = pd.DataFrame(columns=['Missing Reference', 'Response Character Count'])
+    else:
+        # Fallback: if no logged content, create empty missing_df
+        acc_missing_df = pd.DataFrame(columns=['Missing Reference', 'Response Character Count'])
+    
     # Create display table markdown for validation results
     if not acc_topic_summary_df.empty:
         validation_display_table = acc_topic_summary_df.copy()
@@ -803,7 +822,7 @@ def validate_topics_wrapper(
         acc_topic_summary_df,               # modifiable_unique_topics_df_state
         acc_output_files,                   # modification_input_files
         [],                                 # in_join_files (empty for validation)
-        pd.DataFrame(),                     # missing_df_state (empty for validation)
+        acc_missing_df,                     # missing_df_state (empty for validation)
         acc_input_tokens,                   # input_tokens_num
         acc_output_tokens,                  # output_tokens_num
         acc_llm_calls,                     # number_of_calls_num
@@ -2198,12 +2217,8 @@ def extract_topics(in_data_file: gr.FileData,
         pd.DataFrame(basic_response_data).to_csv(basic_response_data_out_path, index=None, encoding='utf-8-sig')
         log_files_output_paths.append(basic_response_data_out_path)
 
-        # Create missing references dataframe
-        missing_df = create_missing_references_df(basic_response_data, existing_reference_df)
-
-        missing_df_out_path = output_folder + file_path_details + "_missing_references_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
-        missing_df.to_csv(missing_df_out_path, index=None, encoding='utf-8-sig')
-        log_files_output_paths.append(missing_df_out_path)
+        # Note: missing_df creation moved to wrapper functions to handle grouped processing correctly
+        missing_df = pd.DataFrame()
 
         out_file_paths = list(set(out_file_paths))
         log_files_output_paths = list(set(log_files_output_paths))        
@@ -2361,13 +2376,12 @@ def wrapper_extract_topics_per_column_value(
         raise ValueError(f"Selected column '{grouping_col}' not found in file_data.")
 
     unique_values = file_data[grouping_col].unique()
-    #print("unique_values:", unique_values)
 
     if len(unique_values) > MAX_GROUPS:
         print(f"Warning: More than {MAX_GROUPS} unique values found in '{grouping_col}'. Processing only the first {MAX_GROUPS}.")
         unique_values = unique_values[:MAX_GROUPS]
 
-    # Initialize accumulators for results across all unique values
+    # Initialise accumulators for results across all unique values
     # DataFrames are built upon iteratively
     acc_topics_table = initial_existing_topics_table.copy()
     acc_reference_df = initial_existing_reference_df.copy()
@@ -2554,6 +2568,20 @@ def wrapper_extract_topics_per_column_value(
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
     
     if "Group" in acc_reference_df.columns:        
+        # Create missing references dataframe using consolidated data from all groups
+        # This ensures we correctly identify missing references across all groups
+        # Get all basic_response_data from all groups
+        all_basic_response_data = list()
+        for logged_item in acc_logged_content:
+            if 'basic_response_data' in logged_item:
+                all_basic_response_data.extend(logged_item['basic_response_data'])
+        
+        if all_basic_response_data:
+            all_basic_response_df = pd.DataFrame(all_basic_response_data)
+            acc_missing_df = create_missing_references_df(all_basic_response_df, acc_reference_df)
+        else:
+            # Fallback: if no logged content, create empty missing_df
+            acc_missing_df = pd.DataFrame(columns=['Missing Reference', 'Response Character Count'])
         
         acc_reference_df_path = output_folder + overall_file_name + "_col_" + column_clean + "_all_final_reference_table_" + model_choice_clean_short + ".csv"
         acc_topic_summary_df_path = output_folder + overall_file_name + "_col_" + column_clean +  "_all_final_unique_topics_" + model_choice_clean_short + ".csv"
@@ -2625,7 +2653,6 @@ def wrapper_extract_topics_per_column_value(
         out_message,
         acc_logged_content
     )
-
 
 def join_modified_topic_names_to_ref_table(modified_topic_summary_df:pd.DataFrame, original_topic_summary_df:pd.DataFrame, reference_df:pd.DataFrame):
     '''

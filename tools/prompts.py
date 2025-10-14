@@ -75,7 +75,7 @@ validation_prompt_suffix_default = """\n\nBased on the above information, you ne
 - Correct incorrect information in the summary column, which is a summary of the relevant response text.{additional_validation_issues}
 - Any other obvious errors that you can identify.
 
-With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change"."""
+With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
 
 ###
 # SENTIMENT CHOICES
