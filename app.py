@@ -243,9 +243,13 @@ with app:
             
         with gr.Accordion("1b. Validate topics - validate previous results with an LLM", open = False):
             if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
-                additional_validation_issues_textbox = gr.Textbox(value="", visible=True, label="Additional validation issues for the model to consider (bullet-point list)")
+                with gr.Row():
+                    show_previous_table_radio = gr.Radio(label="Provide response data to validation process", value="Yes", choices=["Yes", "No"], visible=True, scale=1)
+                    additional_validation_issues_textbox = gr.Textbox(value="", visible=True, label="Additional validation issues for the model to consider (bullet-point list)", scale=3)
             else:
-                additional_validation_issues_textbox = gr.Textbox(value="", visible=False, label="Additional validation issues for the model to consider (bullet-point list)")
+                with gr.Row():
+                    show_previous_table_radio = gr.Radio(label="Provide response data to validation process", value="Yes", choices=["Yes", "No"], visible=False, scale=1)
+                    additional_validation_issues_textbox = gr.Textbox(value="", visible=False, label="Additional validation issues for the model to consider (bullet-point list)", scale=3)
             validate_topics_btn = gr.Button("1b. Validate topics", variant="secondary")
             validation_output_files = gr.File(label="Validation output files", scale=1, interactive=False, height=FILE_INPUT_HEIGHT)
 
@@ -436,7 +440,8 @@ with app:
                 output_folder_state,
                 logged_content_df,
                 additional_summary_instructions_textbox,
-                additional_validation_issues_textbox],
+                additional_validation_issues_textbox,
+                show_previous_table_radio],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -495,7 +500,8 @@ with app:
                 max_time_for_loop_num,
                 in_data_files,
                 sentiment_checkbox,
-                logged_content_df],
+                logged_content_df,
+                show_previous_table_radio],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -615,7 +621,8 @@ with app:
                 usage_logs_state,
                 logged_content_df,
                 additional_summary_instructions_textbox,
-                additional_validation_issues_textbox
+                additional_validation_issues_textbox,
+                show_previous_table_radio
             ],
             outputs=[
                 display_topic_table_markdown,

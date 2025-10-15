@@ -80,6 +80,9 @@ def reconstruct_markdown_table_from_reference_df(reference_df: pd.DataFrame, sta
         
         if filtered_df.empty:
             return "", pd.DataFrame()
+
+    if "Revised summary" in filtered_df.columns and "Summary" not in filtered_df.columns:
+        filtered_df = filtered_df.rename(columns={"Revised summary": "Summary"})
     
     # Group by General topic, Subtopic, and Sentiment to aggregate response references
     grouped_df = filtered_df.groupby(['General topic', 'Subtopic', 'Sentiment']).agg({
@@ -111,6 +114,8 @@ def reconstruct_markdown_table_from_reference_df(reference_df: pd.DataFrame, sta
     cleaned_df['Summary'] = cleaned_df['Summary'].apply(
         lambda x: re.sub(r'^Rows\s+\d+\s+to\s+\d+:\s*', '', x) if isinstance(x, str) else x
     )
+
+    cleaned_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Response References"], inplace=True)
     
     # Create the markdown table
     markdown_table = "| General topic | Subtopic | Sentiment | Response References | Summary |\n"
@@ -156,6 +161,7 @@ def validate_topics(
     max_time_for_loop: int = MAX_TIME_FOR_LOOP,
     sentiment_checkbox: str = "Negative or Positive",
     logged_content: list = None,
+    show_previous_table: str = "Yes",
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -188,8 +194,9 @@ def validate_topics(
     - additional_validation_issues_provided (str): Additional validation issues provided
     - max_time_for_loop (int): Maximum time for the loop
     - logged_content (list, optional): The logged content from the original run. If None, tables will be reconstructed from reference_df
+    - show_previous_table (str): Whether to show the previous table ("Yes" or "No").
     - progress: Progress bar object
-    
+
     Returns:
     - Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]: Updated reference_df, topic_summary_df, logged_content, conversation_metadata_str, total_input_tokens, total_output_tokens, total_llm_calls
     """
@@ -337,8 +344,8 @@ def validate_topics(
                 validation_topic_assignment_prompt = validation_topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")
 
             # Provide new validation issues on a new line if provided
-            if additional_validation_issues_provided:
-                additional_validation_issues_provided = "\n" + additional_validation_issues_provided
+            #if additional_validation_issues_provided:
+            #    additional_validation_issues_provided = "\n" + additional_validation_issues_provided
             
             # Format the validation prompt with the response table and topics
             if produce_structured_summary_radio != "Yes":
@@ -352,7 +359,7 @@ def validate_topics(
                     response_reference_format=validation_response_reference_format,
                     add_existing_topics_summary_format=additional_instructions_summary_format,
                     previous_table_introduction=previous_table_introduction_default,
-                    previous_table=previous_table_content,
+                    previous_table=previous_table_content if show_previous_table == "Yes" else "",
                     validate_prompt_suffix=validation_prompt_suffix_default.format(additional_validation_issues=additional_validation_issues_provided)
                 )
             else:
@@ -434,7 +441,7 @@ def validate_topics(
                 if validation_new_reference_df.equals(validation_reference_df):
                     print("Validation new reference df is identical to existing df (no change response), skipping concatenation")
                 else:
-                    print("Validation new reference df is not empty, appending new table to validation reference df")
+                    #print("Validation new reference df is not empty, appending new table to validation reference df")
                     # Remove any existing entries for this batch range to avoid duplicates
                     start_row_reported = int(validation_start_row) + 1
                     end_row_reported = int(validation_end_row) + 1
@@ -499,8 +506,11 @@ def validate_topics(
     # Sort output dataframes
     validation_reference_df["Response References"] = validation_reference_df["Response References"].astype(str).astype(int)
     validation_reference_df["Start row of group"] = validation_reference_df["Start row of group"].astype(int)
+    validation_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
     validation_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
+    
     validation_topic_summary_df["Number of responses"] = validation_topic_summary_df["Number of responses"].astype(int)
+    validation_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment"], inplace=True)
     validation_topic_summary_df.sort_values(["Group","Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True], inplace=True)
     
     print("Validation process completed.")
@@ -536,6 +546,7 @@ def validate_topics_wrapper(
     in_data_files: Any = None,
     sentiment_checkbox: str = "Negative or Positive",
     logged_content: List[dict] = None,
+    show_previous_table: str = "Yes",
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -570,6 +581,7 @@ def validate_topics_wrapper(
         in_data_files (Any, optional): The input data files (e.g., Gradio FileData). If None, file_data must be provided.
         sentiment_checkbox (str): Sentiment analysis option.
         logged_content (List[dict], optional): The logged content from the original run. If None, tables will be reconstructed from reference_df.
+        show_previous_table (str): Whether to show the previous table ("Yes" or "No").
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
@@ -694,14 +706,17 @@ def validate_topics_wrapper(
                 additional_validation_issues_provided=additional_validation_issues_provided,
                 max_time_for_loop=max_time_for_loop,
                 sentiment_checkbox=sentiment_checkbox,
-                logged_content=logged_content
+                logged_content=logged_content,
+                show_previous_table=show_previous_table
             )
             
             # Accumulate results
             if not validation_reference_df.empty:
                 acc_reference_df = pd.concat([acc_reference_df, validation_reference_df], ignore_index=True)
+                acc_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
             if not validation_topic_summary_df.empty:
                 acc_topic_summary_df = pd.concat([acc_topic_summary_df, validation_topic_summary_df], ignore_index=True)
+                acc_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment"], inplace=True)
             
             acc_logged_content.extend(updated_logged_content)
             acc_conversation_metadata += (("\n---\n" if acc_conversation_metadata else "") +
@@ -743,15 +758,23 @@ def validate_topics_wrapper(
         if "Topic number" in acc_topic_summary_df.columns:
             if "General topic" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on=["General topic", "Subtopic", "Sentiment"], how="left")
+                # Sort output dataframes
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
+                acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
             elif "Main heading" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
+                # Sort output dataframes
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
+                acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "Main heading", "Subheading", "Topic number"], inplace=True)
 
-    # Sort output dataframes
-    acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
-    acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
-    acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
-    acc_topic_summary_df["Number of responses"] = acc_topic_summary_df["Number of responses"].astype(int)
-    acc_topic_summary_df.sort_values(["Group","Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True], inplace=True)
+    if "General topic" in acc_topic_summary_df.columns:
+        acc_topic_summary_df["Number of responses"] = acc_topic_summary_df["Number of responses"].astype(int)
+        acc_topic_summary_df.sort_values(["Group","Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True], inplace=True)
+    elif "Main heading" in acc_topic_summary_df.columns:
+        acc_topic_summary_df["Number of responses"] = acc_topic_summary_df["Number of responses"].astype(int)
+        acc_topic_summary_df.sort_values(["Group","Number of responses", "Main heading", "Subheading", "Topic number"], ascending=[True, False, True, True, True], inplace=True)
     
     # Save consolidated validation dataframes to CSV
     if not acc_reference_df.empty:
@@ -1132,6 +1155,13 @@ def write_llm_output_and_logs(response_text: str,
     out_topic_summary_df = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment"])  
     is_error = False # If there was an error in parsing, return boolean saying error
 
+    if produce_structured_summary_radio == "Yes":
+        existing_topics_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+        existing_reference_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+        topic_with_response_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+        out_reference_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+        out_topic_summary_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+
     # Convert conversation to string and add to log outputs
     whole_conversation_str = '\n'.join(whole_conversation)    
     all_metadata_content_str = '\n'.join(all_metadata_content)
@@ -1149,6 +1179,8 @@ def write_llm_output_and_logs(response_text: str,
         with open(whole_conversation_path_meta, "w", encoding='utf-8-sig', errors='replace') as f: f.write(all_metadata_content_str)
         log_files_output_paths.append(whole_conversation_path_meta)
 
+    
+
     # Check if response is "No change" - if so, return input dataframes
     stripped_response = response_text.strip()
     if stripped_response.lower().startswith("no change"):
@@ -1158,7 +1190,10 @@ def write_llm_output_and_logs(response_text: str,
         # but we still need to process them through the same logic as normal processing
         
         # Create empty topic_with_response_df since no new topics were generated
-        topic_with_response_df = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment", "Response References", "Summary"])
+        if produce_structured_summary_radio == "Yes":
+            topic_with_response_df = pd.DataFrame(columns=["Main heading", "Subheading", "Sentiment", "Response References", "Summary"])
+        else:
+            topic_with_response_df = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment", "Response References", "Summary"])        
         
         # For "No change", we return the existing dataframes as-is (they already contain all the data)
         # This is equivalent to the normal processing where new_reference_df would be empty
@@ -1531,6 +1566,8 @@ def process_batch_with_llm(
         reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, 
         MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=assistant_prefill, master=not is_first_batch
     )
+
+    print("Response text:", response_text)
     
     # Return output tables
     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, batch_file_path_details, is_error = write_llm_output_and_logs(
@@ -1692,9 +1729,15 @@ def extract_topics(in_data_file: gr.FileData,
     assistant_model = None
     zero_shot_topics_df = pd.DataFrame()
     missing_df = pd.DataFrame()
-    new_reference_df = pd.DataFrame(columns=["Response References",	"General topic",	"Subtopic",	"Sentiment",	"Start row of group",	"Group"	,"Topic number",	"Summary"])
+    new_reference_df = pd.DataFrame(columns=["Response References",	"General topic",	"Subtopic",	"Sentiment",	"Start row of group",	"Group"	,"Topic number","Summary"])
     new_topic_summary_df = pd.DataFrame(columns=["General topic","Subtopic","Sentiment","Group","Number of responses","Summary"])
-    new_topic_df = pd.DataFrame()
+    if existing_topic_summary_df.empty:
+        existing_topic_summary_df = pd.DataFrame(columns=["General topic","Subtopic","Sentiment","Group","Number of responses","Summary"])
+    if existing_reference_df.empty:
+        existing_reference_df = pd.DataFrame(columns=["Response References","General topic","Subtopic","Sentiment","Start row of group","Group","Topic number","Summary"])
+    new_topic_df = pd.DataFrame(columns=["General topic","Subtopic","Sentiment","Group","Number of responses","Summary"])
+    out_reference_df = pd.DataFrame(columns=["Response References","General topic","Subtopic","Sentiment","Start row of group","Group","Topic number","Summary"])
+    out_topic_summary_df = pd.DataFrame(columns=["General topic","Subtopic","Sentiment","Group","Number of responses","Summary"])
     task_type = "Topic extraction"
 
     # Logged content
@@ -1805,6 +1848,9 @@ def extract_topics(in_data_file: gr.FileData,
             else:
                 response_table_prompt = ""
 
+            existing_topic_summary_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+            existing_reference_df.rename(columns={"Main heading":"General topic", "Subheading": "Subtopic"}, inplace=True, errors="ignore")
+
             # If the latest batch of responses contains at least one instance of text
             if not batch_basic_response_df.empty:
 
@@ -1821,7 +1867,9 @@ def extract_topics(in_data_file: gr.FileData,
                         zero_shot_topics = zero_shot_topics.fillna("")      # Replace NaN with empty string
                         zero_shot_topics = zero_shot_topics.astype(str)
                             
-                        zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics)                        
+                        zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics)
+
+                        print("Existing topic summary dataframe:", existing_topic_summary_df)
 
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
                         if not existing_topic_summary_df.empty and force_zero_shot_radio != "Yes":
@@ -1832,12 +1880,14 @@ def extract_topics(in_data_file: gr.FileData,
                         # If you have already created revised zero shot topics, concat to the current
                         existing_topic_summary_df = pd.concat([existing_topic_summary_df, zero_shot_topics_df])
 
-                    #all_topic_tables_df_merged = existing_topic_summary_df
+                    print("Cleaning topic summary dataframe...:", existing_topic_summary_df)
                     existing_topic_summary_df["Number of responses"] = ""
                     existing_topic_summary_df.fillna("", inplace=True)
                     existing_topic_summary_df["General topic"] = existing_topic_summary_df["General topic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df["Subtopic"] = existing_topic_summary_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df = existing_topic_summary_df.drop_duplicates()
+
+                    print("Cleaned topic summary dataframe:", existing_topic_summary_df)
                     
 
                     # If user has chosen to try to force zero shot topics, then the prompt is changed to ask the model not to deviate at all from submitted topic list.
@@ -1858,19 +1908,23 @@ def extract_topics(in_data_file: gr.FileData,
 
                     if produce_structured_summary_radio == "Yes":
                         if "General topic" in topics_df_for_markdown.columns:
-                            topics_df_for_markdown = topics_df_for_markdown.rename(columns={"General topic":"Main heading"})
+                            topics_df_for_markdown.rename(columns={"General topic":"Main heading"}, inplace=True, errors="ignore")
                         if "Subtopic" in topics_df_for_markdown.columns:
-                            topics_df_for_markdown = topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"})
+                            topics_df_for_markdown.rename(columns={"Subtopic":"Subheading"}, inplace=True, errors="ignore")
 
                     # Remove duplicate General topic and subtopic names, prioritising topics where a general topic is provided
-                    if "General topic" in topics_df_for_markdown.columns:
+                    if "General topic" in topics_df_for_markdown.columns and "Subtopic" in topics_df_for_markdown.columns:
                         topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"], ascending=[False, True])
                         topics_df_for_markdown = topics_df_for_markdown.drop_duplicates(["General topic", "Subtopic"], keep="first")
                         topics_df_for_markdown = topics_df_for_markdown.sort_values(["General topic", "Subtopic"], ascending=[True, True])
-                    else:
+                    elif "Subtopic" in topics_df_for_markdown.columns:
                         topics_df_for_markdown = topics_df_for_markdown.sort_values(["Subtopic"], ascending=[True])
                         topics_df_for_markdown = topics_df_for_markdown.drop_duplicates(["Subtopic"], keep="first")
                         topics_df_for_markdown = topics_df_for_markdown.sort_values(["Subtopic"], ascending=[True])
+                    elif "Main heading" in topics_df_for_markdown.columns and "Subheading" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["Main heading", "Subheading"], ascending=[True, True])
+                        topics_df_for_markdown = topics_df_for_markdown.drop_duplicates(["Main heading", "Subheading"], keep="first")
+                        topics_df_for_markdown = topics_df_for_markdown.sort_values(["Main heading", "Subheading"], ascending=[True, True])
 
                     unique_topics_markdown = topics_df_for_markdown.to_markdown(index=False)
                     unique_topics_markdown = normalise_string(unique_topics_markdown)
@@ -1881,9 +1935,7 @@ def extract_topics(in_data_file: gr.FileData,
                     # Should the outputs force only one single topic assignment per response?
                     if force_single_topic_radio != "Yes": force_single_topic_prompt = ""
                     else:
-                        topic_assignment_prompt = topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")
-
-                    
+                        topic_assignment_prompt = topic_assignment_prompt.replace("Assign topics", "Assign a topic").replace("assign Subtopics", "assign a Subtopic").replace("Subtopics", "Subtopic").replace("Topics", "Topic").replace("topics", "a topic")                    
 
                     # Format the summary prompt with the response table and topics
                     if produce_structured_summary_radio != "Yes":
@@ -1905,6 +1957,8 @@ def extract_topics(in_data_file: gr.FileData,
                         topics=unique_topics_markdown, summary_format=additional_instructions_summary_format)
                     
                     batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"
+
+                    print("Formatted summary prompt:", formatted_summary_prompt)
 
                     # Use the helper function to process the batch
                     new_topic_df, new_reference_df, new_topic_summary_df, is_error, current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged, topic_table_out_path, reference_table_out_path, topic_summary_df_out_path = process_batch_with_llm(
@@ -1942,6 +1996,8 @@ def extract_topics(in_data_file: gr.FileData,
                         task_type=task_type,
                         assistant_prefill=add_existing_topics_assistant_prefill
                     )
+
+                    print("Completed batch processing")
 
                     all_prompts_content.append(current_prompt_content_logged)
                     all_responses_content.append(current_summary_content_logged)
@@ -2273,6 +2329,7 @@ def wrapper_extract_topics_per_column_value(
     existing_logged_content:list=list(),
     additional_instructions_summary_format:str="",
     additional_validation_issues_provided:str="",
+    show_previous_table:str="Yes",
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
@@ -2329,6 +2386,7 @@ def wrapper_extract_topics_per_column_value(
     :param force_single_topic_prompt: Prompt for forcing a single topic.
     :param additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
     :param additional_validation_issues_provided: Additional validation issues provided by the user.
+    :param show_previous_table: Whether to show the previous table ("Yes" or "No").
     :param max_tokens: Maximum tokens for LLM generation.
     :param model_name_map: Dictionary mapping model names to their properties.
     :param max_time_for_loop: Maximum time allowed for the processing loop.
@@ -2564,8 +2622,23 @@ def wrapper_extract_topics_per_column_value(
         if "Topic number" in acc_topic_summary_df.columns:
             if "General topic" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on=["General topic", "Subtopic", "Sentiment"], how="left")
+                # Sort output dataframes
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
+                acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
             elif "Main heading" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
+                # Sort output dataframes
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
+                acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "Main heading", "Subheading", "Topic number"], inplace=True)
+
+    if "General topic" in acc_topic_summary_df.columns:
+        acc_topic_summary_df["Number of responses"] = acc_topic_summary_df["Number of responses"].astype(int)
+        acc_topic_summary_df.sort_values(["Group","Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True], inplace=True)
+    elif "Main heading" in acc_topic_summary_df.columns:
+        acc_topic_summary_df["Number of responses"] = acc_topic_summary_df["Number of responses"].astype(int)
+        acc_topic_summary_df.sort_values(["Group","Number of responses", "Main heading", "Subheading", "Topic number"], ascending=[True, False, True, True, True], inplace=True)
     
     if "Group" in acc_reference_df.columns:        
         # Create missing references dataframe using consolidated data from all groups
@@ -2804,6 +2877,7 @@ def all_in_one_pipeline(
     existing_logged_content:list=list(),
     additional_instructions_summary_format:str="",
     additional_validation_issues_provided:str="",
+    show_previous_table:str="Yes",
     model: object = None,
     tokenizer: object = None,
     assistant_model: object = None,    
@@ -2860,6 +2934,7 @@ def all_in_one_pipeline(
         existing_logged_content (list, optional): Existing logged content. Defaults to list().
         additional_instructions_summary_format (str, optional): Summary format for adding existing topics. Defaults to "".
         additional_validation_issues_provided (str, optional): Additional validation issues provided by the user. Defaults to "".
+        show_previous_table (str, optional): Whether to show the previous table ("Yes" or "No"). Defaults to "Yes".
         model (object, optional): Loaded local model object. Defaults to None.
         tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.
         assistant_model (object, optional): Loaded local assistant model object. Defaults to None.
@@ -2951,7 +3026,8 @@ def all_in_one_pipeline(
         assistant_model=assistant_model,
         max_rows=max_rows,
         additional_instructions_summary_format=additional_instructions_summary_format,
-        additional_validation_issues_provided=additional_validation_issues_provided
+        additional_validation_issues_provided=additional_validation_issues_provided,
+        show_previous_table=show_previous_table
     )
 
     total_input_tokens += out_input_tokens

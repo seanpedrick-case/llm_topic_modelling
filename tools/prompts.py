@@ -72,7 +72,8 @@ validation_prompt_suffix_default = """\n\nBased on the above information, you ne
 - Remove rows where responses are not relevant to the assigned topic, or where responses are not relevant to any topic.
 - Remove rows where a topic is not assigned to any specific response.
 - If the current topic assignment does not cover all information in a response, assign responses to relevant topics from the suggested topics table, or create a new topic if necessary.
-- Correct incorrect information in the summary column, which is a summary of the relevant response text.{additional_validation_issues}
+- Correct any false information in the summary column, which is a summary of the relevant response text.
+{additional_validation_issues}
 - Any other obvious errors that you can identify.
 
 With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
