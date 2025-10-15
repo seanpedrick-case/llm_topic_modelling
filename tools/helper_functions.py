@@ -266,7 +266,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
     if for_modified_table == False:            
         return reference_file_data, unique_file_data, latest_batch, out_message, reference_file_name, unique_file_name
     else:        
-        reference_file_data.drop("Topic_number", axis=1, inplace=True, errors="ignore")
+        reference_file_data.drop("Topic number", axis=1, inplace=True, errors="ignore")
 
         unique_file_data = create_topic_summary_df_from_reference_table(reference_file_data)
 
@@ -274,7 +274,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
 
         # Then merge the topic numbers back to the original dataframe
         reference_file_data = reference_file_data.merge(
-            unique_file_data[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            unique_file_data[['General topic', 'Subtopic', 'Sentiment', 'Topic number']],
             on=['General topic', 'Subtopic', 'Sentiment'],
             how='left'
         )        
@@ -374,6 +374,10 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
 
+    # Ensure 'Start row of group' column is numeric to avoid comparison errors
+    if 'Start row of group' in reference_df.columns:
+        reference_df['Start row of group'] = pd.to_numeric(reference_df['Start row of group'], errors='coerce')
+    
     out_topic_summary_df = (reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
             .agg({
                 'Response References': 'size',  # Count the number of references
@@ -383,17 +387,22 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
             })
             .reset_index()
             #.sort_values('Response References', ascending=False)  # Sort by size, biggest first
-            .assign(Topic_number=lambda df: np.arange(1, len(df) + 1))  # Add numbering 1 to x
         )
     
     out_topic_summary_df = out_topic_summary_df.rename(columns={"Response References": "Number of responses"}, errors="ignore")
 
+    # Sort the dataframe first
     out_topic_summary_df = out_topic_summary_df.sort_values(["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True])
+
+    # Then assign Topic number based on the final sorted order
+    out_topic_summary_df = out_topic_summary_df.assign(Topic_number=lambda df: np.arange(1, len(df) + 1))
+
+    out_topic_summary_df.rename(columns={"Topic_number":"Topic number"}, inplace=True)
 
     return out_topic_summary_df
 
 # Wrap text in each column to the specified max width, including whole words
-def wrap_text(text:str, max_width=100, max_text_length=None):
+def wrap_text(text:str, max_width=60, max_text_length=None):
     if not isinstance(text, str):
         return text
         
@@ -840,6 +849,8 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                 .str.replace('\n', ' ')
                 .str.replace('\r', ' ')
                 .str.replace('/', ' or ')
+                .str.replace('&', ' and ')
+                .str.replace(' s ', 's ')
                 .str.lower()
                 .str.capitalize())
 
@@ -896,7 +907,13 @@ def generate_zero_shot_topics_df(zero_shot_topics:pd.DataFrame,
                 "Subtopic":zero_shot_topics_subtopics_list,
                 "Description": zero_shot_topics_description_list
                 })
-        
+
+        # Filter out duplicate General topic and subtopic names
+        zero_shot_topics_df = zero_shot_topics_df.drop_duplicates(["General topic", "Subtopic"], keep="first")
+
+        # Sort the dataframe by General topic and subtopic
+        zero_shot_topics_df = zero_shot_topics_df.sort_values(["General topic", "Subtopic"], ascending=[True, True])
+
         return zero_shot_topics_df
 
 def update_model_choice(model_source):

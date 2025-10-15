@@ -14,7 +14,7 @@ from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_d
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details, read_file
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, REASONING_SUFFIX, AZURE_OPENAI_INFERENCE_ENDPOINT, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -25,6 +25,7 @@ deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
 output_debug_files = OUTPUT_DEBUG_FILES
+max_text_length = 500
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:
@@ -157,7 +158,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     deduplicated_unique_table_markdown = ""
 
 
-    if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic_number"].unique()) == 1):
+    if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic number"].unique()) == 1):
         print("Data file outputs are too short for deduplicating. Returning original data.")
 
         reference_file_out_path = output_folder + reference_table_file_name 
@@ -175,7 +176,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Topic number']],
             on=['General topic', 'Subtopic', 'Sentiment'],
             how='left'
         )     
@@ -341,7 +342,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic_number']],
+            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic number']],
             on=['General topic', 'Subtopic', 'Sentiment', 'Group'],
             how='left'
         )       
@@ -370,7 +371,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
     output_files.append(unique_topics_file_out_path)
 
     # Outputs for markdown table output
-    topic_summary_df_revised_display = topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+    topic_summary_df_revised_display = topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
     deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(index=False)
 
     return reference_df, topic_summary_df, output_files, log_output_files, deduplicated_unique_table_markdown
@@ -428,7 +429,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
     deduplicated_unique_table_markdown = ""
 
     # Check if data is too short for deduplication
-    if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic_number"].unique()) == 1):
+    if (len(reference_df["Response References"].unique()) == 1) | (len(topic_summary_df["Topic number"].unique()) == 1):
         print("Data file outputs are too short for deduplicating. Returning original data.")
 
         #print("reference_df:", reference_df)
@@ -450,7 +451,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
         
         # Merge topic numbers back to the original dataframe
         reference_df = reference_df.merge(
-            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Topic_number']],
+            topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Topic number']],
             on=['General topic', 'Subtopic', 'Sentiment'],
             how='left'
         )
@@ -655,7 +656,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
 
     # Merge the topic numbers back to the original dataframe
     reference_df = reference_df.merge(
-        topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic_number']],
+        topic_summary_df[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic number']],
         on=['General topic', 'Subtopic', 'Sentiment', 'Group'],
         how='left'
     )
@@ -671,7 +672,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
 
     # Save analysis results CSV if merge suggestions were found
     if not merge_suggestions_df.empty:
-        analysis_results_file_path = output_folder + get_file_name_no_ext(reference_table_file_name) + "_llm_analysis_results.csv"
+        analysis_results_file_path = output_folder + get_file_name_no_ext(reference_table_file_name) + "_dedup_llm_analysis_results.csv"
         merge_suggestions_df.to_csv(analysis_results_file_path, index=None, encoding='utf-8-sig')
         log_output_files.append(analysis_results_file_path)
         print(f"Analysis results saved to: {analysis_results_file_path}")
@@ -686,7 +687,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
     output_files.append(unique_topics_file_out_path)
 
     # Outputs for markdown table output
-    topic_summary_df_revised_display = topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+    topic_summary_df_revised_display = topic_summary_df.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
     deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(index=False)
 
     # Calculate token usage and timing information for logging
@@ -759,6 +760,36 @@ def sample_reference_table_summaries(reference_df:pd.DataFrame,
 
     return sampled_reference_table_df, summarised_references_markdown#, reference_df, topic_summary_df
 
+def count_tokens_in_text(text: str, tokenizer=None, model_source: str = "Local") -> int:
+    """
+    Count the number of tokens in the given text.
+    
+    Args:
+        text (str): The text to count tokens for
+        tokenizer (object, optional): Tokenizer object for local models. Defaults to None.
+        model_source (str): Source of the model to determine tokenization method. Defaults to "Local".
+    
+    Returns:
+        int: Number of tokens in the text
+    """
+    if not text:
+        return 0
+    
+    try:
+        if model_source == "Local" and tokenizer and len(tokenizer) > 0:
+            # Use local tokenizer if available
+            tokens = tokenizer[0].encode(text, add_special_tokens=False)
+            return len(tokens)
+        else:
+            # Fallback: rough estimation using word count (approximately 1.3 tokens per word)
+            word_count = len(text.split())
+            return int(word_count * 1.3)
+    except Exception as e:
+        print(f"Error counting tokens: {e}. Using word count estimation.")
+        # Fallback: rough estimation using word count
+        word_count = len(text.split())
+        return int(word_count * 1.3)
+
 def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list(), tokenizer=list(), assistant_model=list(), azure_endpoint:str=""):
     """
     Query an LLM to generate a summary of topics based on the provided prompts.
@@ -783,6 +814,23 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation_metadata = list()
     client = list()
     client_config = {}
+
+    # Check if the input text exceeds the LLM context length
+    from tools.config import LLM_CONTEXT_LENGTH
+    
+    # Combine system prompt and user prompt for token counting
+    full_input_text = summarise_topic_descriptions_system_prompt + "\n" + formatted_summary_prompt[0] if isinstance(formatted_summary_prompt, list) else summarise_topic_descriptions_system_prompt + "\n" + formatted_summary_prompt
+    
+    # Count tokens in the input text
+    input_token_count = count_tokens_in_text(full_input_text, tokenizer, model_source)
+    
+    # Check if input exceeds context length
+    if input_token_count > LLM_CONTEXT_LENGTH:
+        error_message = f"Input text exceeds LLM context length. Input tokens: {input_token_count}, Max context length: {LLM_CONTEXT_LENGTH}. Please reduce the input text size."
+        print(error_message)
+        raise ValueError(error_message)
+    
+    print(f"Input token count: {input_token_count} (Max: {LLM_CONTEXT_LENGTH})")
 
     # Prepare Gemini models before query      
     if "Gemini" in model_source:
@@ -845,7 +893,26 @@ def process_debug_output_iteration(
     """
     current_prompt_content = final_system_prompt
     current_summary_content = summarised_output
-    current_conversation_content = str(conversation_history)
+
+    if isinstance(conversation_history, list):
+        # Handle both list of strings and list of dicts
+        if conversation_history and isinstance(conversation_history[0], dict):
+            # Convert list of dicts to list of strings
+            conversation_strings = []
+            for entry in conversation_history:
+                if 'role' in entry and 'parts' in entry:
+                    role = entry['role'].capitalize()
+                    message = ' '.join(entry['parts']) if isinstance(entry['parts'], list) else str(entry['parts'])
+                    conversation_strings.append(f"{role}: {message}")
+                else:
+                    # Fallback for unexpected dict format
+                    conversation_strings.append(str(entry))
+            current_conversation_content = "\n".join(conversation_strings)
+        else:
+            # Handle list of strings
+            current_conversation_content = "\n".join(conversation_history)
+    else:
+        current_conversation_content = str(conversation_history)
     current_metadata_content = str(metadata)
     current_task_type = task_type
     
@@ -900,6 +967,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             hf_api_key_textbox:str='',
                             azure_endpoint_textbox:str='',
                             existing_logged_content:list=list(),
+                            additional_summary_instructions_provided:str="",
                             output_debug_files:str=output_debug_files,
                             reasoning_suffix:str=reasoning_suffix,
                             local_model:object=None, 
@@ -934,6 +1002,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
         model_name_map (dict, optional): Dictionary mapping model choices to their properties. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
+        azure_endpoint_textbox (str, optional): Azure endpoint. Defaults to empty string.
+        additional_summary_instructions_provided (str, optional): Additional summary instructions provided by the user. Defaults to empty string.
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
         output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
@@ -958,6 +1028,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
     out_metadata_str = "" # Output metadata is currently replaced on starting a summarisation task
     out_message = list()
     task_type = "Topic summarisation"
+    topic_summary_df_revised = pd.DataFrame()
 
     all_prompts_content = list()
     all_summaries_content = list()
@@ -1031,11 +1102,13 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
         model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
 
+        combined_summary_instructions = summarise_format_radio + ". " + additional_summary_instructions_provided
+
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
 
             summary_text = all_summaries[summary_no]
-            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=summarise_format_radio)]
+            formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=combined_summary_instructions)]
 
             formatted_summarise_topic_descriptions_system_prompt = summarise_topic_descriptions_system_prompt.format(column_name=chosen_cols,consultation_context=context_textbox)
 
@@ -1109,13 +1182,32 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
         topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
 
-        # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
-        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True)         
+        # Ensure consistent Topic number assignment by recreating topic_summary_df from reference_df
+        # if not reference_table_df_revised.empty:
+        #     topic_summary_df_revised = create_topic_summary_df_from_reference_table(reference_table_df_revised)
+        #     # Keep the revised summary column
+        #     topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
+        #     topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Topic number", "Revised summary"]]
 
-        reference_table_df_revised = reference_table_df.merge(summarised_references_j, on = join_cols, how = "left")
-        # If no new summary is available, keep the original
+        # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True) 
+        topic_summary_df_revised["Topic number"] = range(1, len(topic_summary_df_revised) + 1)
+        
+        # If no new summary is available, keep the original. Also join on topic number to ensure consistent topic number assignment
+        reference_table_df_revised = reference_table_df.copy()        
+        reference_table_df_revised = reference_table_df_revised.drop("Topic number", axis=1, errors="ignore")
+
+        # Ensure reference table has Topic number column
+        if "Topic number" not in reference_table_df_revised.columns or "Revised summary" not in reference_table_df_revised.columns:
+            if "Topic number" in topic_summary_df_revised.columns and "Revised summary" in topic_summary_df_revised.columns:
+                reference_table_df_revised = reference_table_df_revised.merge(
+                    topic_summary_df_revised[['General topic', 'Subtopic', 'Sentiment', 'Group', 'Topic number', 'Revised summary']],
+                    on=['General topic', 'Subtopic', 'Sentiment', 'Group'],
+                    how='left'
+                )
+        
         reference_table_df_revised["Revised summary"] = reference_table_df_revised["Revised summary"].combine_first(reference_table_df_revised["Summary"])
-        reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1)
+        reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1, errors="ignore")
 
         # Remove topics that are tagged as 'Not Mentioned'
         topic_summary_df_revised = topic_summary_df_revised.loc[topic_summary_df_revised["Sentiment"] != "Not Mentioned", :]
@@ -1153,7 +1245,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])
 
         ###
-        topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=500)))
+        topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
         summarised_output_markdown = topic_summary_df_revised_display.to_markdown(index=False)
 
         # Ensure same file name not returned twice

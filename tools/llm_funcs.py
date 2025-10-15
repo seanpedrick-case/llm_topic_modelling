@@ -1217,9 +1217,12 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
 
         stripped_response = response_text.strip()
 
-        # Check if response meets our criteria (length and contains table)
-        if len(stripped_response) > 120 and '|' in stripped_response:
-            print(f"Attempt {attempt + 1} produced response with markdown table.")
+        # Check if response meets our criteria (length and contains table) OR is "No change"
+        if (len(stripped_response) > 120 and '|' in stripped_response) or stripped_response.lower().startswith("no change"):
+            if stripped_response.lower().startswith("no change"):
+                print(f"Attempt {attempt + 1} produced 'No change' response.")
+            else:
+                print(f"Attempt {attempt + 1} produced response with markdown table.")
             break  # Success - exit loop
 
         # Increase temperature for next attempt

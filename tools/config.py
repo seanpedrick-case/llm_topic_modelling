@@ -192,11 +192,13 @@ if LOGGING == 'True':
 # App run variables
 ###
 OUTPUT_DEBUG_FILES = get_or_create_env_var('OUTPUT_DEBUG_FILES', 'False') # Whether to output debug files
+SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES = get_or_create_env_var('SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES', 'True') # Whether to show additional instruction textboxes in the GUI
 
 TIMEOUT_WAIT = int(get_or_create_env_var('TIMEOUT_WAIT', '30')) # Maximum number of seconds to wait for a response from the LLM
 NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var('NUMBER_OF_RETRY_ATTEMPTS', '5')) # Maximum number of times to retry a request to the LLM
 # Try up to 3 times to get a valid markdown table response with LLM calls, otherwise retry with temperature changed
 MAX_OUTPUT_VALIDATION_ATTEMPTS = int(get_or_create_env_var('MAX_OUTPUT_VALIDATION_ATTEMPTS', '3'))
+ENABLE_VALIDATION = get_or_create_env_var('ENABLE_VALIDATION', 'False') # Whether to run validation loop after initial topic extraction
 MAX_TIME_FOR_LOOP = int(get_or_create_env_var('MAX_TIME_FOR_LOOP', '99999')) # Maximum number of seconds to run the loop for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there)
 
 MAX_COMMENT_CHARS = int(get_or_create_env_var('MAX_COMMENT_CHARS', '14000')) # Maximum number of characters in a comment
