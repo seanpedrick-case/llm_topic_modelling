@@ -14,7 +14,7 @@ from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_d
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details, read_file
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, MAX_GROUPS
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -26,6 +26,7 @@ max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
 output_debug_files = OUTPUT_DEBUG_FILES
 max_text_length = 500
+default_number_of_sampled_summaries = 100
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:
@@ -199,7 +200,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                     reference_df_unique = reference_df.drop_duplicates("old_category")
 
                     # Create an empty list to store results from each group
-                    results = []
+                    results = list()
                     # Iterate over each group instead of using .apply()
                     for name, group in reference_df_unique.groupby(["General topic", "Sentiment", "Group"]):
                         # Run your function on the 'group' DataFrame
@@ -222,7 +223,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
                     
-                    results = []
+                    results = list()
                     for name, group in reference_df_unique.groupby("Sentiment"):
                         result = deduplicate_categories(
                             group["Subtopic"], 
@@ -240,7 +241,7 @@ def deduplicate_topics(reference_df:pd.DataFrame,
                     reference_df["old_category"] = reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     reference_df_unique = reference_df.drop_duplicates("old_category")
                     
-                    results = []
+                    results = list()
                     for name, group in reference_df_unique.groupby("General topic"):
                         result = deduplicate_categories(
                             group["Subtopic"], 
@@ -395,7 +396,8 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
                           chosen_cols:List[str]="",
                           output_folder:str=OUTPUT_FOLDER,
                           candidate_topics=None,
-                          azure_endpoint:str=""
+                          azure_endpoint:str="",
+                          output_debug_files:str="False"
                           ):
     '''
     Deduplicate topics using LLM semantic understanding to identify and merge similar topics.
@@ -420,6 +422,8 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
         chosen_cols (List[str], optional): List of chosen columns from the input data files. Defaults to "".
         output_folder (str, optional): Folder path to save output files. Defaults to OUTPUT_FOLDER.
         candidate_topics (optional): Candidate topics file for zero-shot guidance. Defaults to None.
+        azure_endpoint (str, optional): Azure endpoint for the LLM. Defaults to "".
+        output_debug_files (str, optional): Whether to output debug files. Defaults to "False".
     '''
 
     
@@ -497,9 +501,9 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
         formatted_prompt = llm_deduplication_prompt.format(topics_table=topics_table)
     
     # Initialise conversation history
-    conversation_history = []
-    whole_conversation = []
-    whole_conversation_metadata = []
+    conversation_history = list()
+    whole_conversation = list()
+    whole_conversation_metadata = list()
     
     # Set up model clients based on model source
     if "Gemini" in model_source:
@@ -550,7 +554,7 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
     )
 
     # Generate debug files if enabled
-    if OUTPUT_DEBUG_FILES == "True":
+    if output_debug_files == "True":
         try:
             # Create batch file path details for debug files
             batch_file_path_details = get_file_name_no_ext(reference_table_file_name) + "_llm_dedup"
@@ -714,51 +718,58 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
 
 def sample_reference_table_summaries(reference_df:pd.DataFrame,
                                      random_seed:int,
-                                     no_of_sampled_summaries:int=150):
+                                     no_of_sampled_summaries:int=default_number_of_sampled_summaries,
+                                     sample_reference_table_checkbox:bool=False):
     
     '''
     Sample x number of summaries from which to produce summaries, so that the input token length is not too long.
     '''
+
+    if sample_reference_table_checkbox:
     
-    all_summaries = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment", "Group", "Response References", "Summary"])
-    output_files = list()
+        all_summaries = pd.DataFrame(columns=["General topic", "Subtopic", "Sentiment", "Group", "Response References", "Summary"])
+        output_files = list()
 
-    if "Group" not in reference_df.columns:
-        reference_df["Group"] = "All"
+        if "Group" not in reference_df.columns:
+            reference_df["Group"] = "All"
 
-    reference_df_grouped = reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
+        reference_df_grouped = reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
 
-    if 'Revised summary' in reference_df.columns:
-        out_message = "Summary has already been created for this file"
-        print(out_message)
-        raise Exception(out_message)
+        if 'Revised summary' in reference_df.columns:
+            out_message = "Summary has already been created for this file"
+            print(out_message)
+            raise Exception(out_message)
 
-    for group_keys, reference_df_group in reference_df_grouped:
-        if len(reference_df_group["General topic"]) > 1:
+        for group_keys, reference_df_group in reference_df_grouped:
+            if len(reference_df_group["General topic"]) > 1:
 
-            filtered_reference_df = reference_df_group.reset_index()
+                filtered_reference_df = reference_df_group.reset_index()
 
-            filtered_reference_df_unique = filtered_reference_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Summary"])
+                filtered_reference_df_unique = filtered_reference_df.drop_duplicates(["General topic", "Subtopic", "Sentiment", "Summary"])
 
-            # Sample n of the unique topic summaries. To limit the length of the text going into the summarisation tool
-            filtered_reference_df_unique_sampled = filtered_reference_df_unique.sample(min(no_of_sampled_summaries, len(filtered_reference_df_unique)), random_state=random_seed)
+                # Sample n of the unique topic summaries PER GROUP. To limit the length of the text going into the summarisation tool
+                # This ensures each group gets up to no_of_sampled_summaries summaries, not the total across all groups
+                filtered_reference_df_unique_sampled = filtered_reference_df_unique.sample(min(no_of_sampled_summaries, len(filtered_reference_df_unique)), random_state=random_seed)
 
-            all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
+                all_summaries = pd.concat([all_summaries, filtered_reference_df_unique_sampled])
 
-    # If no responses/topics qualify, just go ahead with the original reference dataframe
-    if all_summaries.empty:
-        sampled_reference_table_df = reference_df
+        # If no responses/topics qualify, just go ahead with the original reference dataframe
+        if all_summaries.empty:
+            sampled_reference_table_df = reference_df
+        else:
+            # FIXED: Preserve Group column in aggregation to maintain group-specific summaries
+            sampled_reference_table_df = all_summaries.groupby(["General topic", "Subtopic", "Sentiment", "Group"]).agg({
+            'Response References': 'size',  # Count the number of references
+            'Summary': lambda x: '\n'.join([s.split(': ', 1)[1] for s in x if ': ' in s])  # Join substrings after ': '
+            }).reset_index()
+
+        sampled_reference_table_df = sampled_reference_table_df.loc[(sampled_reference_table_df["Sentiment"] != "Not Mentioned") & (sampled_reference_table_df["Response References"] > 1)]
     else:
-        sampled_reference_table_df = all_summaries.groupby(["General topic", "Subtopic", "Sentiment"]).agg({
-        'Response References': 'size',  # Count the number of references
-        'Summary': lambda x: '\n'.join([s.split(': ', 1)[1] for s in x if ': ' in s])  # Join substrings after ': '
-        }).reset_index()
-
-    sampled_reference_table_df = sampled_reference_table_df.loc[(sampled_reference_table_df["Sentiment"] != "Not Mentioned") & (sampled_reference_table_df["Response References"] > 1)]
+        sampled_reference_table_df = reference_df
 
     summarised_references_markdown = sampled_reference_table_df.to_markdown(index=False)
 
-    return sampled_reference_table_df, summarised_references_markdown#, reference_df, topic_summary_df
+    return sampled_reference_table_df, summarised_references_markdown
 
 def count_tokens_in_text(text: str, tokenizer=None, model_source: str = "Local") -> int:
     """
@@ -832,7 +843,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     
     print(f"Input token count: {input_token_count} (Max: {LLM_CONTEXT_LENGTH})")
 
-    # Prepare Gemini models before query      
+    # Prepare Gemini models before query
     if "Gemini" in model_source:
         #print("Using Gemini model:", model_choice)
         client, config = construct_gemini_generative_model(in_api_key=in_api_key, temperature=temperature, model_choice=model_choice, system_prompt=system_prompt, max_tokens=max_tokens)
@@ -856,6 +867,33 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     summarised_output = summarised_output.strip()
     
     print("Finished summary query")
+
+    # Ensure the system prompt is included in the conversation history
+    try:
+        if isinstance(conversation_history, list):
+            has_system_prompt = False
+
+            if conversation_history:
+                first_entry = conversation_history[0]
+                if isinstance(first_entry, dict):
+                    role_is_system = first_entry.get('role') == 'system'
+                    parts = first_entry.get('parts')
+                    content_matches = (
+                        parts == summarise_topic_descriptions_system_prompt or
+                        (isinstance(parts, list) and summarise_topic_descriptions_system_prompt in parts)
+                    )
+                    has_system_prompt = role_is_system and content_matches
+                elif isinstance(first_entry, str):
+                    has_system_prompt = first_entry.strip().lower().startswith("system:")
+
+            if not has_system_prompt:
+                conversation_history.insert(0, {
+                    'role': 'system',
+                    'parts': [summarise_topic_descriptions_system_prompt]
+                })
+    except Exception as _e:
+        # Non-fatal: if anything goes wrong, return the original conversation history
+        pass
 
     return summarised_output, conversation_history, whole_conversation_metadata, response_text
 
@@ -895,10 +933,11 @@ def process_debug_output_iteration(
     current_summary_content = summarised_output
 
     if isinstance(conversation_history, list):
+
         # Handle both list of strings and list of dicts
         if conversation_history and isinstance(conversation_history[0], dict):
             # Convert list of dicts to list of strings
-            conversation_strings = []
+            conversation_strings = list()
             for entry in conversation_history:
                 if 'role' in entry and 'parts' in entry:
                     role = entry['role'].capitalize()
@@ -968,7 +1007,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             azure_endpoint_textbox:str='',
                             existing_logged_content:list=list(),
                             additional_summary_instructions_provided:str="",
-                            output_debug_files:str=output_debug_files,
+                            output_debug_files:str="False",
+                            group_value:str="All",
                             reasoning_suffix:str=reasoning_suffix,
                             local_model:object=None, 
                             tokenizer:object=None,
@@ -978,7 +1018,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             do_summaries:str="Yes",                            
                             progress=gr.Progress(track_tqdm=True)):
     '''
-    Create improved summaries of topics by consolidating raw batch-level summaries from the initial model run.
+    Create improved summaries of topics by consolidating raw batch-level summaries from the initial model run. Works on a single group of summaries at a time (called from wrapper function summarise_output_topics_by_group).
 
     Args:
         sampled_reference_table_df (pd.DataFrame): DataFrame containing sampled reference data with summaries
@@ -1006,6 +1046,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         additional_summary_instructions_provided (str, optional): Additional summary instructions provided by the user. Defaults to empty string.
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
         output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
+        group_value (str, optional): Value of the group to summarise. Defaults to "All".
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object if using local inference. Defaults to None.
         tokenizer (object, optional): Tokenizer object if using local inference. Defaults to None.
@@ -1046,6 +1087,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
     model_choice_clean = clean_column_name(model_name_map[model_choice]["short_name"], max_length=20, front_characters=False)
 
+    if context_textbox and 'The context of this analysis is' not in context_textbox: context_textbox = "The context of this analysis is '" + context_textbox + "'."
+
     if log_output_files is None: log_output_files = list()   
 
     # Check for data for summarisations
@@ -1082,6 +1125,11 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         all_summaries = sampled_reference_table_df["Revised summary"].tolist()
         all_groups = sampled_reference_table_df["Group"].tolist()
 
+    if not group_value:
+        group_value = str(all_groups[0])
+    else:
+        group_value = str(group_value)
+
     length_all_summaries = len(all_summaries)
 
     model_source = model_name_map[model_choice]["source"]
@@ -1093,19 +1141,24 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         assistant_model = get_assistant_model()
 
     summary_loop_description = "Revising topic-level summaries. " + str(latest_summary_completed) + " summaries completed so far."
-    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
+    summary_loop = progress.tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
 
     if do_summaries == "Yes":
         
         bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
 
-        batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
+        initial_batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
         model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+        file_name_clean = f"{clean_column_name(reference_data_file_name, max_length=15)}_{clean_column_name(str(group_value), max_length=15).replace(' ','_')}"
+        #file_name_clean = clean_column_name(reference_data_file_name, max_length=20, front_characters=True)
+        in_column_cleaned = clean_column_name(chosen_cols, max_length=20)  
 
         combined_summary_instructions = summarise_format_radio + ". " + additional_summary_instructions_provided
 
         for summary_no in summary_loop:
             print("Current summary number is:", summary_no)
+
+            batch_file_path_details = f"{file_name_clean}_batch_{latest_summary_completed + 1}_size_1_col_{in_column_cleaned}"
 
             summary_text = all_summaries[summary_no]
             formatted_summary_prompt = [summarise_topic_descriptions_prompt.format(summaries=summary_text, summary_format=combined_summary_instructions)]
@@ -1130,9 +1183,12 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
             full_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + formatted_summary_prompt[0]
 
+            # Coerce toggle to string expected by debug writer (accepts True/False or "True"/"False")
+            output_debug_files_str = "True" if ((isinstance(output_debug_files, bool) and output_debug_files) or (str(output_debug_files) == "True")) else "False"
+
             current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged = \
                 process_debug_output_iteration(
-                    output_debug_files, 
+                    output_debug_files_str, 
                     output_folder, 
                     batch_file_path_details, 
                     model_choice_clean_short, 
@@ -1179,18 +1235,24 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         topic_summary_df_revised = topic_summary_df.merge(summarised_references_j, on = join_cols, how = "left")
 
         # If no new summary is available, keep the original
+        # But prefer the version without "Rows X to Y" prefix to avoid duplication
+        def clean_summary_text(text):
+            if pd.isna(text):
+                return text
+            # Remove "Rows X to Y:" prefix if present (both at start and after <br> tags)
+            import re
+            # First remove from the beginning
+            cleaned = re.sub(r'^Rows\s+\d+\s+to\s+\d+:\s*', '', str(text))
+            # Then remove from after <br> tags
+            cleaned = re.sub(r'<br>\s*Rows\s+\d+\s+to\s+\d+:\s*', '<br>', cleaned)
+            return cleaned
+        
         topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
+        # Clean the revised summary to remove "Rows X to Y" prefixes
+        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].apply(clean_summary_text)
         topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Revised summary"]]
 
-        # Ensure consistent Topic number assignment by recreating topic_summary_df from reference_df
-        # if not reference_table_df_revised.empty:
-        #     topic_summary_df_revised = create_topic_summary_df_from_reference_table(reference_table_df_revised)
-        #     # Keep the revised summary column
-        #     topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].combine_first(topic_summary_df_revised["Summary"])
-        #     topic_summary_df_revised = topic_summary_df_revised[["General topic", "Subtopic", "Sentiment", "Group", "Number of responses", "Topic number", "Revised summary"]]
-
-        # Replace all instances of 'Rows X to Y:' that remain on some topics that have not had additional summaries
-        topic_summary_df_revised["Revised summary"] = topic_summary_df_revised["Revised summary"].str.replace("^Rows\s+\d+\s+to\s+\d+:\s*", "", regex=True) 
+        # Note: "Rows X to Y:" prefixes are now cleaned by the clean_summary_text function above 
         topic_summary_df_revised["Topic number"] = range(1, len(topic_summary_df_revised) + 1)
         
         # If no new summary is available, keep the original. Also join on topic number to ensure consistent topic number assignment
@@ -1207,6 +1269,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                 )
         
         reference_table_df_revised["Revised summary"] = reference_table_df_revised["Revised summary"].combine_first(reference_table_df_revised["Summary"])
+        # Clean the revised summary to remove "Rows X to Y" prefixes
+        reference_table_df_revised["Revised summary"] = reference_table_df_revised["Revised summary"].apply(clean_summary_text)
         reference_table_df_revised = reference_table_df_revised.drop("Summary", axis=1, errors="ignore")
 
         # Remove topics that are tagged as 'Not Mentioned'
@@ -1226,23 +1290,25 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
 
         ### Save output files
 
-        if not file_data.empty:
-            basic_response_data = get_basic_response_data(file_data, chosen_cols)
-            reference_table_df_revised_pivot = convert_reference_table_to_pivot_table(reference_table_df_revised, basic_response_data)
+        if output_debug_files == "True":
 
-            ### Save pivot file to log area
-            reference_table_df_revised_pivot_path = output_folder + batch_file_path_details + "_summarised_reference_table_pivot_" + model_choice_clean + ".csv"
-            reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8-sig')
-            log_output_files.append(reference_table_df_revised_pivot_path)
+            if not file_data.empty:
+                basic_response_data = get_basic_response_data(file_data, chosen_cols)
+                reference_table_df_revised_pivot = convert_reference_table_to_pivot_table(reference_table_df_revised, basic_response_data)
 
-        # Save to file
-        topic_summary_df_revised_path = output_folder + batch_file_path_details + "_summarised_unique_topics_table_" + model_choice_clean + ".csv"
-        topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8-sig')
+                ### Save pivot file to log area
+                reference_table_df_revised_pivot_path = output_folder + file_name_clean + "_summ_reference_table_pivot_" + model_choice_clean + ".csv"
+                reference_table_df_revised_pivot.to_csv(reference_table_df_revised_pivot_path, index=None, encoding='utf-8-sig')
+                log_output_files.append(reference_table_df_revised_pivot_path)
 
-        reference_table_df_revised_path = output_folder + batch_file_path_details + "_summarised_reference_table_" + model_choice_clean + ".csv"
-        reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8-sig')
+            # Save to file
+            topic_summary_df_revised_path = output_folder + file_name_clean + "_summ_unique_topics_table_" + model_choice_clean + ".csv"
+            topic_summary_df_revised.to_csv(topic_summary_df_revised_path, index = None, encoding='utf-8-sig')
 
-        output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])
+            reference_table_df_revised_path = output_folder + file_name_clean + "_summ_reference_table_" + model_choice_clean + ".csv"
+            reference_table_df_revised.to_csv(reference_table_df_revised_path, index = None, encoding='utf-8-sig')
+
+            log_output_files.extend([reference_table_df_revised_path, topic_summary_df_revised_path])
 
         ###
         topic_summary_df_revised_display = topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
@@ -1264,6 +1330,306 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         return sampled_reference_table_df, topic_summary_df_revised, reference_table_df_revised, output_files, summarised_outputs, latest_summary_completed, out_metadata_str, summarised_output_markdown, log_output_files, output_files, acc_input_tokens, acc_output_tokens, acc_number_of_calls, time_taken, out_message, out_logged_content
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def wrapper_summarise_output_topics_per_group(
+    grouping_col: str,
+    sampled_reference_table_df: pd.DataFrame,
+    topic_summary_df: pd.DataFrame,
+    reference_table_df: pd.DataFrame,
+    model_choice: str,
+    in_api_key: str,
+    temperature: float,
+    reference_data_file_name: str,
+    summarised_outputs: list = list(),
+    latest_summary_completed: int = 0,
+    out_metadata_str: str = "",
+    in_data_files: List[str] = list(),
+    in_excel_sheets: str = "",
+    chosen_cols: List[str] = list(),
+    log_output_files: list[str] = list(),
+    summarise_format_radio: str = "Return a summary up to two paragraphs long that includes as much detail as possible from the original text",
+    output_folder: str = OUTPUT_FOLDER,
+    context_textbox: str = "",
+    aws_access_key_textbox: str = '',
+    aws_secret_key_textbox: str = '',
+    model_name_map: dict = model_name_map,
+    hf_api_key_textbox: str = '',
+    azure_endpoint_textbox: str = '',
+    existing_logged_content: list = list(),
+    additional_summary_instructions_provided: str = "",
+    output_debug_files: str = "False",
+    reasoning_suffix: str = reasoning_suffix,
+    local_model: object = None,
+    tokenizer: object = None,
+    assistant_model: object = None,
+    summarise_topic_descriptions_prompt: str = summarise_topic_descriptions_prompt,
+    summarise_topic_descriptions_system_prompt: str = summarise_topic_descriptions_system_prompt,
+    do_summaries: str = "Yes",
+    sample_reference_table: bool = False,
+    no_of_sampled_summaries: int = default_number_of_sampled_summaries,
+    random_seed: int = 42,
+    progress = gr.Progress(track_tqdm=True)
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, List[str], List[str], int, str, str, List[str], List[str], int, int, int, float, str, List[dict]]:
+    """
+    A wrapper function that iterates through unique values in a specified grouping column
+    and calls the `summarise_output_topics` function for each group of summaries.
+    It accumulates results from each call and returns a consolidated output.
+
+    :param grouping_col: The name of the column to group the data by.
+    :param sampled_reference_table_df: DataFrame containing sampled reference data with summaries
+    :param topic_summary_df: DataFrame containing topic summary information
+    :param reference_table_df: DataFrame mapping response references to topics
+    :param model_choice: Name of the LLM model to use
+    :param in_api_key: API key for model access
+    :param temperature: Temperature parameter for model generation
+    :param reference_data_file_name: Name of the reference data file
+    :param summarised_outputs: List to store generated summaries
+    :param latest_summary_completed: Index of last completed summary
+    :param out_metadata_str: String for metadata output
+    :param in_data_files: List of input data file paths
+    :param in_excel_sheets: Excel sheet names if using Excel files
+    :param chosen_cols: List of columns selected for analysis
+    :param log_output_files: List of log file paths
+    :param summarise_format_radio: Format instructions for summary generation
+    :param output_folder: Folder path for outputs
+    :param context_textbox: Additional context for summarization
+    :param aws_access_key_textbox: AWS access key
+    :param aws_secret_key_textbox: AWS secret key
+    :param model_name_map: Dictionary mapping model choices to their properties
+    :param hf_api_key_textbox: Hugging Face API key
+    :param azure_endpoint_textbox: Azure endpoint
+    :param existing_logged_content: List of existing logged content
+    :param additional_summary_instructions_provided: Additional summary instructions
+    :param output_debug_files: Flag to indicate if debug files should be written
+    :param reasoning_suffix: Suffix for reasoning
+    :param local_model: Local model object if using local inference
+    :param tokenizer: Tokenizer object if using local inference
+    :param assistant_model: Assistant model object if using local inference
+    :param summarise_topic_descriptions_prompt: Prompt template for topic summarization
+    :param summarise_topic_descriptions_system_prompt: System prompt for topic summarization
+    :param do_summaries: Flag to control summary generation
+    :param sample_reference_table: If True, sample the reference table at the top of the function
+    :param no_of_sampled_summaries: Number of summaries to sample per group (default 100)
+    :param random_seed: Random seed for reproducible sampling (default 42)
+    :param progress: Gradio progress tracker
+    :return: A tuple containing consolidated results, mimicking the return structure of `summarise_output_topics`
+    """
+    
+    acc_input_tokens = 0
+    acc_output_tokens = 0
+    acc_number_of_calls = 0
+    out_message = list()
+
+    # Logged content
+    all_groups_logged_content = existing_logged_content
+
+    # Check if we have data to process
+    if sampled_reference_table_df.empty or topic_summary_df.empty or reference_table_df.empty:
+        out_message = "Please upload reference table, topic summary, and sampled reference table files to continue with summarisation."
+        print(out_message)
+        raise Exception(out_message)
+
+    # Ensure Group column exists
+    if "Group" not in sampled_reference_table_df.columns:
+        sampled_reference_table_df["Group"] = "All"
+    if "Group" not in topic_summary_df.columns:
+        topic_summary_df["Group"] = "All"
+    if "Group" not in reference_table_df.columns:
+        reference_table_df["Group"] = "All"
+
+    # Sample reference table if requested
+    if sample_reference_table:
+        print(f"Sampling reference table with {no_of_sampled_summaries} summaries per group...")
+        sampled_reference_table_df, _ = sample_reference_table_summaries(
+            reference_table_df, 
+            random_seed=random_seed, 
+            no_of_sampled_summaries=no_of_sampled_summaries,
+            sample_reference_table_checkbox=sample_reference_table
+        )
+        print(f"Sampling complete. {len(sampled_reference_table_df)} summaries selected.")
+
+    # Get unique group values
+    unique_values = sampled_reference_table_df["Group"].unique()
+
+    if len(unique_values) > MAX_GROUPS:
+        print(f"Warning: More than {MAX_GROUPS} unique values found in '{grouping_col}'. Processing only the first {MAX_GROUPS}.")
+        unique_values = unique_values[:MAX_GROUPS]
+
+    # Initialize accumulators for results across all groups
+    acc_sampled_reference_table_df = pd.DataFrame()
+    acc_topic_summary_df_revised = pd.DataFrame()
+    acc_reference_table_df_revised = pd.DataFrame()
+    acc_output_files = list()
+    acc_log_output_files = list()
+    acc_summarised_outputs = list()
+    acc_latest_summary_completed = latest_summary_completed
+    acc_out_metadata_str = out_metadata_str
+    acc_summarised_output_markdown = ""
+    acc_total_time_taken = 0.0
+    acc_logged_content = list()
+
+    wrapper_first_loop = True
+
+    if len(unique_values) == 1:
+        # If only one unique value, no need for progress bar, iterate directly
+        loop_object = unique_values
+    else:
+        # If multiple unique values, use tqdm progress bar
+        loop_object = progress.tqdm(unique_values, desc=f"Summarising group", unit="groups")
+
+    for i, group_value in enumerate(loop_object):
+        print(f"\nProcessing summary group: {grouping_col} = {group_value} ({i+1}/{len(unique_values)})")
+        
+        # Filter data for current group
+        filtered_sampled_reference_table_df = sampled_reference_table_df[sampled_reference_table_df["Group"] == group_value].copy()
+        filtered_topic_summary_df = topic_summary_df[topic_summary_df["Group"] == group_value].copy()
+        filtered_reference_table_df = reference_table_df[reference_table_df["Group"] == group_value].copy()
+
+        if filtered_sampled_reference_table_df.empty:
+            print(f"No data for {grouping_col} = {group_value}. Skipping.")
+            continue
+
+        # Create unique file name for this group's outputs
+        group_file_name = f"{reference_data_file_name}_{clean_column_name(str(group_value), max_length=15).replace(' ','_')}"
+
+        # Call summarise_output_topics for the current group
+        try:
+            (
+                seg_sampled_reference_table_df,
+                seg_topic_summary_df_revised,
+                seg_reference_table_df_revised,
+                seg_output_files,
+                seg_summarised_outputs,
+                seg_latest_summary_completed,
+                seg_out_metadata_str,
+                seg_summarised_output_markdown,
+                seg_log_output_files,
+                seg_output_files_2,
+                seg_acc_input_tokens,
+                seg_acc_output_tokens,
+                seg_acc_number_of_calls,
+                seg_time_taken,
+                seg_out_message,
+                seg_logged_content
+            ) = summarise_output_topics(
+                sampled_reference_table_df=filtered_sampled_reference_table_df,
+                topic_summary_df=filtered_topic_summary_df,
+                reference_table_df=filtered_reference_table_df,
+                model_choice=model_choice,
+                in_api_key=in_api_key,
+                temperature=temperature,
+                reference_data_file_name=group_file_name,
+                summarised_outputs=list(),  # Fresh for each call
+                latest_summary_completed=0,  # Reset for each group
+                out_metadata_str="",  # Fresh for each call
+                in_data_files=in_data_files,
+                in_excel_sheets=in_excel_sheets,
+                chosen_cols=chosen_cols,
+                log_output_files=list(),  # Fresh for each call
+                summarise_format_radio=summarise_format_radio,
+                output_folder=output_folder,
+                context_textbox=context_textbox,
+                aws_access_key_textbox=aws_access_key_textbox,
+                aws_secret_key_textbox=aws_secret_key_textbox,
+                model_name_map=model_name_map,
+                hf_api_key_textbox=hf_api_key_textbox,
+                azure_endpoint_textbox=azure_endpoint_textbox,
+                existing_logged_content=all_groups_logged_content,
+                additional_summary_instructions_provided=additional_summary_instructions_provided,
+                output_debug_files=output_debug_files,
+                group_value=group_value,
+                reasoning_suffix=reasoning_suffix,
+                local_model=local_model,
+                tokenizer=tokenizer,
+                assistant_model=assistant_model,
+                summarise_topic_descriptions_prompt=summarise_topic_descriptions_prompt,
+                summarise_topic_descriptions_system_prompt=summarise_topic_descriptions_system_prompt,
+                do_summaries=do_summaries
+            )
+
+            # Aggregate results
+            acc_sampled_reference_table_df = pd.concat([acc_sampled_reference_table_df, seg_sampled_reference_table_df])
+            acc_topic_summary_df_revised = pd.concat([acc_topic_summary_df_revised, seg_topic_summary_df_revised])
+            acc_reference_table_df_revised = pd.concat([acc_reference_table_df_revised, seg_reference_table_df_revised])
+            
+            # For lists, extend
+            acc_output_files.extend(f for f in seg_output_files if f not in acc_output_files)
+            acc_log_output_files.extend(f for f in seg_log_output_files if f not in acc_log_output_files)
+            acc_summarised_outputs.extend(seg_summarised_outputs)
+
+            acc_latest_summary_completed = seg_latest_summary_completed
+            acc_out_metadata_str += (("\n---\n" if acc_out_metadata_str else "") +
+                                    f"Group {grouping_col}={group_value}:\n" +
+                                    seg_out_metadata_str)
+            acc_summarised_output_markdown = seg_summarised_output_markdown  # Keep the latest markdown
+            acc_total_time_taken += float(seg_time_taken)
+            acc_logged_content.extend(seg_logged_content)
+
+            # Accumulate token counts
+            acc_input_tokens += seg_acc_input_tokens
+            acc_output_tokens += seg_acc_output_tokens
+            acc_number_of_calls += seg_acc_number_of_calls
+
+            print(f"Group {grouping_col} = {group_value} summarised. Time: {seg_time_taken:.2f}s")
+
+        except Exception as e:
+            print(f"Error processing summary group {grouping_col} = {group_value}: {e}")
+            # Optionally, decide if you want to continue with other groups or stop
+            # For now, it will continue
+            continue
+
+    # Create consolidated output files
+    overall_file_name = clean_column_name(reference_data_file_name, max_length=20)
+    model_choice_clean = model_name_map[model_choice]["short_name"]
+    model_choice_clean_short = clean_column_name(model_choice_clean, max_length=20, front_characters=False)
+
+    # Save consolidated outputs
+    if not acc_topic_summary_df_revised.empty and not acc_reference_table_df_revised.empty:
+        # Sort the dataframes
+        if "General topic" in acc_topic_summary_df_revised.columns:
+            acc_topic_summary_df_revised["Number of responses"] = acc_topic_summary_df_revised["Number of responses"].astype(int)
+            acc_topic_summary_df_revised.sort_values(["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"], ascending=[True, False, True, True, True], inplace=True)
+        elif "Main heading" in acc_topic_summary_df_revised.columns:
+            acc_topic_summary_df_revised["Number of responses"] = acc_topic_summary_df_revised["Number of responses"].astype(int)
+            acc_topic_summary_df_revised.sort_values(["Group", "Number of responses", "Main heading", "Subheading", "Topic number"], ascending=[True, False, True, True, True], inplace=True)
+
+        # Save consolidated files
+        consolidated_topic_summary_path = output_folder + overall_file_name + "_all_final_summ_unique_topics_" + model_choice_clean_short + ".csv"
+        consolidated_reference_table_path = output_folder + overall_file_name + "_all_final_summ_reference_table_" + model_choice_clean_short + ".csv"
+
+        acc_topic_summary_df_revised.to_csv(consolidated_topic_summary_path, index=None, encoding='utf-8-sig')
+        acc_reference_table_df_revised.to_csv(consolidated_reference_table_path, index=None, encoding='utf-8-sig')
+
+        acc_output_files.extend([consolidated_topic_summary_path, consolidated_reference_table_path])
+
+        # Create markdown output for display
+        topic_summary_df_revised_display = acc_topic_summary_df_revised.apply(lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length)))
+        acc_summarised_output_markdown = topic_summary_df_revised_display.to_markdown(index=False)
+
+    out_message = '\n'.join(out_message)
+    out_message = out_message + " " + f"Topic summarisation finished processing all groups. Total time: {acc_total_time_taken:.2f}s"
+    print(out_message)
+
+    # The return signature should match summarise_output_topics
+    return (
+        acc_sampled_reference_table_df,
+        acc_topic_summary_df_revised,
+        acc_reference_table_df_revised,
+        acc_output_files,
+        acc_summarised_outputs,
+        acc_latest_summary_completed,
+        acc_out_metadata_str,
+        acc_summarised_output_markdown,
+        acc_log_output_files,
+        acc_output_files,  # Duplicate for compatibility
+        acc_input_tokens,
+        acc_output_tokens,
+        acc_number_of_calls,
+        acc_total_time_taken,
+        out_message,
+        acc_logged_content
+    )
+
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def overall_summary(topic_summary_df:pd.DataFrame,
                     model_choice:str,
                     in_api_key:str,
@@ -1280,7 +1646,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     existing_logged_content:list=list(),
                     output_debug_files:str=output_debug_files,
                     log_output_files:list=list(),                    
-                    reasoning_suffix:str=reasoning_suffix,                    
+                    reasoning_suffix:str=reasoning_suffix,
                     local_model:object=None,
                     tokenizer:object=None,
                     assistant_model:object=None,
@@ -1370,6 +1736,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
     unique_groups = sorted(topic_summary_df["Group"].unique())
 
     length_groups = len(unique_groups)
+
+    if context_textbox and 'The context of this analysis is' not in context_textbox: context_textbox = "The context of this analysis is '" + context_textbox + "'."
 
     if length_groups > 1:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt_by_group        

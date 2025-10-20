@@ -15,7 +15,7 @@ initial_table_system_prompt = system_prompt + markdown_additional_prompt
 
 initial_table_assistant_prefill = "|"
 
-default_response_reference_format = "In the next column named 'Response References', list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do no write any other text in this column."
+default_response_reference_format = "In the next column named 'Response References', list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do not write any other text in this column."
 
 initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table based on open text responses in the reponse table below.
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
@@ -28,7 +28,6 @@ Response table:
 {response_table}
 
 New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"""
-
 
 ###
 # Adding existing topics to consultation responses
@@ -50,10 +49,10 @@ add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create o
 In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
-{response_table}
-
-Topics that are relevant to this dataset are shown in the following Topics table: 
+Choose from among the following topic names to assign to the responses, only if they are directlyrelevant to responses from the response table below: 
 {topics}
+
+{response_table}
 
 New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"""
 
@@ -72,6 +71,15 @@ validation_prompt_suffix_default = """\n\nBased on the above information, you ne
 - Remove rows where responses are not relevant to the assigned topic, or where responses are not relevant to any topic.
 - Remove rows where a topic is not assigned to any specific response.
 - If the current topic assignment does not cover all information in a response, assign responses to relevant topics from the suggested topics table, or create a new topic if necessary.
+- Correct any false information in the summary column, which is a summary of the relevant response text.
+{additional_validation_issues}
+- Any other obvious errors that you can identify.
+
+With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
+
+validation_prompt_suffix_struct_summary_default = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
+
+- Any misspellings in the Main heading or Subheading columns
 - Correct any false information in the summary column, which is a summary of the relevant response text.
 {additional_validation_issues}
 - Any other obvious errors that you can identify.
@@ -115,7 +123,9 @@ summary_assistant_prefill = ""
 
 summarise_topic_descriptions_system_prompt = system_prompt
 
-summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}. Return only the summary and no other text:
+summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}
+
+Return only the summary and no other text:
 
 {summaries}
 

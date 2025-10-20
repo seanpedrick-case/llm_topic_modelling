@@ -11,12 +11,12 @@ from tqdm import tqdm
 from gradio import Progress
 from typing import List, Tuple, Any
 from io import StringIO
-from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt, validation_prompt_prefix_default, previous_table_introduction_default, validation_prompt_suffix_default, validation_system_prompt
+from tools.prompts import initial_table_prompt, initial_table_system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt,  force_existing_topics_prompt, allow_new_topics_prompt, force_single_topic_prompt, add_existing_topics_assistant_prefill, initial_table_assistant_prefill, structured_summary_prompt, default_response_reference_format, negative_neutral_positive_sentiment_prompt, negative_or_positive_sentiment_prompt,  default_sentiment_prompt, validation_prompt_prefix_default, previous_table_introduction_default, validation_prompt_suffix_default, validation_prompt_suffix_struct_summary_default, validation_system_prompt
 from tools.helper_functions import read_file, put_columns_in_df, wrap_text, load_in_data_file, create_topic_summary_df_from_reference_table, convert_reference_table_to_pivot_table, get_basic_response_data, clean_column_name, load_in_previous_data_files, create_batch_file_path_details, generate_zero_shot_topics_df, clean_column_name, create_topic_summary_df_from_reference_table
 from tools.llm_funcs import construct_gemini_generative_model, call_llm_with_markdown_table_checks, create_missing_references_df, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model
 from tools.config import RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, MAX_OUTPUT_VALIDATION_ATTEMPTS, LLM_MAX_NEW_TOKENS, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, OUTPUT_FOLDER, CHOSEN_LOCAL_MODEL_TYPE, LLM_SEED, MAX_GROUPS, REASONING_SUFFIX, MAX_ROWS, MAXIMUM_ZERO_SHOT_TOPICS, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, ENABLE_VALIDATION, LLM_CONTEXT_LENGTH
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, overall_summary, process_debug_output_iteration
+from tools.dedup_summaries import deduplicate_topics, overall_summary, process_debug_output_iteration, wrapper_summarise_output_topics_per_group
 
 
 max_tokens = LLM_MAX_NEW_TOKENS
@@ -162,6 +162,8 @@ def validate_topics(
     sentiment_checkbox: str = "Negative or Positive",
     logged_content: list = None,
     show_previous_table: str = "Yes",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -195,6 +197,8 @@ def validate_topics(
     - max_time_for_loop (int): Maximum time for the loop
     - logged_content (list, optional): The logged content from the original run. If None, tables will be reconstructed from reference_df
     - show_previous_table (str): Whether to show the previous table ("Yes" or "No").
+    - aws_access_key_textbox (str): AWS access key.
+    - aws_secret_key_textbox (str): AWS secret key.
     - progress: Progress bar object
 
     Returns:
@@ -208,6 +212,8 @@ def validate_topics(
     # Initialize model components
     model_choice_clean = model_name_map[model_choice]['short_name']
     model_source = model_name_map[model_choice]["source"]
+
+    if context_textbox and 'The context of this analysis is' not in context_textbox: context_textbox = "The context of this analysis is '" + context_textbox + "'."
     
     # Initialize model objects
     local_model = None
@@ -220,8 +226,8 @@ def validate_topics(
         tokenizer = get_tokenizer()
     
     # Set up bedrock runtime if needed
-    if model_source == "Bedrock":
-        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, "", "")
+    if model_source == "AWS":
+        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
     
     # Clean file name for output
     file_name_clean = clean_column_name(file_name, max_length=20, front_characters=False)
@@ -363,10 +369,19 @@ def validate_topics(
                     validate_prompt_suffix=validation_prompt_suffix_default.format(additional_validation_issues=additional_validation_issues_provided)
                 )
             else:
-                validation_formatted_summary_prompt = structured_summary_prompt.format(
+                # Ensure the validation wrapper is applied even for structured summaries
+                structured_summary_instructions = structured_summary_prompt.format(
                     response_table=validation_response_table_prompt,
-                    topics=validation_unique_topics_markdown, 
+                    topics=validation_unique_topics_markdown,
                     summary_format=additional_instructions_summary_format
+                )
+
+                validation_formatted_summary_prompt = (
+                    f"{validation_prompt_prefix_default}"
+                    f"{structured_summary_instructions}"
+                    f"{previous_table_introduction_default}"
+                    f"{previous_table_content if show_previous_table == 'Yes' else ''}"
+                    f"{validation_prompt_suffix_struct_summary_default.format(additional_validation_issues=additional_validation_issues_provided)}"
                 )
             
             validation_batch_file_path_details = f"{file_name_clean}_val_batch_{validation_latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"
@@ -466,10 +481,6 @@ def validate_topics(
                     # Remove duplicates and concatenate
                     validation_topic_summary_df = pd.concat([validation_topic_summary_df, validation_new_topic_summary_df]).drop_duplicates(['General topic', 'Subtopic', 'Sentiment']).dropna(how='all')
             
-            # For topics table, just concatenate
-            # if not validation_new_topic_df.empty:
-            #     validation_topics_table = pd.concat([validation_topics_table, validation_new_topic_df]).dropna(how='all')
-            
         else:
             print("Current validation batch of responses contains no text, moving onto next. Batch number:", str(validation_latest_batch_completed + 1), ". Start row:", validation_start_row, ". End row:", validation_end_row)
         
@@ -547,6 +558,8 @@ def validate_topics_wrapper(
     sentiment_checkbox: str = "Negative or Positive",
     logged_content: List[dict] = None,
     show_previous_table: str = "Yes",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -582,6 +595,9 @@ def validate_topics_wrapper(
         sentiment_checkbox (str): Sentiment analysis option.
         logged_content (List[dict], optional): The logged content from the original run. If None, tables will be reconstructed from reference_df.
         show_previous_table (str): Whether to show the previous table ("Yes" or "No").
+        aws_access_key_textbox (str): AWS access key.
+        aws_secret_key_textbox (str): AWS secret key.
+        progress (gr.Progress): Progress bar object.
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
@@ -707,7 +723,9 @@ def validate_topics_wrapper(
                 max_time_for_loop=max_time_for_loop,
                 sentiment_checkbox=sentiment_checkbox,
                 logged_content=logged_content,
-                show_previous_table=show_previous_table
+                show_previous_table=show_previous_table,
+                aws_access_key_textbox=aws_access_key_textbox,
+                aws_secret_key_textbox=aws_secret_key_textbox
             )
             
             # Accumulate results
@@ -1567,7 +1585,7 @@ def process_batch_with_llm(
         MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=assistant_prefill, master=not is_first_batch
     )
 
-    print("Response text:", response_text)
+    #print("Response text:", response_text)
     
     # Return output tables
     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, batch_file_path_details, is_error = write_llm_output_and_logs(
@@ -1650,6 +1668,7 @@ def extract_topics(in_data_file: gr.FileData,
               max_time_for_loop:int=max_time_for_loop,
               CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE,
               reasoning_suffix:str=reasoning_suffix,
+              output_debug_files:str=output_debug_files,
               model:object=list(),
               tokenizer:object=list(),
               assistant_model:object=list(),
@@ -1657,7 +1676,6 @@ def extract_topics(in_data_file: gr.FileData,
               original_full_file_name:str="",
               additional_instructions_summary_format:str="",
               additional_validation_issues_provided:str="",
-              output_debug_files:str=output_debug_files,
               progress=Progress(track_tqdm=True)):
 
     '''
@@ -1707,6 +1725,7 @@ def extract_topics(in_data_file: gr.FileData,
     - max_time_for_loop (int, optional): The number of seconds maximum that the function should run for before breaking (to run again, this is to avoid timeouts with some AWS services if deployed there).
     - CHOSEN_LOCAL_MODEL_TYPE (str, optional): The name of the chosen local model.
     - reasoning_suffix (str, optional): The suffix for the reasoning system prompt.
+    - output_debug_files (str, optional): Flag indicating whether to output debug files ("True" or "False").
     - model: Model object for local inference.
     - tokenizer: Tokenizer object for local inference.
     - assistant_model: Assistant model object for local inference.
@@ -1714,7 +1733,6 @@ def extract_topics(in_data_file: gr.FileData,
     - original_full_file_name: The original full file name.
     - additional_instructions_summary_format: Initial instructions to guide the format for the initial summary of the topics.
     - additional_validation_issues_provided: Additional validation issues provided by the user.
-    - output_debug_files (str, optional): Flag indicating whether to output debug files ("True" or "False").
     - progress (Progress): A progress tracker.
 
     '''
@@ -1825,8 +1843,7 @@ def extract_topics(in_data_file: gr.FileData,
         elif sentiment_checkbox == "Do not assess sentiment": sentiment_prompt = "" # Just remove line completely. Previous: sentiment_prefix + do_not_assess_sentiment_prompt + sentiment_suffix
         else: sentiment_prompt = sentiment_prefix + default_sentiment_prompt + sentiment_suffix
 
-        if context_textbox: context_textbox = "The context of this analysis is '" + context_textbox + "'."
-        else: context_textbox = ""
+        if context_textbox and 'The context of this analysis is' not in context_textbox: context_textbox = "The context of this analysis is '" + context_textbox + "'."
         
         topics_loop_description = "Extracting topics from response batches (each batch of " + str(batch_size) + " responses)."
         total_batches_to_do = num_batches - latest_batch_completed
@@ -1869,8 +1886,6 @@ def extract_topics(in_data_file: gr.FileData,
                             
                         zero_shot_topics_df = generate_zero_shot_topics_df(zero_shot_topics, force_zero_shot_radio, create_revised_general_topics)
 
-                        print("Existing topic summary dataframe:", existing_topic_summary_df)
-
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
                         if not existing_topic_summary_df.empty and force_zero_shot_radio != "Yes":
                             existing_topic_summary_df = pd.concat([existing_topic_summary_df, zero_shot_topics_df]).drop_duplicates("Subtopic")
@@ -1880,14 +1895,11 @@ def extract_topics(in_data_file: gr.FileData,
                         # If you have already created revised zero shot topics, concat to the current
                         existing_topic_summary_df = pd.concat([existing_topic_summary_df, zero_shot_topics_df])
 
-                    print("Cleaning topic summary dataframe...:", existing_topic_summary_df)
                     existing_topic_summary_df["Number of responses"] = ""
                     existing_topic_summary_df.fillna("", inplace=True)
                     existing_topic_summary_df["General topic"] = existing_topic_summary_df["General topic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df["Subtopic"] = existing_topic_summary_df["Subtopic"].str.replace('(?i)^Nan$', '', regex=True)
                     existing_topic_summary_df = existing_topic_summary_df.drop_duplicates()
-
-                    print("Cleaned topic summary dataframe:", existing_topic_summary_df)
                     
 
                     # If user has chosen to try to force zero shot topics, then the prompt is changed to ask the model not to deviate at all from submitted topic list.
@@ -1957,8 +1969,6 @@ def extract_topics(in_data_file: gr.FileData,
                         topics=unique_topics_markdown, summary_format=additional_instructions_summary_format)
                     
                     batch_file_path_details = f"{file_name_clean}_batch_{latest_batch_completed + 1}_size_{batch_size}_col_{in_column_cleaned}"
-
-                    print("Formatted summary prompt:", formatted_summary_prompt)
 
                     # Use the helper function to process the batch
                     new_topic_df, new_reference_df, new_topic_summary_df, is_error, current_prompt_content_logged, current_summary_content_logged, current_conversation_content_logged, current_metadata_content_logged, topic_table_out_path, reference_table_out_path, topic_summary_df_out_path = process_batch_with_llm(
@@ -2221,16 +2231,16 @@ def extract_topics(in_data_file: gr.FileData,
 
         all_groups_logged_content = all_groups_logged_content + group_combined_logged_content
 
-        file_path_details = create_batch_file_path_details(file_name)
+        #file_path_details = create_batch_file_path_details(file_name, in_column=chosen_cols)
 
         # Create a pivoted reference table
         existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)        
 
         # Save the new DataFrame to CSV
-        reference_table_out_pivot_path = output_folder + file_path_details + "_final_reference_table_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
-        reference_table_out_path = output_folder + file_path_details + "_final_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
-        topic_summary_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
-        basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_pivot_path = output_folder + file_name_clean + "_final_reference_table_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_path = output_folder + file_name_clean + "_final_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
+        topic_summary_df_out_path = output_folder + file_name_clean + "_final_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        basic_response_data_out_path = output_folder + file_name_clean + "_simplified_data_file_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
 
         ## Reference table mapping response numbers to topics
         existing_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
@@ -2336,6 +2346,7 @@ def wrapper_extract_topics_per_column_value(
     max_time_for_loop: int = max_time_for_loop, # This applies per call to extract_topics
     reasoning_suffix: str = reasoning_suffix,
     CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
+    output_debug_files: str = output_debug_files,
     model:object=None,
     tokenizer:object=None,
     assistant_model:object=None,
@@ -2392,6 +2403,7 @@ def wrapper_extract_topics_per_column_value(
     :param max_time_for_loop: Maximum time allowed for the processing loop.
     :param reasoning_suffix: Suffix to append for reasoning.
     :param CHOSEN_LOCAL_MODEL_TYPE: Type of local model chosen.    
+    :param output_debug_files: Whether to output debug files ("True" or "False").
     :param model: Model object for local inference.
     :param tokenizer: Tokenizer object for local inference.
     :param assistant_model: Assistant model object for local inference.
@@ -2565,6 +2577,7 @@ def wrapper_extract_topics_per_column_value(
                 model_name_map=model_name_map,
                 max_time_for_loop=max_time_for_loop,
                 CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
+                output_debug_files=output_debug_files,
                 reasoning_suffix=reasoning_suffix,
                 model=model,
                 tokenizer=tokenizer,
@@ -2878,6 +2891,8 @@ def all_in_one_pipeline(
     additional_instructions_summary_format:str="",
     additional_validation_issues_provided:str="",
     show_previous_table:str="Yes",
+    sample_reference_table_checkbox:bool=True,
+    output_debug_files:str=output_debug_files,
     model: object = None,
     tokenizer: object = None,
     assistant_model: object = None,    
@@ -2935,6 +2950,8 @@ def all_in_one_pipeline(
         additional_instructions_summary_format (str, optional): Summary format for adding existing topics. Defaults to "".
         additional_validation_issues_provided (str, optional): Additional validation issues provided by the user. Defaults to "".
         show_previous_table (str, optional): Whether to show the previous table ("Yes" or "No"). Defaults to "Yes".
+        sample_reference_table_checkbox (bool, optional): Whether to sample summaries before creating revised summaries.
+        output_debug_files (str, optional): Whether to output debug files. Defaults to "False".
         model (object, optional): Loaded local model object. Defaults to None.
         tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.
         assistant_model (object, optional): Loaded local assistant model object. Defaults to None.
@@ -3021,6 +3038,7 @@ def all_in_one_pipeline(
         output_folder=output_folder,
         existing_logged_content=existing_logged_content,
         model_name_map=model_name_map_state,        
+        output_debug_files=output_debug_files,
         model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,
@@ -3129,10 +3147,8 @@ def all_in_one_pipeline(
         _unique_name_2
     ) = load_in_previous_data_files(summarisation_input_files)
 
-    summary_reference_table_sample_state, summarised_references_markdown = sample_reference_table_summaries(ref_df_after_dedup, random_seed)
-
     (
-        _summary_reference_table_sample_state,
+        summary_reference_table_sample_state,
         master_unique_topics_df_revised_summaries_state,
         master_reference_df_revised_summaries_state,
         summary_output_files,
@@ -3148,8 +3164,9 @@ def all_in_one_pipeline(
         estimated_time_taken_number,
         output_messages_textbox,
         out_logged_content
-    ) = summarise_output_topics(
-        sampled_reference_table_df=summary_reference_table_sample_state,
+    ) = wrapper_summarise_output_topics_per_group(
+        grouping_col=grouping_col,
+        sampled_reference_table_df=ref_df_after_dedup,
         topic_summary_df=unique_df_after_dedup,
         reference_table_df=ref_df_after_dedup,
         model_choice=model_choice,
@@ -3175,8 +3192,15 @@ def all_in_one_pipeline(
         local_model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,
-        existing_logged_content=out_logged_content
+        existing_logged_content=out_logged_content,
+        sample_reference_table=sample_reference_table_checkbox,
+        no_of_sampled_summaries=100,
+        random_seed=random_seed,
+        output_debug_files=output_debug_files,
     )
+
+    # Generate summarised_references_markdown from the sampled reference table
+    summarised_references_markdown = summary_reference_table_sample_state.to_markdown(index=False)
 
     total_input_tokens += input_tokens_num
     total_output_tokens += output_tokens_num
@@ -3222,7 +3246,8 @@ def all_in_one_pipeline(
         local_model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,
-        existing_logged_content=out_logged_content
+        existing_logged_content=out_logged_content,
+        output_debug_files=output_debug_files,
     )
 
     total_input_tokens += input_tokens_num

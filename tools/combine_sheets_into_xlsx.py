@@ -29,9 +29,13 @@ def add_cover_sheet(
 ):
     ws = wb.create_sheet(title=custom_title, index=0)
 
+    # Freeze top row
+    ws.freeze_panes = "A2"
+
     # Write title
     ws["A1"] = "Large Language Model Topic analysis"
     ws["A1"].font = Font(size=14, bold=True)
+    ws["A1"].alignment = Alignment(wrap_text=True, vertical="top")
 
     # Add intro paragraphs
     row = 3
@@ -72,6 +76,11 @@ def add_cover_sheet(
         # Optional: Adjust column widths
         ws.column_dimensions["A"].width = 25
         ws.column_dimensions["B"].width = 75
+
+    # Ensure first row cells are wrapped on the cover sheet
+    for col_idx in range(1, ws.max_column + 1):
+        header_cell = ws.cell(row=1, column=col_idx)
+        header_cell.alignment = Alignment(wrap_text=True, vertical="center")
 
 def csvs_to_excel(
     csv_files:list[str],
@@ -137,6 +146,14 @@ def csvs_to_excel(
                 for col_letter in wrap_text_columns[sheet_name]:
                     cell = ws[f"{col_letter}{r_idx}"]
                     cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+        # Freeze top row for all data sheets
+        ws.freeze_panes = "A2"
+
+        # Ensure all header cells (first row) are wrapped
+        for col_idx in range(1, ws.max_column + 1):
+            header_cell = ws.cell(row=1, column=col_idx)
+            header_cell.alignment = Alignment(vertical="center", wrap_text=True)
 
         # Set column widths
         if column_widths and sheet_name in column_widths:
