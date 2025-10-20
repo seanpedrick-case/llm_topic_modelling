@@ -78,6 +78,15 @@ validation_prompt_suffix_default = """\n\nBased on the above information, you ne
 
 With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
 
+validation_prompt_suffix_struct_summary_default = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
+
+- Any misspellings in the Main heading or Subheading columns
+- Correct any false information in the summary column, which is a summary of the relevant response text.
+{additional_validation_issues}
+- Any other obvious errors that you can identify.
+
+With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
+
 ###
 # SENTIMENT CHOICES
 ###
@@ -115,7 +124,9 @@ summary_assistant_prefill = ""
 
 summarise_topic_descriptions_system_prompt = system_prompt
 
-summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}. Return only the summary and no other text:
+summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}
+
+Return only the summary and no other text:
 
 {summaries}
 

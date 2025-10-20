@@ -766,22 +766,24 @@ def _get_env_list(env_var_name: str, strip_strings:bool=True) -> List[str]:
     else:
         return [codecs.decode(s, 'unicode_escape') for s in value.split(',') if s]
 
-def create_batch_file_path_details(reference_data_file_name: str) -> str:
+def create_batch_file_path_details(reference_data_file_name: str, latest_batch_completed:int=None, batch_size_number:int=None, in_column:str=None) -> str:
             """
-            Creates a standardized batch file path detail string from a reference data filename.
+            Creates a standardised batch file path detail string from a reference data filename.
             
             Args:
                 reference_data_file_name (str): Name of the reference data file
-            
+                latest_batch_completed (int, optional): Latest batch completed. Defaults to None.
+                batch_size_number (int, optional): Batch size number. Defaults to None.
+                in_column (str, optional): In column. Defaults to None.
             Returns:
                 str: Formatted batch file path detail string
             """
             
             # Extract components from filename using regex
             file_name = re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name).group(1) if re.search(r'(.*?)(?:_all_|_final_|_batch_|_col_)', reference_data_file_name) else reference_data_file_name
-            latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else ""
-            batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else ""
-            in_column = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else ""
+            latest_batch_completed = int(re.search(r'batch_(\d+)_', reference_data_file_name).group(1)) if 'batch_' in reference_data_file_name else latest_batch_completed
+            batch_size_number = int(re.search(r'size_(\d+)_', reference_data_file_name).group(1)) if 'size_' in reference_data_file_name else batch_size_number
+            in_column = re.search(r'col_(.*?)_reference', reference_data_file_name).group(1) if 'col_' in reference_data_file_name else in_column
 
             # Clean the extracted names
             file_name_cleaned = clean_column_name(file_name, max_length=20)

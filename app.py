@@ -6,7 +6,7 @@ from datetime import datetime
 from tools.helper_functions import put_columns_in_df, get_connection_params, view_table, empty_output_vars_extract_topics, empty_output_vars_summarise, load_in_previous_reference_file, join_cols_onto_reference_df, load_in_previous_data_files, load_in_data_file, load_in_default_cost_codes, reset_base_dataframe, update_cost_code_dataframe_from_dropdown_select, df_select_callback_cost, enforce_cost_codes, move_overall_summary_output_files_to_front_page, update_model_choice
 from tools.aws_functions import upload_file_to_s3, download_file_from_s3
 from tools.llm_api_call import modify_existing_output_tables, wrapper_extract_topics_per_column_value, all_in_one_pipeline, validate_topics_wrapper
-from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, deduplicate_topics_llm, overall_summary
+from tools.dedup_summaries import sample_reference_table_summaries, summarise_output_topics, deduplicate_topics, deduplicate_topics_llm, overall_summary, wrapper_summarise_output_topics_per_group
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
@@ -282,6 +282,11 @@ with app:
 
             summarise_format_radio = gr.Radio(label="Choose summary type (Note: this will also use the custom summary instructions from step 1 above if provided)", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt])
             
+            with gr.Row():
+                sample_reference_table_checkbox = gr.Checkbox(value=True, label="Sample reference table (recommended for large datasets)")
+                no_of_sampled_summaries_number = gr.Number(value=150, label="Number of summaries per group", precision=0, minimum=10, maximum=500)
+                random_seed_number = gr.Number(value=42, label="Random seed", precision=0, minimum=1, maximum=9999)
+            
             summarise_previous_data_btn = gr.Button("4. Summarise topics", variant="primary")
             with gr.Row():
                 summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False, scale=3)
@@ -394,8 +399,6 @@ with app:
 
         cost_code_choice_drop.select(update_cost_code_dataframe_from_dropdown_select, inputs=[cost_code_choice_drop, cost_code_dataframe_base], outputs=[cost_code_dataframe])
     
-    
-
     # Extract topics
     extract_topics_btn.click(fn=empty_output_vars_extract_topics, inputs=None, outputs=[master_topic_df_state, master_unique_topics_df_state, master_reference_df_state, topic_extraction_output_files, text_output_file_list_state, latest_batch_completed, log_files_output, log_files_output_list_state, conversation_metadata_textbox, estimated_time_taken_number, file_data_state, working_data_file_name_textbox, display_topic_table_markdown, summary_output_files, summarisation_input_files, overall_summarisation_input_files, overall_summary_output_files]).\
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
@@ -555,10 +558,10 @@ with app:
     summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, overall_summarisation_input_files]).\
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
         success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
-                success(summarise_output_topics, inputs=[summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state, hf_api_key_textbox, azure_endpoint_textbox, logged_content_df], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, output_messages_textbox, logged_content_df], api_name="summarise_topics", show_progress_on=[output_messages_textbox, summary_output_files]).\
-                success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False).\
-                then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_revised_summaries_state, master_unique_topics_df_revised_summaries_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list])
+        success(wrapper_summarise_output_topics_per_group, inputs=[in_group_col, summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state, hf_api_key_textbox, azure_endpoint_textbox, logged_content_df, sample_reference_table_checkbox, no_of_sampled_summaries_number, random_seed_number], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, output_messages_textbox, logged_content_df], api_name="summarise_topics", show_progress_on=[output_messages_textbox, summary_output_files]).\
+        success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False).\
+        then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_revised_summaries_state, master_unique_topics_df_revised_summaries_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list])
+        # success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed, sample_reference_table_checkbox], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
 
     # SUMMARISE WHOLE TABLE PAGE
     overall_summarise_previous_data_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
@@ -622,7 +625,8 @@ with app:
                 logged_content_df,
                 additional_summary_instructions_textbox,
                 additional_validation_issues_textbox,
-                show_previous_table_radio
+                show_previous_table_radio,
+                sample_reference_table_checkbox,
             ],
             outputs=[
                 display_topic_table_markdown,
