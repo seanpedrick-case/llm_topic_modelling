@@ -1141,7 +1141,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
         assistant_model = get_assistant_model()
 
     summary_loop_description = "Revising topic-level summaries. " + str(latest_summary_completed) + " summaries completed so far."
-    summary_loop = tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
+    summary_loop = progress.tqdm(range(latest_summary_completed, length_all_summaries), desc="Revising topic-level summaries", unit="summaries")   
 
     if do_summaries == "Yes":
         
@@ -1543,8 +1543,7 @@ def wrapper_summarise_output_topics_per_group(
                 assistant_model=assistant_model,
                 summarise_topic_descriptions_prompt=summarise_topic_descriptions_prompt,
                 summarise_topic_descriptions_system_prompt=summarise_topic_descriptions_system_prompt,
-                do_summaries=do_summaries,
-                progress=progress
+                do_summaries=do_summaries
             )
 
             # Aggregate results

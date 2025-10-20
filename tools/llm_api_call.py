@@ -162,6 +162,8 @@ def validate_topics(
     sentiment_checkbox: str = "Negative or Positive",
     logged_content: list = None,
     show_previous_table: str = "Yes",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -195,6 +197,8 @@ def validate_topics(
     - max_time_for_loop (int): Maximum time for the loop
     - logged_content (list, optional): The logged content from the original run. If None, tables will be reconstructed from reference_df
     - show_previous_table (str): Whether to show the previous table ("Yes" or "No").
+    - aws_access_key_textbox (str): AWS access key.
+    - aws_secret_key_textbox (str): AWS secret key.
     - progress: Progress bar object
 
     Returns:
@@ -222,8 +226,8 @@ def validate_topics(
         tokenizer = get_tokenizer()
     
     # Set up bedrock runtime if needed
-    if model_source == "Bedrock":
-        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, "", "")
+    if model_source == "AWS":
+        bedrock_runtime = connect_to_bedrock_runtime(model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox)
     
     # Clean file name for output
     file_name_clean = clean_column_name(file_name, max_length=20, front_characters=False)
@@ -554,6 +558,8 @@ def validate_topics_wrapper(
     sentiment_checkbox: str = "Negative or Positive",
     logged_content: List[dict] = None,
     show_previous_table: str = "Yes",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -589,6 +595,9 @@ def validate_topics_wrapper(
         sentiment_checkbox (str): Sentiment analysis option.
         logged_content (List[dict], optional): The logged content from the original run. If None, tables will be reconstructed from reference_df.
         show_previous_table (str): Whether to show the previous table ("Yes" or "No").
+        aws_access_key_textbox (str): AWS access key.
+        aws_secret_key_textbox (str): AWS secret key.
+        progress (gr.Progress): Progress bar object.
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
@@ -714,7 +723,9 @@ def validate_topics_wrapper(
                 max_time_for_loop=max_time_for_loop,
                 sentiment_checkbox=sentiment_checkbox,
                 logged_content=logged_content,
-                show_previous_table=show_previous_table
+                show_previous_table=show_previous_table,
+                aws_access_key_textbox=aws_access_key_textbox,
+                aws_secret_key_textbox=aws_secret_key_textbox
             )
             
             # Accumulate results
@@ -1574,7 +1585,7 @@ def process_batch_with_llm(
         MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=assistant_prefill, master=not is_first_batch
     )
 
-    print("Response text:", response_text)
+    #print("Response text:", response_text)
     
     # Return output tables
     topic_table_out_path, reference_table_out_path, topic_summary_df_out_path, new_topic_df, new_reference_df, new_topic_summary_df, batch_file_path_details, is_error = write_llm_output_and_logs(
@@ -2220,16 +2231,16 @@ def extract_topics(in_data_file: gr.FileData,
 
         all_groups_logged_content = all_groups_logged_content + group_combined_logged_content
 
-        file_path_details = create_batch_file_path_details(file_name)
+        #file_path_details = create_batch_file_path_details(file_name, in_column=chosen_cols)
 
         # Create a pivoted reference table
         existing_reference_df_pivot = convert_reference_table_to_pivot_table(existing_reference_df)        
 
         # Save the new DataFrame to CSV
-        reference_table_out_pivot_path = output_folder + file_path_details + "_final_reference_table_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
-        reference_table_out_path = output_folder + file_path_details + "_final_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
-        topic_summary_df_out_path = output_folder + file_path_details + "_final_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
-        basic_response_data_out_path = output_folder + file_path_details + "_simplified_data_file_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_pivot_path = output_folder + file_name_clean + "_final_reference_table_pivot_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        reference_table_out_path = output_folder + file_name_clean + "_final_reference_table_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv" 
+        topic_summary_df_out_path = output_folder + file_name_clean + "_final_unique_topics_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
+        basic_response_data_out_path = output_folder + file_name_clean + "_simplified_data_file_" + model_choice_clean_short + "_temp_" + str(temperature) + ".csv"
 
         ## Reference table mapping response numbers to topics
         existing_reference_df.to_csv(reference_table_out_path, index=None, encoding='utf-8-sig')
