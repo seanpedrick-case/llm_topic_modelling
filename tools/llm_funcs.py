@@ -504,7 +504,7 @@ def set_model(model, tokenizer, assistant_model=None):
     _assistant_model = assistant_model
 
 # Initialize model at startup if configured
-if LOAD_LOCAL_MODEL_AT_START == "True":
+if LOAD_LOCAL_MODEL_AT_START == "True" and RUN_LOCAL_MODEL == "1":
     get_model()  # This will trigger loading
 
 def call_llama_cpp_model(formatted_string:str, gen_config:str, model=None):
