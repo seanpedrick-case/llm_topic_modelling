@@ -226,6 +226,10 @@ RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
 AZURE_OPENAI_API_KEY = get_or_create_env_var('AZURE_OPENAI_API_KEY', '')
 AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_OPENAI_INFERENCE_ENDPOINT', '')
 
+# Llama-server settings
+RUN_LLAMA_SERVER = get_or_create_env_var("RUN_LLAMA_SERVER", "0")
+API_URL = get_or_create_env_var('API_URL', 'http://localhost:8080')
+
 # Build up options for models
 
 model_full_names = list()
@@ -259,12 +263,21 @@ if RUN_AZURE_MODELS == "1":
     model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
+# Register llama-server models
+if RUN_LLAMA_SERVER == "1":
+    # Example llama-server models; adjust to the models you have available on your server
+    llama_server_models = ["gpt_oss_20b"]
+    model_full_names.extend(llama_server_models)
+    model_short_names.extend(["gpt_oss_20b"])
+    model_source.extend(["llama-server"] * len(llama_server_models))
+
 model_name_map = {
     full: {"short_name": short, "source": source}
     for full, short, source in zip(model_full_names, model_short_names, model_source)
 }
 
 if RUN_LOCAL_MODEL == "1": default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
+elif RUN_LLAMA_SERVER == "1": default_model_choice = llama_server_models[0]
 elif RUN_AWS_FUNCTIONS == "1": default_model_choice = amazon_models[0]
 else: default_model_choice = gemini_models[0]
 
@@ -310,10 +323,8 @@ GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit" # unsloth/gemma-3-4b-it-qat
-if USE_LLAMA_CPP == "False":
-    GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
-
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" )
+if USE_LLAMA_CPP == "False":  GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
@@ -323,6 +334,7 @@ if USE_LLAMA_CPP == "False": GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
 
 GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
+
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
 
@@ -346,10 +358,14 @@ QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MOD
 QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 
 GRANITE_4_TINY_REPO_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_ID", "unsloth/granite-4.0-h-tiny-GGUF")
+GRANITE_4_TINY_REPO_TRANSFORMERS_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-h-tiny-FP8-Dynamic" )
+if USE_LLAMA_CPP == "False":  GRANITE_4_TINY_REPO_ID = GRANITE_4_TINY_REPO_TRANSFORMERS_ID
 GRANITE_4_TINY_MODEL_FILE = get_or_create_env_var("GRANITE_4_TINY_MODEL_FILE", "granite-4.0-h-tiny-UD-Q4_K_XL.gguf")
 GRANITE_4_TINY_MODEL_FOLDER = get_or_create_env_var("GRANITE_4_TINY_MODEL_FOLDER", "model/granite")
 
 GRANITE_4_3B_REPO_ID = get_or_create_env_var("GRANITE_4_3B_REPO_ID", "unsloth/granite-4.0-h-micro-GGUF")
+GRANITE_4_3B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GRANITE_4_3B_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-micro-unsloth-bnb-4bit" )
+if USE_LLAMA_CPP == "False":  GRANITE_4_3B_REPO_ID = GRANITE_4_3B_REPO_TRANSFORMERS_ID
 GRANITE_4_3B_MODEL_FILE = get_or_create_env_var("GRANITE_4_3B_MODEL_FILE", "granite-4.0-h-micro-UD-Q4_K_XL.gguf")
 GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var("GRANITE_4_3B_MODEL_FOLDER", "model/granite")
 
@@ -373,12 +389,12 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
-elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 7B":
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Tiny":
     LOCAL_REPO_ID = GRANITE_4_TINY_REPO_ID
     LOCAL_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
     LOCAL_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
 
-elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 3B":
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Micro":
     LOCAL_REPO_ID = GRANITE_4_3B_REPO_ID
     LOCAL_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
