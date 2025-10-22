@@ -311,7 +311,8 @@ if LOW_VRAM_SYSTEM == 'True':
     LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
     LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
     LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
-    KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
+    K_QUANT_LEVEL = int(get_or_create_env_var('K_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
+    V_QUANT_LEVEL = int(get_or_create_env_var('V_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
 
 USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers with unsloth
 
@@ -434,10 +435,13 @@ LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n\n\n']"
 MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
-KV_QUANT_LEVEL = get_or_create_env_var('KV_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
+K_QUANT_LEVEL = get_or_create_env_var('K_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
+V_QUANT_LEVEL = get_or_create_env_var('V_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
 
-if not KV_QUANT_LEVEL: KV_QUANT_LEVEL = None
-else: KV_QUANT_LEVEL = int(KV_QUANT_LEVEL)
+if not K_QUANT_LEVEL: K_QUANT_LEVEL = None
+else: K_QUANT_LEVEL = int(K_QUANT_LEVEL)
+if not V_QUANT_LEVEL: V_QUANT_LEVEL = None
+else: V_QUANT_LEVEL = int(V_QUANT_LEVEL)
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b": REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')

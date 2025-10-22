@@ -22,7 +22,7 @@ _model = None
 _tokenizer = None
 _assistant_model = None
 
-from tools.config import LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, LOAD_LOCAL_MODEL_AT_START, ASSISTANT_MODEL, LLM_STOP_STRINGS, MULTIMODAL_PROMPT_FORMAT, KV_QUANT_LEVEL, RUN_LOCAL_MODEL
+from tools.config import LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, LOAD_LOCAL_MODEL_AT_START, ASSISTANT_MODEL, LLM_STOP_STRINGS, MULTIMODAL_PROMPT_FORMAT, RUN_LOCAL_MODEL, K_QUANT_LEVEL, V_QUANT_LEVEL
 from tools.helper_functions import _get_env_list
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
@@ -261,9 +261,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
             try:
                 print("GPU load variables:" , vars(gpu_config))
                 if speculative_decoding:
-                    model = Llama(model_path=model_path, type_k=KV_QUANT_LEVEL, type_v=KV_QUANT_LEVEL, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
+                    model = Llama(model_path=model_path, type_k=K_QUANT_LEVEL, type_v=V_QUANT_LEVEL, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
                 else:
-                    model = Llama(model_path=model_path, type_k=KV_QUANT_LEVEL, type_v=KV_QUANT_LEVEL, flash_attn=True, **vars(gpu_config))    
+                    model = Llama(model_path=model_path, type_k=K_QUANT_LEVEL, type_v=V_QUANT_LEVEL, flash_attn=True, **vars(gpu_config))    
 
             except Exception as e:
                 print("GPU load failed due to:", e, "Loading model in CPU mode")
