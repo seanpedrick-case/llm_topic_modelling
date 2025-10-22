@@ -318,34 +318,26 @@ USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or tr
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
 if USE_LLAMA_CPP == "False": GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
-
 GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf")
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" )
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "https://huggingface.co/unsloth/gemma-3-4b-it-bnb-4bit" )
 if USE_LLAMA_CPP == "False":  GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
 
+GEMMA3_12B_REPO_ID = get_or_create_env_var("GEMMA3_12B_REPO_ID", "unsloth/gemma-3-12b-it-GGUF")
+GEMMA3_12B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_12B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-12b-it-bnb-4bit" )
+if USE_LLAMA_CPP == "False":  GEMMA3_12B_REPO_ID = GEMMA3_12B_REPO_TRANSFORMERS_ID
+GEMMA3_12B_MODEL_FILE = get_or_create_env_var("GEMMA3_12B_MODEL_FILE", "gemma-3-12b-it-UD-Q4_K_XL.gguf")
+GEMMA3_12B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_12B_MODEL_FOLDER", "model/gemma3_12b")
+
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
 GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit")
 if USE_LLAMA_CPP == "False": GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
-
 GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
-
-
-USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
-
-ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
-if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
-elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
-
-DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
-
-GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
-GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
 
 QWEN3_4B_REPO_ID = get_or_create_env_var("QWEN3_4B_REPO_ID", "unsloth/Qwen3-4B-Instruct-2507-GGUF")
 QWEN3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("QWEN3_4B_REPO_TRANSFORMERS_ID", "unsloth/Qwen3-4B-unsloth-bnb-4bit")
@@ -353,9 +345,6 @@ if USE_LLAMA_CPP == "False": QWEN3_4B_REPO_ID = QWEN3_4B_REPO_TRANSFORMERS_ID
 
 QWEN3_4B_MODEL_FILE = get_or_create_env_var("QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 QWEN3_4B_MODEL_FOLDER = get_or_create_env_var("QWEN3_4B_MODEL_FOLDER", "model/qwen")
-
-QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-0.6B-Q8_0.gguf")
-QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 
 GRANITE_4_TINY_REPO_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_ID", "unsloth/granite-4.0-h-tiny-GGUF")
 GRANITE_4_TINY_REPO_TRANSFORMERS_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-h-tiny-FP8-Dynamic" )
@@ -378,6 +367,11 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     LOCAL_REPO_ID = GEMMA3_4B_REPO_ID
     LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 12B":
+    LOCAL_REPO_ID = GEMMA3_12B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA3_12B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
 
 elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
     LOCAL_REPO_ID = QWEN3_4B_REPO_ID
@@ -403,6 +397,21 @@ elif not CHOSEN_LOCAL_MODEL_TYPE:
     LOCAL_REPO_ID = ""
     LOCAL_MODEL_FILE = ""
     LOCAL_MODEL_FOLDER = ""
+
+
+USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
+
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
+if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
+
+DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
+
+GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
+GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
+
+QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-0.6B-Q8_0.gguf")
+QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
