@@ -14,7 +14,7 @@ from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_d
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details, read_file
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, MAX_GROUPS, LLM_CONTEXT_LENGTH
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, MAX_GROUPS, LLM_CONTEXT_LENGTH, DEFAULT_SAMPLED_SUMMARIES
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -25,8 +25,8 @@ deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
 output_debug_files = OUTPUT_DEBUG_FILES
+default_number_of_sampled_summaries = DEFAULT_SAMPLED_SUMMARIES
 max_text_length = 500
-default_number_of_sampled_summaries = 100
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:

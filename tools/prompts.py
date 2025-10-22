@@ -49,7 +49,7 @@ add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create o
 In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
-Choose from among the following topic names to assign to the responses, only if they are directlyrelevant to responses from the response table below: 
+Choose from among the following topic names to assign to the responses, only if they are directly relevant to responses from the response table below: 
 {topics}
 
 {response_table}

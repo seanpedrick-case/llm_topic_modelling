@@ -266,9 +266,9 @@ if RUN_AZURE_MODELS == "1":
 # Register llama-server models
 if RUN_LLAMA_SERVER == "1":
     # Example llama-server models; adjust to the models you have available on your server
-    llama_server_models = ["gpt_oss_20b"]
+    llama_server_models = ["gpt_oss_20b", "gemma_3_12b"]
     model_full_names.extend(llama_server_models)
-    model_short_names.extend(["gpt_oss_20b"])
+    model_short_names.extend(llama_server_models)
     model_source.extend(["llama-server"] * len(llama_server_models))
 
 model_name_map = {
@@ -428,8 +428,8 @@ LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
 LLM_RESET = get_or_create_env_var('LLM_RESET', 'False')
 LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'True')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
-LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '32768'))
+LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '2048'))
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '24576'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
 LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n\n\n']")
 MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
@@ -454,6 +454,8 @@ USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether t
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
+
+DEFAULT_SAMPLED_SUMMARIES = int(get_or_create_env_var('DEFAULT_SAMPLED_SUMMARIES', '75'))
 
 ###
 # Gradio app variables
