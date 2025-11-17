@@ -1,22 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "Large language model topic modelling"
-version = "0.4.0"
-description = "Topic model open text data files with a large language model."
+name = "llm_topic_modelling"
+version = "0.5.1"
+description = "Generate thematic summaries from open text in tabular data files with a large language model."
 requires-python = ">=3.10"
 readme = "README.md"
+authors = [
+    { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
+]
+maintainers = [
+    { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
+]
+keywords = [
+    "topic-modelling",
+    "topic-modeling",
+    "llm",
+    "large-language-models",
+    "thematic-analysis",
+    "text-analysis",
+    "nlp",
+    "natural-language-processing",
+    "text-summarization",
+    "text-summarisation",
+    "thematic-summaries",
+    "gradio",
+    "data-analysis",
+    "tabular-data",
+    "excel",
+    "csv",
+    "open-text",
+    "text-mining"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Information Technology",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Text Processing :: Markup",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 
 dependencies = [
     "pandas==2.3.3",
     "gradio==5.49.1",
-    "transformers==4.56.0",
+    "transformers==4.57.1",
     "spaces==0.42.1",
-    "boto3==1.40.48",
+    "boto3==1.40.72",
     "pyarrow==21.0.0",
     "openpyxl==3.1.5",
     "markdown==3.7",
     "tabulate==0.9.0",
     "lxml==5.3.0",
-    "google-genai==1.33.0",
+    "google-genai==1.50.0",
     "openai==2.2.0",
     "html5lib==1.1",
     "beautifulsoup4==4.12.3",
@@ -24,13 +69,36 @@ dependencies = [
     "python-dotenv==1.1.0"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+test = ["pytest", "pytest-cov"]
+
+# Extra dependencies for VLM models
+# For torch you should use --index-url https://download.pytorch.org/whl/cu124. Additionally installs the unsloth package
+torch = [
+    "torch==2.6.0",
+    "accelerate==1.11.0",
+    "bitsandbytes==0.48.2",
+    "unsloth==2025.9.4",
+    "unsloth_zoo==2025.9.5",
+    "timm==1.0.19"
+]
+
+# If you want to install llama-cpp-python in GPU mode, use cmake.args="-DGGML_CUDA=on" . If that doesn't work, try specific wheels for your system, e.g. for Linux: See files in https://github.com/abetlen/llama-cpp-python/releases/tag/v0.3.16-cu124 . More details on installation here: https://llama-cpp-python.readthedocs.io/en/latest
+llamacpp = [
+    "llama-cpp-python==0.3.16",
+]
+
+# Run Gradio as an mcp server
+mcp = [
+    "gradio[mcp]==5.49.1"
+]
+
 [project.urls]
 Homepage = "https://github.com/seanpedrick-case/llm_topic_modelling"
 repository = "https://github.com/seanpedrick-case/llm_topic_modelling"
 
-[project.optional-dependencies]
-dev = ["pytest"]
-test = ["pytest", "pytest-cov"]
+
 
 # Configuration for Ruff linter:
 [tool.ruff]
@@ -50,3 +118,26 @@ ignore = [
 [tool.black]
 line-length = 88
 target-version = ['py310']
+
+# Configuration for pytest:
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:click.parser",
+    "ignore::DeprecationWarning:weasel.util.config",
+    "ignore::DeprecationWarning:builtin type",
+    "ignore::DeprecationWarning:websockets.legacy",
+    "ignore::DeprecationWarning:websockets.server",
+    "ignore::DeprecationWarning:spacy.cli._util",
+    "ignore::DeprecationWarning:weasel.util.config",
+    "ignore::DeprecationWarning:importlib._bootstrap",
+]
+testpaths = ["test"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]

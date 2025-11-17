@@ -50,6 +50,17 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
+def convert_string_to_boolean(value: str) -> bool:
+    """Convert string to boolean, handling various formats."""
+    if isinstance(value, bool):
+        return value
+    elif value in ["True", "1", "true", "TRUE"]:
+        return True
+    elif value in ["False", "0", "false", "FALSE"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
 ###
 # LOAD CONFIG FROM ENV FILE
 ###
@@ -242,8 +253,9 @@ AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_OPENAI_INFERENCE_
 RUN_INFERENCE_SERVER = get_or_create_env_var("RUN_INFERENCE_SERVER", "0")
 API_URL = get_or_create_env_var('API_URL', 'http://localhost:8080')
 
-# Build up options for models
+RUN_MCP_SERVER = convert_string_to_boolean(get_or_create_env_var("RUN_MCP_SERVER", "False"))
 
+# Build up options for models
 model_full_names = list()
 model_short_names = list()
 model_source = list()
