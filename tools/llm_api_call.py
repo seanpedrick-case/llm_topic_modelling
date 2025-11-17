@@ -164,6 +164,7 @@ def validate_topics(
     show_previous_table: str = "Yes",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    api_url: str = None,
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -420,7 +421,8 @@ def validate_topics(
                 output_folder=output_folder,
                 output_debug_files=output_debug_files,
                 task_type="Validation",
-                assistant_prefill=add_existing_topics_assistant_prefill
+                assistant_prefill=add_existing_topics_assistant_prefill,
+                api_url=api_url
             )
 
             if validation_new_topic_df.empty:
@@ -560,6 +562,7 @@ def validate_topics_wrapper(
     show_previous_table: str = "Yes",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    api_url: str = None,
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -725,7 +728,8 @@ def validate_topics_wrapper(
                 logged_content=logged_content,
                 show_previous_table=show_previous_table,
                 aws_access_key_textbox=aws_access_key_textbox,
-                aws_secret_key_textbox=aws_secret_key_textbox
+                aws_secret_key_textbox=aws_secret_key_textbox,
+                api_url=api_url
             )
             
             # Accumulate results
@@ -1478,7 +1482,8 @@ def process_batch_with_llm(
     output_folder: str,
     output_debug_files: str,
     task_type: str,
-    assistant_prefill: str = ""
+    assistant_prefill: str = "",
+    api_url: str = None
 ):
     """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
 
@@ -1582,7 +1587,7 @@ def process_batch_with_llm(
         batch_prompts, formatted_system_prompt, conversation_history, whole_conversation, 
         all_metadata_content, client, client_config, model_choice, temperature, 
         reported_batch_no, local_model, tokenizer, bedrock_runtime, model_source, 
-        MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=assistant_prefill, master=not is_first_batch
+        MAX_OUTPUT_VALIDATION_ATTEMPTS, assistant_prefill=assistant_prefill, master=not is_first_batch, api_url=api_url
     )
 
     #print("Response text:", response_text)
@@ -1676,6 +1681,7 @@ def extract_topics(in_data_file: gr.FileData,
               original_full_file_name:str="",
               additional_instructions_summary_format:str="",
               additional_validation_issues_provided:str="",
+              api_url:str=None,
               progress=Progress(track_tqdm=True)):
 
     '''
@@ -2004,7 +2010,8 @@ def extract_topics(in_data_file: gr.FileData,
                         output_folder=output_folder,
                         output_debug_files=output_debug_files,
                         task_type=task_type,
-                        assistant_prefill=add_existing_topics_assistant_prefill
+                        assistant_prefill=add_existing_topics_assistant_prefill,
+                        api_url=api_url
                     )
 
                     print("Completed batch processing")
@@ -2105,7 +2112,8 @@ def extract_topics(in_data_file: gr.FileData,
                         output_folder=output_folder,
                         output_debug_files=output_debug_files,
                         task_type=task_type,
-                        assistant_prefill=initial_table_assistant_prefill
+                        assistant_prefill=initial_table_assistant_prefill,
+                        api_url=api_url
                     )
 
                     all_prompts_content.append(current_prompt_content_logged)
@@ -2211,7 +2219,8 @@ def extract_topics(in_data_file: gr.FileData,
                 original_full_file_name=original_full_file_name,
                 max_time_for_loop=max_time_for_loop,
                 sentiment_checkbox=sentiment_checkbox,
-                logged_content=group_combined_logged_content
+                logged_content=group_combined_logged_content,
+                api_url=api_url
             )
             
             # Add validation conversation metadata to the main conversation metadata
@@ -2350,7 +2359,8 @@ def wrapper_extract_topics_per_column_value(
     model:object=None,
     tokenizer:object=None,
     assistant_model:object=None,
-    max_rows:int=max_rows,    
+    max_rows:int=max_rows,
+    api_url:str=None,
     progress=Progress(track_tqdm=True) # type: ignore
 ) -> Tuple: # Mimicking the return tuple structure of extract_topics
     """
@@ -2587,6 +2597,7 @@ def wrapper_extract_topics_per_column_value(
                 original_full_file_name=original_file_name,
                 additional_instructions_summary_format=additional_instructions_summary_format,
                 additional_validation_issues_provided=additional_validation_issues_provided,
+                api_url=api_url,
                 progress=progress
             )
 
@@ -2892,11 +2903,12 @@ def all_in_one_pipeline(
     additional_validation_issues_provided:str="",
     show_previous_table:str="Yes",
     sample_reference_table_checkbox:bool=True,
+    api_url: str = None,
     output_debug_files:str=output_debug_files,
     model: object = None,
     tokenizer: object = None,
     assistant_model: object = None,    
-    max_rows: int = max_rows,
+    max_rows: int = max_rows,    
     progress=Progress(track_tqdm=True)
 ):
     """
@@ -2951,6 +2963,7 @@ def all_in_one_pipeline(
         additional_validation_issues_provided (str, optional): Additional validation issues provided by the user. Defaults to "".
         show_previous_table (str, optional): Whether to show the previous table ("Yes" or "No"). Defaults to "Yes".
         sample_reference_table_checkbox (bool, optional): Whether to sample summaries before creating revised summaries.
+        api_url (str, optional): API URL for inference-server models. Defaults to None.
         output_debug_files (str, optional): Whether to output debug files. Defaults to "False".
         model (object, optional): Loaded local model object. Defaults to None.
         tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.
@@ -3045,7 +3058,8 @@ def all_in_one_pipeline(
         max_rows=max_rows,
         additional_instructions_summary_format=additional_instructions_summary_format,
         additional_validation_issues_provided=additional_validation_issues_provided,
-        show_previous_table=show_previous_table
+        show_previous_table=show_previous_table,
+        api_url=api_url
     )
 
     total_input_tokens += out_input_tokens
@@ -3197,6 +3211,7 @@ def all_in_one_pipeline(
         no_of_sampled_summaries=100,
         random_seed=random_seed,
         output_debug_files=output_debug_files,
+        api_url=api_url
     )
 
     # Generate summarised_references_markdown from the sampled reference table
@@ -3248,6 +3263,7 @@ def all_in_one_pipeline(
         assistant_model=assistant_model,
         existing_logged_content=out_logged_content,
         output_debug_files=output_debug_files,
+        api_url=api_url
     )
 
     total_input_tokens += input_tokens_num

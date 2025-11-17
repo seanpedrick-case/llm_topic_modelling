@@ -12,7 +12,7 @@ from tools.custom_csvlogger import CSVLogger_custom
 from tools.auth import authenticate_user
 from tools.example_table_outputs import dummy_consultation_table, case_notes_table, dummy_consultation_table_zero_shot, case_notes_table_grouped, case_notes_table_structured_summary
 from tools.prompts import initial_table_prompt, system_prompt, add_existing_topics_system_prompt, add_existing_topics_prompt, two_para_summary_format_prompt, single_para_summary_format_prompt
-from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, FILE_INPUT_HEIGHT, GEMINI_API_KEY, BATCH_SIZE_DEFAULT, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY, SHOW_EXAMPLES, HF_TOKEN, AZURE_OPENAI_API_KEY, AZURE_OPENAI_INFERENCE_ENDPOINT, LLM_TEMPERATURE, model_name_map, default_model_choice, default_source_models, default_model_source, model_sources, ensure_folder_exists, SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES
+from tools.config import RUN_AWS_FUNCTIONS, HOST_NAME, ACCESS_LOGS_FOLDER, FEEDBACK_LOGS_FOLDER, USAGE_LOGS_FOLDER, FILE_INPUT_HEIGHT, GEMINI_API_KEY, BATCH_SIZE_DEFAULT, LLM_SEED, COGNITO_AUTH, MAX_QUEUE_SIZE, MAX_FILE_SIZE, GRADIO_SERVER_PORT, ROOT_PATH, INPUT_FOLDER, OUTPUT_FOLDER, S3_LOG_BUCKET, CONFIG_FOLDER, GRADIO_TEMP_DIR, MPLCONFIGDIR, GET_COST_CODES, ENFORCE_COST_CODES, DEFAULT_COST_CODE, INTRO_TEXT, COST_CODES_PATH, S3_COST_CODES_PATH, OUTPUT_COST_CODES_PATH, SHOW_COSTS, SAVE_LOGS_TO_CSV, SAVE_LOGS_TO_DYNAMODB, ACCESS_LOG_DYNAMODB_TABLE_NAME, USAGE_LOG_DYNAMODB_TABLE_NAME, FEEDBACK_LOG_DYNAMODB_TABLE_NAME, LOG_FILE_NAME, FEEDBACK_LOG_FILE_NAME, USAGE_LOG_FILE_NAME, CSV_ACCESS_LOG_HEADERS, CSV_FEEDBACK_LOG_HEADERS, CSV_USAGE_LOG_HEADERS, DYNAMODB_ACCESS_LOG_HEADERS, DYNAMODB_FEEDBACK_LOG_HEADERS, DYNAMODB_USAGE_LOG_HEADERS, S3_ACCESS_LOGS_FOLDER, S3_FEEDBACK_LOGS_FOLDER, S3_USAGE_LOGS_FOLDER, AWS_ACCESS_KEY, AWS_SECRET_KEY, SHOW_EXAMPLES, HF_TOKEN, AZURE_OPENAI_API_KEY, AZURE_OPENAI_INFERENCE_ENDPOINT, LLM_TEMPERATURE, model_name_map, default_model_choice, default_source_models, default_model_source, model_sources, ensure_folder_exists, SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES, RUN_INFERENCE_SERVER, API_URL, RUN_MCP_SERVER
 
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
@@ -138,11 +138,7 @@ with app:
     # UI LAYOUT
     ###
 
-    gr.Markdown("""# Large language model topic modelling
-
-    Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure/OpenAI, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets below. API keys for AWS, Azure/OpenAI, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
-
-    NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
+    gr.Markdown(INTRO_TEXT)
 
     if SHOW_EXAMPLES == "True":
         def show_info_box_on_click(
@@ -177,7 +173,7 @@ with app:
     with gr.Tab(label="All in one topic extraction and summarisation"):
         with gr.Row():
             model_source = gr.Dropdown(value = default_model_source, choices = model_sources, label="Large language model family", multiselect=False)
-            model_choice = gr.Dropdown(value = default_model_choice, choices = default_source_models, label="Large language model for topic extraction and summarisation", multiselect=False)   
+            model_choice = gr.Dropdown(value = default_model_choice, choices = default_source_models, label="Large language model for topic extraction and summarisation", multiselect=False, allow_custom_value=True)   
 
             model_source.change(fn=update_model_choice, inputs=[model_source], outputs=[model_choice])
 
@@ -346,6 +342,9 @@ with app:
                 azure_api_key_textbox = gr.Textbox(value = AZURE_OPENAI_API_KEY, label="Enter Azure/OpenAI Inference API key (only if using Azure/OpenAI models)", lines=1, type="password")
                 azure_endpoint_textbox = gr.Textbox(value = AZURE_OPENAI_INFERENCE_ENDPOINT, label="Enter Azure Inference endpoint URL (only if using Azure models)", lines=1)
 
+        with gr.Accordion("Llama-server API", open = False, visible=RUN_INFERENCE_SERVER == "1"):
+            api_url_textbox = gr.Textbox(value = API_URL, label="Enter inference-server API URL (only if using inference-server models)", lines=1)
+
         with gr.Accordion("Hugging Face token for downloading gated models", open = False):
             hf_api_key_textbox = gr.Textbox(value = HF_TOKEN, label="Enter Hugging Face API key (only for gated models that need a token to download)", lines=1, type="password")
 
@@ -444,7 +443,8 @@ with app:
                 logged_content_df,
                 additional_summary_instructions_textbox,
                 additional_validation_issues_textbox,
-                show_previous_table_radio],
+                show_previous_table_radio,
+                api_url_textbox],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -506,7 +506,8 @@ with app:
                 logged_content_df,
                 show_previous_table_radio,
                 aws_access_key_textbox,
-                aws_secret_key_textbox],
+                aws_secret_key_textbox,
+                api_url_textbox],
         outputs=[display_topic_table_markdown,
                 master_topic_df_state,
                 master_unique_topics_df_state,
@@ -547,20 +548,20 @@ with app:
         success(deduplicate_topics, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, deduplicate_score_threshold, in_data_files, in_colnames, output_folder_state], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown], scroll_to_output=True, api_name="deduplicate_topics")
     
     # When LLM deduplication button pressed, deduplicate data using LLM
-    def deduplicate_topics_llm_wrapper(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics=None, azure_endpoint=""):
+    def deduplicate_topics_llm_wrapper(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics=None, azure_endpoint="", api_url=None):
         model_source = model_name_map[model_choice]["source"]
-        return deduplicate_topics_llm(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, model_source, None, None, None, None, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics, azure_endpoint)
+        return deduplicate_topics_llm(reference_df, topic_summary_df, reference_table_file_name, unique_topics_table_file_name, model_choice, in_api_key, temperature, model_source, None, None, None, None, in_excel_sheets, merge_sentiment, merge_general_topics, in_data_files, chosen_cols, output_folder, candidate_topics, azure_endpoint, api_url)
     
 
     deduplicate_llm_previous_data_btn.click(load_in_previous_data_files, inputs=[deduplication_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-        success(deduplicate_topics_llm_wrapper, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, model_choice, google_api_key_textbox, temperature_slide, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, in_data_files, in_colnames, output_folder_state, candidate_topics, azure_endpoint_textbox], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="deduplicate_topics_llm").\
+        success(deduplicate_topics_llm_wrapper, inputs=[master_reference_df_state, master_unique_topics_df_state, working_data_file_name_textbox, unique_topics_table_file_name_textbox, model_choice, google_api_key_textbox, temperature_slide, in_excel_sheets, merge_sentiment_drop, merge_general_topics_drop, in_data_files, in_colnames, output_folder_state, candidate_topics, azure_endpoint_textbox, api_url_textbox], outputs=[master_reference_df_state, master_unique_topics_df_state, summarisation_input_files, log_files_output, summarised_output_markdown, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number], scroll_to_output=True, api_name="deduplicate_topics_llm").\
         success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False, api_name="usage_logs_llm_dedup")
     
     # When button pressed, summarise previous data
     summarise_previous_data_btn.click(empty_output_vars_summarise, inputs=None, outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, overall_summarisation_input_files]).\
     success(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
         success(load_in_previous_data_files, inputs=[summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-        success(wrapper_summarise_output_topics_per_group, inputs=[in_group_col, summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state, hf_api_key_textbox, azure_endpoint_textbox, logged_content_df, sample_reference_table_checkbox, no_of_sampled_summaries_number, random_seed_number], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, output_messages_textbox, logged_content_df], api_name="summarise_topics", show_progress_on=[output_messages_textbox, summary_output_files]).\
+        success(wrapper_summarise_output_topics_per_group, inputs=[in_group_col, summary_reference_table_sample_state, master_unique_topics_df_state, master_reference_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, in_data_files, in_excel_sheets, in_colnames, log_files_output_list_state, summarise_format_radio, output_folder_state, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state, hf_api_key_textbox, azure_endpoint_textbox, logged_content_df, sample_reference_table_checkbox, no_of_sampled_summaries_number, random_seed_number, api_url_textbox], outputs=[summary_reference_table_sample_state, master_unique_topics_df_revised_summaries_state, master_reference_df_revised_summaries_state, summary_output_files, summarised_outputs_list, latest_summary_completed_num, conversation_metadata_textbox, summarised_output_markdown, log_files_output, overall_summarisation_input_files, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, output_messages_textbox, logged_content_df], api_name="summarise_topics", show_progress_on=[output_messages_textbox, summary_output_files]).\
         success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False).\
         then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_revised_summaries_state, master_unique_topics_df_revised_summaries_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list])
         # success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed, sample_reference_table_checkbox], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
@@ -568,7 +569,7 @@ with app:
     # SUMMARISE WHOLE TABLE PAGE
     overall_summarise_previous_data_btn.click(fn= enforce_cost_codes, inputs=[enforce_cost_code_textbox, cost_code_choice_drop, cost_code_dataframe_base]).\
             success(load_in_previous_data_files, inputs=[overall_summarisation_input_files], outputs=[master_reference_df_state, master_unique_topics_df_state, latest_batch_completed_no_loop, deduplication_input_files_status, working_data_file_name_textbox, unique_topics_table_file_name_textbox]).\
-            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state, hf_api_key_textbox, azure_endpoint_textbox, logged_content_df], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, output_messages_textbox, logged_content_df], scroll_to_output=True, api_name="overall_summary", show_progress_on=[output_messages_textbox, overall_summary_output_files]).\
+            success(overall_summary, inputs=[master_unique_topics_df_state, model_choice, google_api_key_textbox, temperature_slide, working_data_file_name_textbox, output_folder_state, in_colnames, context_textbox, aws_access_key_textbox, aws_secret_key_textbox, model_name_map_state, hf_api_key_textbox, azure_endpoint_textbox, logged_content_df, api_url_textbox], outputs=[overall_summary_output_files, overall_summarised_output_markdown, summarised_output_df, conversation_metadata_textbox, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, output_messages_textbox, logged_content_df], scroll_to_output=True, api_name="overall_summary", show_progress_on=[output_messages_textbox, overall_summary_output_files]).\
             success(lambda *args: usage_callback.flag(list(args), save_to_csv=SAVE_LOGS_TO_CSV, save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,  dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME, dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS, replacement_headers=CSV_USAGE_LOG_HEADERS), [session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num, number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop], None, preprocess=False).\
             then(collect_output_csvs_and_create_excel_output, inputs=[in_data_files, in_colnames, original_data_file_name_textbox, in_group_col, model_choice, master_reference_df_state, master_unique_topics_df_state, summarised_output_df, missing_df_state, in_excel_sheets, usage_logs_state, model_name_map_state, output_folder_state, produce_structured_summary_radio], outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list])
 
@@ -629,6 +630,7 @@ with app:
                 additional_validation_issues_textbox,
                 show_previous_table_radio,
                 sample_reference_table_checkbox,
+                api_url_textbox,
             ],
             outputs=[
                 display_topic_table_markdown,
@@ -751,6 +753,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp=RUN_MCP_SERVER)
     else:
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp=RUN_MCP_SERVER)

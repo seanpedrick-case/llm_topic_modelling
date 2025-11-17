@@ -50,6 +50,17 @@ def add_folder_to_path(folder_path: str):
     else:
         print(f"Folder not found at {folder_path} - not added to PATH")
 
+def convert_string_to_boolean(value: str) -> bool:
+    """Convert string to boolean, handling various formats."""
+    if isinstance(value, bool):
+        return value
+    elif value in ["True", "1", "true", "TRUE"]:
+        return True
+    elif value in ["False", "0", "false", "FALSE"]:
+        return False
+    else:
+        raise ValueError(f"Invalid boolean value: {value}")
+
 ###
 # LOAD CONFIG FROM ENV FILE
 ###
@@ -221,13 +232,30 @@ RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
+INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", """# Large language model topic modelling
+
+Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure/OpenAI, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets below. API keys for AWS, Azure/OpenAI, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
+
+NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
+
+# Read in intro text from a text file if it is a path to a text file
+if INTRO_TEXT.endswith(".txt"): 
+    INTRO_TEXT = open(INTRO_TEXT, "r").read()
+
+INTRO_TEXT = INTRO_TEXT.strip('"').strip("'")
+
 # Azure/OpenAI AI Inference settings
 RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
 AZURE_OPENAI_API_KEY = get_or_create_env_var('AZURE_OPENAI_API_KEY', '')
 AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_OPENAI_INFERENCE_ENDPOINT', '')
 
-# Build up options for models
+# Llama-server settings
+RUN_INFERENCE_SERVER = get_or_create_env_var("RUN_INFERENCE_SERVER", "0")
+API_URL = get_or_create_env_var('API_URL', 'http://localhost:8080')
 
+RUN_MCP_SERVER = convert_string_to_boolean(get_or_create_env_var("RUN_MCP_SERVER", "False"))
+
+# Build up options for models
 model_full_names = list()
 model_short_names = list()
 model_source = list()
@@ -259,12 +287,21 @@ if RUN_AZURE_MODELS == "1":
     model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
+# Register inference-server models
+if RUN_INFERENCE_SERVER == "1":
+    # Example inference-server models; adjust to the models you have available on your server
+    inference_server_models = ["gpt_oss_20b", "gemma_3_12b"]
+    model_full_names.extend(inference_server_models)
+    model_short_names.extend(inference_server_models)
+    model_source.extend(["inference-server"] * len(inference_server_models))
+
 model_name_map = {
     full: {"short_name": short, "source": source}
     for full, short, source in zip(model_full_names, model_short_names, model_source)
 }
 
 if RUN_LOCAL_MODEL == "1": default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
+elif RUN_INFERENCE_SERVER == "1": default_model_choice = inference_server_models[0]
 elif RUN_AWS_FUNCTIONS == "1": default_model_choice = amazon_models[0]
 else: default_model_choice = gemini_models[0]
 
@@ -298,42 +335,34 @@ if LOW_VRAM_SYSTEM == 'True':
     LLM_MAX_NEW_TOKENS = int(get_or_create_env_var('LLM_MAX_NEW_TOKENS', '4096'))
     LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '16384'))
     LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
-    KV_QUANT_LEVEL = int(get_or_create_env_var('KV_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
+    K_QUANT_LEVEL = int(get_or_create_env_var('K_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
+    V_QUANT_LEVEL = int(get_or_create_env_var('V_QUANT_LEVEL', '2')) # 2 = q4_0, 8 = q8_0, 4 = fp16
 
 USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers with unsloth
 
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
 if USE_LLAMA_CPP == "False": GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
-
 GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf")
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-qat" ) # "google/gemma-3-4b-it" # "unsloth/gemma-3-4b-it-qat-unsloth-bnb-4bit" # unsloth/gemma-3-4b-it-qat
-if USE_LLAMA_CPP == "False":
-    GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
-
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "https://huggingface.co/unsloth/gemma-3-4b-it-bnb-4bit" )
+if USE_LLAMA_CPP == "False":  GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
+
+GEMMA3_12B_REPO_ID = get_or_create_env_var("GEMMA3_12B_REPO_ID", "unsloth/gemma-3-12b-it-GGUF")
+GEMMA3_12B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_12B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-12b-it-bnb-4bit" )
+if USE_LLAMA_CPP == "False":  GEMMA3_12B_REPO_ID = GEMMA3_12B_REPO_TRANSFORMERS_ID
+GEMMA3_12B_MODEL_FILE = get_or_create_env_var("GEMMA3_12B_MODEL_FILE", "gemma-3-12b-it-UD-Q4_K_XL.gguf")
+GEMMA3_12B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_12B_MODEL_FOLDER", "model/gemma3_12b")
 
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
 GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var("GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit")
 if USE_LLAMA_CPP == "False": GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
-
 GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
 GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
-
-USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
-
-ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
-if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
-elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
-
-DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
-
-GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
-GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
 
 QWEN3_4B_REPO_ID = get_or_create_env_var("QWEN3_4B_REPO_ID", "unsloth/Qwen3-4B-Instruct-2507-GGUF")
 QWEN3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("QWEN3_4B_REPO_TRANSFORMERS_ID", "unsloth/Qwen3-4B-unsloth-bnb-4bit")
@@ -342,14 +371,15 @@ if USE_LLAMA_CPP == "False": QWEN3_4B_REPO_ID = QWEN3_4B_REPO_TRANSFORMERS_ID
 QWEN3_4B_MODEL_FILE = get_or_create_env_var("QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 QWEN3_4B_MODEL_FOLDER = get_or_create_env_var("QWEN3_4B_MODEL_FOLDER", "model/qwen")
 
-QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-0.6B-Q8_0.gguf")
-QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
-
 GRANITE_4_TINY_REPO_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_ID", "unsloth/granite-4.0-h-tiny-GGUF")
+GRANITE_4_TINY_REPO_TRANSFORMERS_ID = get_or_create_env_var("GRANITE_4_TINY_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-h-tiny-FP8-Dynamic" )
+if USE_LLAMA_CPP == "False":  GRANITE_4_TINY_REPO_ID = GRANITE_4_TINY_REPO_TRANSFORMERS_ID
 GRANITE_4_TINY_MODEL_FILE = get_or_create_env_var("GRANITE_4_TINY_MODEL_FILE", "granite-4.0-h-tiny-UD-Q4_K_XL.gguf")
 GRANITE_4_TINY_MODEL_FOLDER = get_or_create_env_var("GRANITE_4_TINY_MODEL_FOLDER", "model/granite")
 
 GRANITE_4_3B_REPO_ID = get_or_create_env_var("GRANITE_4_3B_REPO_ID", "unsloth/granite-4.0-h-micro-GGUF")
+GRANITE_4_3B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GRANITE_4_3B_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-micro-unsloth-bnb-4bit" )
+if USE_LLAMA_CPP == "False":  GRANITE_4_3B_REPO_ID = GRANITE_4_3B_REPO_TRANSFORMERS_ID
 GRANITE_4_3B_MODEL_FILE = get_or_create_env_var("GRANITE_4_3B_MODEL_FILE", "granite-4.0-h-micro-UD-Q4_K_XL.gguf")
 GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var("GRANITE_4_3B_MODEL_FOLDER", "model/granite")
 
@@ -363,6 +393,11 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
 
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 12B":
+    LOCAL_REPO_ID = GEMMA3_12B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA3_12B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
+
 elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
     LOCAL_REPO_ID = QWEN3_4B_REPO_ID
     LOCAL_MODEL_FILE = QWEN3_4B_MODEL_FILE
@@ -373,12 +408,12 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b":
     LOCAL_MODEL_FILE = GPT_OSS_MODEL_FILE
     LOCAL_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
 
-elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 7B":
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Tiny":
     LOCAL_REPO_ID = GRANITE_4_TINY_REPO_ID
     LOCAL_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
     LOCAL_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
 
-elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 3B":
+elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Micro":
     LOCAL_REPO_ID = GRANITE_4_3B_REPO_ID
     LOCAL_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
@@ -387,6 +422,21 @@ elif not CHOSEN_LOCAL_MODEL_TYPE:
     LOCAL_REPO_ID = ""
     LOCAL_MODEL_FILE = ""
     LOCAL_MODEL_FOLDER = ""
+
+
+USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
+
+ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
+if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/gemma-3-270m-it")
+elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B": ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
+
+DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
+
+GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-270m-it-qat-GGUF_gemma-3-270m-it-qat-F16.gguf")
+GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("GEMMA3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf")
+
+QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-0.6B-Q8_0.gguf")
+QWEN3_4B_DRAFT_MODEL_LOC = get_or_create_env_var("QWEN3_4B_DRAFT_MODEL_LOC", DRAFT_MODEL_LOC + "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf")
 
 
 LLM_MAX_GPU_LAYERS = int(get_or_create_env_var('LLM_MAX_GPU_LAYERS','-1')) # Maximum possible
@@ -402,17 +452,20 @@ LLM_SEED = int(get_or_create_env_var('LLM_SEED', '42'))
 LLM_RESET = get_or_create_env_var('LLM_RESET', 'False')
 LLM_STREAM = get_or_create_env_var('LLM_STREAM', 'True')
 LLM_THREADS = int(get_or_create_env_var('LLM_THREADS', '-1'))
-LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '512'))
-LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '32768'))
+LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '2048'))
+LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '24576'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
 LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n\n\n']")
 MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
-KV_QUANT_LEVEL = get_or_create_env_var('KV_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
+K_QUANT_LEVEL = get_or_create_env_var('K_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
+V_QUANT_LEVEL = get_or_create_env_var('V_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
 
-if not KV_QUANT_LEVEL: KV_QUANT_LEVEL = None
-else: KV_QUANT_LEVEL = int(KV_QUANT_LEVEL)
+if not K_QUANT_LEVEL: K_QUANT_LEVEL = None
+else: K_QUANT_LEVEL = int(K_QUANT_LEVEL)
+if not V_QUANT_LEVEL: V_QUANT_LEVEL = None
+else: V_QUANT_LEVEL = int(V_QUANT_LEVEL)
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
 if CHOSEN_LOCAL_MODEL_TYPE == "gpt-oss-20b": REASONING_SUFFIX = get_or_create_env_var('REASONING_SUFFIX', 'Reasoning: low')
@@ -425,6 +478,8 @@ USE_BITSANDBYTES = get_or_create_env_var('USE_BITSANDBYTES', 'True') # Whether t
 COMPILE_MODE = get_or_create_env_var('COMPILE_MODE', 'reduce-overhead') # alternatively 'max-autotune'
 MODEL_DTYPE = get_or_create_env_var('MODEL_DTYPE', 'bfloat16') # alternatively 'bfloat16'
 INT8_WITH_OFFLOAD_TO_CPU = get_or_create_env_var('INT8_WITH_OFFLOAD_TO_CPU', 'False') # Whether to offload to CPU
+
+DEFAULT_SAMPLED_SUMMARIES = int(get_or_create_env_var('DEFAULT_SAMPLED_SUMMARIES', '75'))
 
 ###
 # Gradio app variables

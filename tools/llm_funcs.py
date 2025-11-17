@@ -4,6 +4,8 @@ import re
 import time
 import boto3
 import pandas as pd
+import requests
+import json
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 from typing import List, Tuple, TypeVar
@@ -20,7 +22,7 @@ _model = None
 _tokenizer = None
 _assistant_model = None
 
-from tools.config import LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, LOAD_LOCAL_MODEL_AT_START, ASSISTANT_MODEL, LLM_STOP_STRINGS, MULTIMODAL_PROMPT_FORMAT, KV_QUANT_LEVEL
+from tools.config import LLM_TEMPERATURE, LLM_TOP_K, LLM_MIN_P, LLM_TOP_P, LLM_REPETITION_PENALTY, LLM_LAST_N_TOKENS, LLM_MAX_NEW_TOKENS, LLM_SEED, LLM_RESET, LLM_STREAM, LLM_THREADS, LLM_BATCH_SIZE, LLM_CONTEXT_LENGTH, LLM_SAMPLE, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, MAX_COMMENT_CHARS, CHOSEN_LOCAL_MODEL_TYPE, LOCAL_REPO_ID, LOCAL_MODEL_FILE, LOCAL_MODEL_FOLDER, HF_TOKEN, LLM_SEED, LLM_MAX_GPU_LAYERS, SPECULATIVE_DECODING, NUM_PRED_TOKENS, USE_LLAMA_CPP, COMPILE_MODE, MODEL_DTYPE, USE_BITSANDBYTES, COMPILE_TRANSFORMERS, INT8_WITH_OFFLOAD_TO_CPU, LOAD_LOCAL_MODEL_AT_START, ASSISTANT_MODEL, LLM_STOP_STRINGS, MULTIMODAL_PROMPT_FORMAT, RUN_LOCAL_MODEL, K_QUANT_LEVEL, V_QUANT_LEVEL
 from tools.helper_functions import _get_env_list
 
 if SPECULATIVE_DECODING == "True": SPECULATIVE_DECODING = True 
@@ -259,9 +261,9 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
             try:
                 print("GPU load variables:" , vars(gpu_config))
                 if speculative_decoding:
-                    model = Llama(model_path=model_path, type_k=KV_QUANT_LEVEL, type_v=KV_QUANT_LEVEL, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
+                    model = Llama(model_path=model_path, type_k=K_QUANT_LEVEL, type_v=V_QUANT_LEVEL, flash_attn=True, draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS), **vars(gpu_config)) 
                 else:
-                    model = Llama(model_path=model_path, type_k=KV_QUANT_LEVEL, type_v=KV_QUANT_LEVEL, flash_attn=True, **vars(gpu_config))    
+                    model = Llama(model_path=model_path, type_k=K_QUANT_LEVEL, type_v=V_QUANT_LEVEL, flash_attn=True, **vars(gpu_config))    
 
             except Exception as e:
                 print("GPU load failed due to:", e, "Loading model in CPU mode")
@@ -502,7 +504,7 @@ def set_model(model, tokenizer, assistant_model=None):
     _assistant_model = assistant_model
 
 # Initialize model at startup if configured
-if LOAD_LOCAL_MODEL_AT_START == "True":
+if LOAD_LOCAL_MODEL_AT_START == "True" and RUN_LOCAL_MODEL == "1":
     get_model()  # This will trigger loading
 
 def call_llama_cpp_model(formatted_string:str, gen_config:str, model=None):
@@ -579,7 +581,7 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
     input_tokens = len(model.tokenize((system_prompt + "\n" + formatted_string).encode("utf-8"), special=True))
 
     if stream:
-        final_tokens = []
+        final_tokens = list()
         output_tokens = 0
         for chunk in model.create_chat_completion(
             messages=messages,
@@ -638,6 +640,183 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
             model.reset()
 
         return response
+
+def call_inference_server_api(formatted_string: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, 
+                          api_url: str = "http://localhost:8080", model_name: str = None):
+    """
+    Calls a inference-server API endpoint with a formatted user message and system prompt,
+    using generation parameters from the LlamaCPPGenerationConfig object.
+    
+    This function provides the same interface as call_llama_cpp_chatmodel but calls
+    a remote inference-server instance instead of a local model.
+
+    Args:
+        formatted_string (str): The formatted input text for the user's message.
+        system_prompt (str): The system-level instructions for the model.
+        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
+        api_url (str): The base URL of the inference-server API (default: "http://localhost:8080").
+        model_name (str): Optional model name to use. If None, uses the default model.
+    
+    Returns:
+        dict: Response in the same format as call_llama_cpp_chatmodel
+        
+    Example:
+        # Create generation config
+        gen_config = LlamaCPPGenerationConfig(temperature=0.7, max_tokens=100)
+        
+        # Call the API
+        response = call_inference_server_api(
+            formatted_string="Hello, how are you?",
+            system_prompt="You are a helpful assistant.",
+            gen_config=gen_config,
+            api_url="http://localhost:8080"
+        )
+        
+        # Extract the response text
+        response_text = response['choices'][0]['message']['content']
+        
+    Integration Example:
+        # To use inference-server instead of local model:
+        # 1. Set model_source to "inference-server"
+        # 2. Provide api_url parameter
+        # 3. Call your existing functions as normal
+        
+        responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = call_llm_with_markdown_table_checks(
+            batch_prompts=["Your prompt here"],
+            system_prompt="Your system prompt",
+            conversation_history=[],
+            whole_conversation=[],
+            whole_conversation_metadata=[],
+            client=None,  # Not used for inference-server
+            client_config=None,  # Not used for inference-server
+            model_choice="your-model-name",  # Model name on the server
+            temperature=0.7,
+            reported_batch_no=1,
+            local_model=None,  # Not used for inference-server
+            tokenizer=None,  # Not used for inference-server
+            bedrock_runtime=None,  # Not used for inference-server
+            model_source="inference-server",  # Key change: use inference-server
+            MAX_OUTPUT_VALIDATION_ATTEMPTS=3,
+            api_url="http://localhost:8080"  # Key change: provide API URL
+        )
+    """
+    # Extract parameters from the gen_config object
+    temperature = gen_config.temperature
+    top_k = gen_config.top_k
+    top_p = gen_config.top_p
+    repeat_penalty = gen_config.repeat_penalty
+    seed = gen_config.seed
+    max_tokens = gen_config.max_tokens
+    stream = gen_config.stream
+    reset = gen_config.reset
+
+    # Prepare the request payload
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": formatted_string}
+    ]
+    
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "top_k": top_k,
+        "top_p": top_p,
+        "repeat_penalty": repeat_penalty,
+        "seed": seed,
+        "max_tokens": max_tokens,
+        "stream": stream,
+        "stop": LLM_STOP_STRINGS if LLM_STOP_STRINGS else []
+    }
+    
+    # Add model name if specified
+    #if model_name:
+    #    payload["model"] = model_name
+    
+    # Determine the endpoint based on streaming preference
+    if stream:
+        endpoint = f"{api_url}/v1/chat/completions"
+    else:
+        endpoint = f"{api_url}/v1/chat/completions"
+    
+    try:
+        if stream:
+            # Handle streaming response
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                stream=True,
+                timeout=timeout_wait
+            )
+            response.raise_for_status()
+            
+            final_tokens = []
+            output_tokens = 0
+            
+            for line in response.iter_lines():
+                if line:
+                    line = line.decode('utf-8')
+                    if line.startswith('data: '):
+                        data = line[6:]  # Remove 'data: ' prefix
+                        if data.strip() == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            if 'choices' in chunk and len(chunk['choices']) > 0:
+                                delta = chunk['choices'][0].get('delta', {})
+                                token = delta.get('content', '')
+                                if token:
+                                    print(token, end="", flush=True)
+                                    final_tokens.append(token)
+                                    output_tokens += 1
+                        except json.JSONDecodeError:
+                            continue
+            
+            print()  # newline after stream finishes
+            
+            text = "".join(final_tokens)
+            
+            # Estimate input tokens (rough approximation)
+            input_tokens = len((system_prompt + "\n" + formatted_string).split())
+            
+            return {
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": text},
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                },
+            }
+        else:
+            # Handle non-streaming response
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=timeout_wait
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Ensure the response has the expected format
+            if 'choices' not in result:
+                raise ValueError("Invalid response format from inference-server")
+            
+            return result
+            
+    except requests.exceptions.RequestException as e:
+        raise ConnectionError(f"Failed to connect to inference-server at {api_url}: {str(e)}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
+    except Exception as e:
+        raise RuntimeError(f"Error calling inference-server API: {str(e)}")
 
 ###
 # LLM FUNCTIONS
@@ -893,12 +1072,12 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     return assistant_reply, num_input_tokens, num_generated_tokens
 
 # Function to send a request and update history
-def send_request(prompt: str, conversation_history: List[dict], client: ai.Client | OpenAI, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_model=None, assistant_prefill = "", progress=Progress(track_tqdm=True)) -> Tuple[str, List[dict]]:
+def send_request(prompt: str, conversation_history: List[dict], client: ai.Client | OpenAI, config: types.GenerateContentConfig, model_choice: str, system_prompt: str, temperature: float, bedrock_runtime:boto3.Session.client, model_source:str, local_model= list(), tokenizer=None, assistant_model=None, assistant_prefill = "", progress=Progress(track_tqdm=True), api_url:str=None) -> Tuple[str, List[dict]]:
     """Sends a request to a language model and manages the conversation history.
 
     This function constructs the full prompt by appending the new user prompt to the conversation history,
     generates a response from the model, and updates the conversation history with the new prompt and response.
-    It handles different model sources (Gemini, AWS, Local) and includes retry logic for API calls.
+    It handles different model sources (Gemini, AWS, Local, inference-server) and includes retry logic for API calls.
 
     Args:
         prompt (str): The user's input prompt to be sent to the model.
@@ -910,12 +1089,13 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
         system_prompt (str): An optional system-level instruction or context for the model.
         temperature (float): Controls the randomness of the model's output, with higher values leading to more diverse responses.
         bedrock_runtime (boto3.Session.client): The boto3 Bedrock runtime client object for AWS models.
-        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local").
+        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local", "inference-server").
         local_model (list, optional): A list containing the local model and its tokenizer (if `model_source` is "Local"). Defaults to [].
         tokenizer (object, optional): The tokenizer object for local models. Defaults to None.
         assistant_model (object, optional): An optional assistant model used for speculative decoding with local models. Defaults to None.
         assistant_prefill (str, optional): A string to pre-fill the assistant's response, useful for certain models like Claude. Defaults to "".
         progress (Progress, optional): A progress object for tracking the operation, typically from `tqdm`. Defaults to Progress(track_tqdm=True).
+        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
         Tuple[str, List[dict]]: A tuple containing the model's response text and the updated conversation history.
@@ -1039,6 +1219,29 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
+    elif "inference-server" in model_source:
+        # This is the inference-server API
+        for i in progress_bar:
+            try:
+                print("Calling inference-server API, attempt", i + 1)
+                
+                if api_url is None:
+                    raise ValueError("api_url is required when model_source is 'inference-server'")
+                
+                gen_config = LlamaCPPGenerationConfig()
+                gen_config.update_temp(temperature)
+                
+                response = call_inference_server_api(prompt, system_prompt, gen_config, api_url=api_url, model_name=model_choice)
+                
+                break
+            except Exception as e:
+                # If fails, try again after X seconds in case there is a throttle limit
+                print("Call to inference-server API failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
+                
+                time.sleep(timeout_wait)
+                
+            if i == number_of_api_retry_attempts:
+                return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
     else:
         print("Model source not recognised")
         return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
@@ -1046,10 +1249,10 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
     # Update the conversation history with the new prompt and response
     conversation_history.append({'role': 'user', 'parts': [prompt]})
 
-    # Check if is a LLama.cpp model response
+    # Check if is a LLama.cpp model response or inference-server response
     if isinstance(response, ResponseObject):
         response_text = response.text
-    elif 'choices' in response: # LLama.cpp model response
+    elif 'choices' in response: # LLama.cpp model response or inference-server response
         if "gpt-oss" in model_choice: response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
         else: response_text = response['choices'][0]['message']['content']
     elif model_source == "Gemini":
@@ -1082,7 +1285,8 @@ local_model = list(),
 tokenizer=None,
 assistant_model=None,
 master:bool = False,
-assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+assistant_prefill="",
+api_url:str=None) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -1096,12 +1300,13 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
         config (dict): Configuration for the model.
         model_choice (str): The choice of model to use.        
         temperature (float): The temperature parameter for the model.
-        model_source (str): Source of the model, whether local, AWS, or Gemini
+        model_source (str): Source of the model, whether local, AWS, Gemini, or inference-server
         batch_no (int): Batch number of the large language model request.
         local_model: Local gguf model (if loaded)
         master (bool): Is this request for the master table.
         assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS model calls
         bedrock_runtime: The client object for boto3 Bedrock runtime
+        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
         Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
@@ -1113,7 +1318,7 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
 
     for prompt in prompts:
 
-        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, client=client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source)
+        response, conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens = send_request(prompt, conversation_history, client=client, config=config, model_choice=model_choice, system_prompt=system_prompt, temperature=temperature, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=assistant_prefill, bedrock_runtime=bedrock_runtime, model_source=model_source, api_url=api_url)
 
         responses.append(response)
         whole_conversation.append(system_prompt)
@@ -1144,6 +1349,11 @@ assistant_prefill="") -> Tuple[List[ResponseObject], List[dict], List[str], List
                     input_tokens = num_transformer_input_tokens
                     output_tokens = num_transformer_generated_tokens
 
+            elif "inference-server" in model_source:
+                # inference-server returns the same format as llama-cpp
+                output_tokens = response['usage'].get('completion_tokens', 0)
+                input_tokens = response['usage'].get('prompt_tokens', 0)
+
             else:
                 input_tokens = 0
                 output_tokens = 0
@@ -1173,7 +1383,8 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
                                         assistant_prefill:str = "",                                       
                                         master:bool=False,
                                         CHOSEN_LOCAL_MODEL_TYPE:str=CHOSEN_LOCAL_MODEL_TYPE,
-                                        random_seed:int=seed) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
+                                        random_seed:int=seed,
+                                        api_url:str=None) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
     """
     Call the large language model with checks for a valid markdown table.
 
@@ -1191,12 +1402,13 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     - local_model (object): The local model to use.
     - tokenizer (object): The tokenizer to use.
     - bedrock_runtime (boto3.Session.client): The client object for boto3 Bedrock runtime.
-    - model_source (str): The source of the model, whether in AWS, Gemini, or local.
+    - model_source (str): The source of the model, whether in AWS, Gemini, local, or inference-server.
     - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
     - assistant_prefill (str, optional): The text to prefill the LLM response. Currently only working with AWS Claude calls.
     - master (bool, optional): Boolean to determine whether this call is for the master output table.
     - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded.
     - random_seed (int, optional): The random seed used for LLM generation.
+    - api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
     - Tuple[List[ResponseObject], List[dict], List[str], List[str], str]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, the updated whole conversation metadata, and the response text.
@@ -1212,7 +1424,7 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
         responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(
             batch_prompts, system_prompt, conversation_history, whole_conversation, 
             whole_conversation_metadata, client, client_config, model_choice, 
-            call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, tokenizer=tokenizer, master=master, assistant_prefill=assistant_prefill
+            call_temperature, bedrock_runtime, model_source, reported_batch_no, local_model, tokenizer=tokenizer, master=master, assistant_prefill=assistant_prefill, api_url=api_url
         )
 
         stripped_response = response_text.strip()

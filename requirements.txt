@@ -1,15 +1,15 @@
 # Note that this requirements file is optimised for Hugging Face spaces / Python 3.10. Please use requirements_no_local.txt for installation without local model inference (simplest approach to get going). Please use requirements_cpu.txt for CPU instances and requirements_gpu.txt for GPU instances using Python 3.11
 pandas==2.3.3
 gradio==5.49.1
-transformers==4.56.0
+transformers==4.57.1
 spaces==0.42.1
-boto3==1.40.48
+boto3==1.40.72
 pyarrow==21.0.0
 openpyxl==3.1.5
 markdown==3.7
 tabulate==0.9.0
 lxml==5.3.0
-google-genai==1.33.0
+google-genai==1.50.0
 openai==2.2.0
 html5lib==1.1
 beautifulsoup4==4.12.3

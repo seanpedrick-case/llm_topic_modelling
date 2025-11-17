@@ -14,7 +14,7 @@ from tools.prompts import summarise_topic_descriptions_prompt, summarise_topic_d
 from tools.llm_funcs import construct_gemini_generative_model, process_requests, calculate_tokens_from_metadata, construct_azure_client, get_model, get_tokenizer, get_assistant_model, construct_gemini_generative_model, construct_azure_client, call_llm_with_markdown_table_checks
 from tools.helper_functions import create_topic_summary_df_from_reference_table, load_in_data_file, get_basic_response_data, convert_reference_table_to_pivot_table, wrap_text, clean_column_name, get_file_name_no_ext, create_batch_file_path_details, read_file
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, MAX_GROUPS
+from tools.config import OUTPUT_FOLDER, RUN_LOCAL_MODEL, MAX_COMMENT_CHARS, LLM_MAX_NEW_TOKENS, LLM_SEED, TIMEOUT_WAIT, NUMBER_OF_RETRY_ATTEMPTS, MAX_TIME_FOR_LOOP, BATCH_SIZE_DEFAULT, DEDUPLICATION_THRESHOLD, model_name_map, CHOSEN_LOCAL_MODEL_TYPE, REASONING_SUFFIX, MAX_SPACES_GPU_RUN_TIME, OUTPUT_DEBUG_FILES, MAX_GROUPS, LLM_CONTEXT_LENGTH, DEFAULT_SAMPLED_SUMMARIES
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
@@ -25,8 +25,8 @@ deduplication_threshold = DEDUPLICATION_THRESHOLD
 max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
 output_debug_files = OUTPUT_DEBUG_FILES
+default_number_of_sampled_summaries = DEFAULT_SAMPLED_SUMMARIES
 max_text_length = 500
-default_number_of_sampled_summaries = 100
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(category_series: pd.Series, join_series: pd.Series, reference_df: pd.DataFrame, general_topic_series: pd.Series = None, merge_general_topics = "No", merge_sentiment:str="No", threshold: float = 90) -> pd.DataFrame:
@@ -397,7 +397,8 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
                           output_folder:str=OUTPUT_FOLDER,
                           candidate_topics=None,
                           azure_endpoint:str="",
-                          output_debug_files:str="False"
+                          output_debug_files:str="False",
+                          api_url:str=None
                           ):
     '''
     Deduplicate topics using LLM semantic understanding to identify and merge similar topics.
@@ -550,7 +551,8 @@ def deduplicate_topics_llm(reference_df:pd.DataFrame,
         assistant_prefill="",
         master=False,
         CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
-        random_seed=LLM_SEED
+        random_seed=LLM_SEED,
+        api_url=api_url
     )
 
     # Generate debug files if enabled
@@ -801,7 +803,7 @@ def count_tokens_in_text(text: str, tokenizer=None, model_source: str = "Local")
         word_count = len(text.split())
         return int(word_count * 1.3)
 
-def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list(), tokenizer=list(), assistant_model=list(), azure_endpoint:str=""):
+def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:float, formatted_summary_prompt:str, summarise_topic_descriptions_system_prompt:str, model_source:str, bedrock_runtime:boto3.Session.client, local_model=list(), tokenizer=list(), assistant_model=list(), azure_endpoint:str="", api_url:str=None):
     """
     Query an LLM to generate a summary of topics based on the provided prompts.
 
@@ -826,8 +828,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     client = list()
     client_config = {}
 
-    # Check if the input text exceeds the LLM context length
-    from tools.config import LLM_CONTEXT_LENGTH
+    
     
     # Combine system prompt and user prompt for token counting
     full_input_text = summarise_topic_descriptions_system_prompt + "\n" + formatted_summary_prompt[0] if isinstance(formatted_summary_prompt, list) else summarise_topic_descriptions_system_prompt + "\n" + formatted_summary_prompt
@@ -859,7 +860,7 @@ def summarise_output_topics_query(model_choice:str, in_api_key:str, temperature:
     whole_conversation = [summarise_topic_descriptions_system_prompt] 
 
     # Process requests to large language model
-    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=summary_assistant_prefill)
+    responses, conversation_history, whole_conversation, whole_conversation_metadata, response_text = process_requests(formatted_summary_prompt, system_prompt, conversation_history, whole_conversation, whole_conversation_metadata, client, client_config, model_choice, temperature, bedrock_runtime=bedrock_runtime, model_source=model_source, local_model=local_model, tokenizer=tokenizer, assistant_model=assistant_model, assistant_prefill=summary_assistant_prefill, api_url=api_url)
 
     summarised_output = re.sub(r'\n{2,}', '\n', response_text)  # Replace multiple line breaks with a single line break
     summarised_output = re.sub(r'^\n{1,}', '', summarised_output)  # Remove one or more line breaks at the start
@@ -1015,7 +1016,8 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
                             assistant_model:object=None,                            
                             summarise_topic_descriptions_prompt:str=summarise_topic_descriptions_prompt, 
                             summarise_topic_descriptions_system_prompt:str=summarise_topic_descriptions_system_prompt,                            
-                            do_summaries:str="Yes",                            
+                            do_summaries:str="Yes",
+                            api_url:str=None,                            
                             progress=gr.Progress(track_tqdm=True)):
     '''
     Create improved summaries of topics by consolidating raw batch-level summaries from the initial model run. Works on a single group of summaries at a time (called from wrapper function summarise_output_topics_by_group).
@@ -1168,7 +1170,7 @@ def summarise_output_topics(sampled_reference_table_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_topic_descriptions_system_prompt = formatted_summarise_topic_descriptions_system_prompt + "\n" + reasoning_suffix
 
             try:
-                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model, azure_endpoint=azure_endpoint_textbox)
+                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_topic_descriptions_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model, azure_endpoint=azure_endpoint_textbox, api_url=api_url)
                 summarised_output = response_text
             except Exception as e:
                 print("Creating summary failed:", e)
@@ -1367,6 +1369,7 @@ def wrapper_summarise_output_topics_per_group(
     sample_reference_table: bool = False,
     no_of_sampled_summaries: int = default_number_of_sampled_summaries,
     random_seed: int = 42,
+    api_url: str = None,
     progress = gr.Progress(track_tqdm=True)
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, List[str], List[str], int, str, str, List[str], List[str], int, int, int, float, str, List[dict]]:
     """
@@ -1543,7 +1546,8 @@ def wrapper_summarise_output_topics_per_group(
                 assistant_model=assistant_model,
                 summarise_topic_descriptions_prompt=summarise_topic_descriptions_prompt,
                 summarise_topic_descriptions_system_prompt=summarise_topic_descriptions_system_prompt,
-                do_summaries=do_summaries
+                do_summaries=do_summaries,
+                api_url=api_url
             )
 
             # Aggregate results
@@ -1644,9 +1648,10 @@ def overall_summary(topic_summary_df:pd.DataFrame,
                     hf_api_key_textbox:str='',
                     azure_endpoint_textbox:str='',
                     existing_logged_content:list=list(),
+                    api_url:str=None,
                     output_debug_files:str=output_debug_files,
                     log_output_files:list=list(),                    
-                    reasoning_suffix:str=reasoning_suffix,
+                    reasoning_suffix:str=reasoning_suffix,                    
                     local_model:object=None,
                     tokenizer:object=None,
                     assistant_model:object=None,
@@ -1674,7 +1679,8 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
         output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
-        log_output_files (list, optional): List of existing logged content. Defaults to empty list.        
+        log_output_files (list, optional): List of existing logged content. Defaults to empty list.
+        api_url (str, optional): API URL for inference-server models. Defaults to None.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object. Defaults to None.
         tokenizer (object, optional): Tokenizer object. Defaults to None. 
@@ -1775,7 +1781,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
             if "Local" in model_source and reasoning_suffix: formatted_summarise_everything_system_prompt = formatted_summarise_everything_system_prompt + "\n" + reasoning_suffix
             
             try:
-                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model, azure_endpoint=azure_endpoint_textbox)
+                response, conversation_history, metadata, response_text = summarise_output_topics_query(model_choice, in_api_key, temperature, formatted_summary_prompt, formatted_summarise_everything_system_prompt, model_source, bedrock_runtime, local_model, tokenizer=tokenizer, assistant_model=assistant_model, azure_endpoint=azure_endpoint_textbox, api_url=api_url)
                 summarised_output_for_df = response_text
                 summarised_output = response
             except Exception as e:
