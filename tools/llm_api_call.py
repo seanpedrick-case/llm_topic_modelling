@@ -2963,7 +2963,7 @@ def all_in_one_pipeline(
         additional_validation_issues_provided (str, optional): Additional validation issues provided by the user. Defaults to "".
         show_previous_table (str, optional): Whether to show the previous table ("Yes" or "No"). Defaults to "Yes".
         sample_reference_table_checkbox (bool, optional): Whether to sample summaries before creating revised summaries.
-        api_url (str, optional): API URL for llama-server models. Defaults to None.
+        api_url (str, optional): API URL for inference-server models. Defaults to None.
         output_debug_files (str, optional): Whether to output debug files. Defaults to "False".
         model (object, optional): Loaded local model object. Defaults to None.
         tokenizer (object, optional): Loaded local tokenizer object. Defaults to None.

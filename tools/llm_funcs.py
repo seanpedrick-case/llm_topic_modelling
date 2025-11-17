@@ -641,20 +641,20 @@ def call_llama_cpp_chatmodel(formatted_string:str, system_prompt:str, gen_config
 
         return response
 
-def call_llama_server_api(formatted_string: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, 
+def call_inference_server_api(formatted_string: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, 
                           api_url: str = "http://localhost:8080", model_name: str = None):
     """
-    Calls a llama-server API endpoint with a formatted user message and system prompt,
+    Calls a inference-server API endpoint with a formatted user message and system prompt,
     using generation parameters from the LlamaCPPGenerationConfig object.
     
     This function provides the same interface as call_llama_cpp_chatmodel but calls
-    a remote llama-server instance instead of a local model.
+    a remote inference-server instance instead of a local model.
 
     Args:
         formatted_string (str): The formatted input text for the user's message.
         system_prompt (str): The system-level instructions for the model.
         gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
-        api_url (str): The base URL of the llama-server API (default: "http://localhost:8080").
+        api_url (str): The base URL of the inference-server API (default: "http://localhost:8080").
         model_name (str): Optional model name to use. If None, uses the default model.
     
     Returns:
@@ -665,7 +665,7 @@ def call_llama_server_api(formatted_string: str, system_prompt: str, gen_config:
         gen_config = LlamaCPPGenerationConfig(temperature=0.7, max_tokens=100)
         
         # Call the API
-        response = call_llama_server_api(
+        response = call_inference_server_api(
             formatted_string="Hello, how are you?",
             system_prompt="You are a helpful assistant.",
             gen_config=gen_config,
@@ -676,8 +676,8 @@ def call_llama_server_api(formatted_string: str, system_prompt: str, gen_config:
         response_text = response['choices'][0]['message']['content']
         
     Integration Example:
-        # To use llama-server instead of local model:
-        # 1. Set model_source to "llama-server"
+        # To use inference-server instead of local model:
+        # 1. Set model_source to "inference-server"
         # 2. Provide api_url parameter
         # 3. Call your existing functions as normal
         
@@ -687,15 +687,15 @@ def call_llama_server_api(formatted_string: str, system_prompt: str, gen_config:
             conversation_history=[],
             whole_conversation=[],
             whole_conversation_metadata=[],
-            client=None,  # Not used for llama-server
-            client_config=None,  # Not used for llama-server
+            client=None,  # Not used for inference-server
+            client_config=None,  # Not used for inference-server
             model_choice="your-model-name",  # Model name on the server
             temperature=0.7,
             reported_batch_no=1,
-            local_model=None,  # Not used for llama-server
-            tokenizer=None,  # Not used for llama-server
-            bedrock_runtime=None,  # Not used for llama-server
-            model_source="llama-server",  # Key change: use llama-server
+            local_model=None,  # Not used for inference-server
+            tokenizer=None,  # Not used for inference-server
+            bedrock_runtime=None,  # Not used for inference-server
+            model_source="inference-server",  # Key change: use inference-server
             MAX_OUTPUT_VALIDATION_ATTEMPTS=3,
             api_url="http://localhost:8080"  # Key change: provide API URL
         )
@@ -729,8 +729,8 @@ def call_llama_server_api(formatted_string: str, system_prompt: str, gen_config:
     }
     
     # Add model name if specified
-    if model_name:
-        payload["model"] = model_name
+    #if model_name:
+    #    payload["model"] = model_name
     
     # Determine the endpoint based on streaming preference
     if stream:
@@ -807,16 +807,16 @@ def call_llama_server_api(formatted_string: str, system_prompt: str, gen_config:
             
             # Ensure the response has the expected format
             if 'choices' not in result:
-                raise ValueError("Invalid response format from llama-server")
+                raise ValueError("Invalid response format from inference-server")
             
             return result
             
     except requests.exceptions.RequestException as e:
-        raise ConnectionError(f"Failed to connect to llama-server at {api_url}: {str(e)}")
+        raise ConnectionError(f"Failed to connect to inference-server at {api_url}: {str(e)}")
     except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON response from llama-server: {str(e)}")
+        raise ValueError(f"Invalid JSON response from inference-server: {str(e)}")
     except Exception as e:
-        raise RuntimeError(f"Error calling llama-server API: {str(e)}")
+        raise RuntimeError(f"Error calling inference-server API: {str(e)}")
 
 ###
 # LLM FUNCTIONS
@@ -1077,7 +1077,7 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
 
     This function constructs the full prompt by appending the new user prompt to the conversation history,
     generates a response from the model, and updates the conversation history with the new prompt and response.
-    It handles different model sources (Gemini, AWS, Local, llama-server) and includes retry logic for API calls.
+    It handles different model sources (Gemini, AWS, Local, inference-server) and includes retry logic for API calls.
 
     Args:
         prompt (str): The user's input prompt to be sent to the model.
@@ -1089,13 +1089,13 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
         system_prompt (str): An optional system-level instruction or context for the model.
         temperature (float): Controls the randomness of the model's output, with higher values leading to more diverse responses.
         bedrock_runtime (boto3.Session.client): The boto3 Bedrock runtime client object for AWS models.
-        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local", "llama-server").
+        model_source (str): Indicates the source/provider of the model (e.g., "Gemini", "AWS", "Local", "inference-server").
         local_model (list, optional): A list containing the local model and its tokenizer (if `model_source` is "Local"). Defaults to [].
         tokenizer (object, optional): The tokenizer object for local models. Defaults to None.
         assistant_model (object, optional): An optional assistant model used for speculative decoding with local models. Defaults to None.
         assistant_prefill (str, optional): A string to pre-fill the assistant's response, useful for certain models like Claude. Defaults to "".
         progress (Progress, optional): A progress object for tracking the operation, typically from `tqdm`. Defaults to Progress(track_tqdm=True).
-        api_url (str, optional): The API URL for llama-server calls. Required when model_source is 'llama-server'.
+        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
         Tuple[str, List[dict]]: A tuple containing the model's response text and the updated conversation history.
@@ -1219,24 +1219,24 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
 
             if i == number_of_api_retry_attempts:
                 return ResponseObject(text="", usage_metadata={'RequestId':"FAILED"}), conversation_history, response_text, num_transformer_input_tokens, num_transformer_generated_tokens
-    elif "llama-server" in model_source:
-        # This is the llama-server API
+    elif "inference-server" in model_source:
+        # This is the inference-server API
         for i in progress_bar:
             try:
-                print("Calling llama-server API, attempt", i + 1)
+                print("Calling inference-server API, attempt", i + 1)
                 
                 if api_url is None:
-                    raise ValueError("api_url is required when model_source is 'llama-server'")
+                    raise ValueError("api_url is required when model_source is 'inference-server'")
                 
                 gen_config = LlamaCPPGenerationConfig()
                 gen_config.update_temp(temperature)
                 
-                response = call_llama_server_api(prompt, system_prompt, gen_config, api_url=api_url, model_name=model_choice)
+                response = call_inference_server_api(prompt, system_prompt, gen_config, api_url=api_url, model_name=model_choice)
                 
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to llama-server API failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
+                print("Call to inference-server API failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")         
                 
                 time.sleep(timeout_wait)
                 
@@ -1249,10 +1249,10 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
     # Update the conversation history with the new prompt and response
     conversation_history.append({'role': 'user', 'parts': [prompt]})
 
-    # Check if is a LLama.cpp model response or llama-server response
+    # Check if is a LLama.cpp model response or inference-server response
     if isinstance(response, ResponseObject):
         response_text = response.text
-    elif 'choices' in response: # LLama.cpp model response or llama-server response
+    elif 'choices' in response: # LLama.cpp model response or inference-server response
         if "gpt-oss" in model_choice: response_text = response['choices'][0]['message']['content'].split('<|start|>assistant<|channel|>final<|message|>')[1]
         else: response_text = response['choices'][0]['message']['content']
     elif model_source == "Gemini":
@@ -1300,13 +1300,13 @@ api_url:str=None) -> Tuple[List[ResponseObject], List[dict], List[str], List[str
         config (dict): Configuration for the model.
         model_choice (str): The choice of model to use.        
         temperature (float): The temperature parameter for the model.
-        model_source (str): Source of the model, whether local, AWS, Gemini, or llama-server
+        model_source (str): Source of the model, whether local, AWS, Gemini, or inference-server
         batch_no (int): Batch number of the large language model request.
         local_model: Local gguf model (if loaded)
         master (bool): Is this request for the master table.
         assistant_prefill (str, optional): Is there a prefill for the assistant response. Currently only working for AWS model calls
         bedrock_runtime: The client object for boto3 Bedrock runtime
-        api_url (str, optional): The API URL for llama-server calls. Required when model_source is 'llama-server'.
+        api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
         Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
@@ -1349,8 +1349,8 @@ api_url:str=None) -> Tuple[List[ResponseObject], List[dict], List[str], List[str
                     input_tokens = num_transformer_input_tokens
                     output_tokens = num_transformer_generated_tokens
 
-            elif "llama-server" in model_source:
-                # llama-server returns the same format as llama-cpp
+            elif "inference-server" in model_source:
+                # inference-server returns the same format as llama-cpp
                 output_tokens = response['usage'].get('completion_tokens', 0)
                 input_tokens = response['usage'].get('prompt_tokens', 0)
 
@@ -1402,13 +1402,13 @@ def call_llm_with_markdown_table_checks(batch_prompts: List[str],
     - local_model (object): The local model to use.
     - tokenizer (object): The tokenizer to use.
     - bedrock_runtime (boto3.Session.client): The client object for boto3 Bedrock runtime.
-    - model_source (str): The source of the model, whether in AWS, Gemini, local, or llama-server.
+    - model_source (str): The source of the model, whether in AWS, Gemini, local, or inference-server.
     - MAX_OUTPUT_VALIDATION_ATTEMPTS (int): The maximum number of attempts to validate the output.
     - assistant_prefill (str, optional): The text to prefill the LLM response. Currently only working with AWS Claude calls.
     - master (bool, optional): Boolean to determine whether this call is for the master output table.
     - CHOSEN_LOCAL_MODEL_TYPE (str, optional): String to determine model type loaded.
     - random_seed (int, optional): The random seed used for LLM generation.
-    - api_url (str, optional): The API URL for llama-server calls. Required when model_source is 'llama-server'.
+    - api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
     - Tuple[List[ResponseObject], List[dict], List[str], List[str], str]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, the updated whole conversation metadata, and the response text.

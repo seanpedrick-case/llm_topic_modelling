@@ -1680,7 +1680,7 @@ def overall_summary(topic_summary_df:pd.DataFrame,
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
         output_debug_files (str, optional): Flag to indicate if debug files should be written. Defaults to "False".
         log_output_files (list, optional): List of existing logged content. Defaults to empty list.
-        api_url (str, optional): API URL for llama-server models. Defaults to None.
+        api_url (str, optional): API URL for inference-server models. Defaults to None.
         reasoning_suffix (str, optional): Suffix for reasoning. Defaults to reasoning_suffix.
         local_model (object, optional): Local model object. Defaults to None.
         tokenizer (object, optional): Tokenizer object. Defaults to None. 

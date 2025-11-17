@@ -221,13 +221,25 @@ RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var('GEMINI_API_KEY', '')
 
+INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", """# Large language model topic modelling
+
+Extract topics and summarise outputs using Large Language Models (LLMs, Gemma 3 4b/GPT-OSS 20b if local (see tools/config.py to modify), Gemini, Azure/OpenAI, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets below. API keys for AWS, Azure/OpenAI, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
+
+NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""")
+
+# Read in intro text from a text file if it is a path to a text file
+if INTRO_TEXT.endswith(".txt"): 
+    INTRO_TEXT = open(INTRO_TEXT, "r").read()
+
+INTRO_TEXT = INTRO_TEXT.strip('"').strip("'")
+
 # Azure/OpenAI AI Inference settings
 RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
 AZURE_OPENAI_API_KEY = get_or_create_env_var('AZURE_OPENAI_API_KEY', '')
 AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var('AZURE_OPENAI_INFERENCE_ENDPOINT', '')
 
 # Llama-server settings
-RUN_LLAMA_SERVER = get_or_create_env_var("RUN_LLAMA_SERVER", "0")
+RUN_INFERENCE_SERVER = get_or_create_env_var("RUN_INFERENCE_SERVER", "0")
 API_URL = get_or_create_env_var('API_URL', 'http://localhost:8080')
 
 # Build up options for models
@@ -263,13 +275,13 @@ if RUN_AZURE_MODELS == "1":
     model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
-# Register llama-server models
-if RUN_LLAMA_SERVER == "1":
-    # Example llama-server models; adjust to the models you have available on your server
-    llama_server_models = ["gpt_oss_20b", "gemma_3_12b"]
-    model_full_names.extend(llama_server_models)
-    model_short_names.extend(llama_server_models)
-    model_source.extend(["llama-server"] * len(llama_server_models))
+# Register inference-server models
+if RUN_INFERENCE_SERVER == "1":
+    # Example inference-server models; adjust to the models you have available on your server
+    inference_server_models = ["gpt_oss_20b", "gemma_3_12b"]
+    model_full_names.extend(inference_server_models)
+    model_short_names.extend(inference_server_models)
+    model_source.extend(["inference-server"] * len(inference_server_models))
 
 model_name_map = {
     full: {"short_name": short, "source": source}
@@ -277,7 +289,7 @@ model_name_map = {
 }
 
 if RUN_LOCAL_MODEL == "1": default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
-elif RUN_LLAMA_SERVER == "1": default_model_choice = llama_server_models[0]
+elif RUN_INFERENCE_SERVER == "1": default_model_choice = inference_server_models[0]
 elif RUN_AWS_FUNCTIONS == "1": default_model_choice = amazon_models[0]
 else: default_model_choice = gemini_models[0]
 
