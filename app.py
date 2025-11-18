@@ -753,6 +753,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp=RUN_MCP_SERVER)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER)
     else:
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp=RUN_MCP_SERVER)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER)
