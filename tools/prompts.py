@@ -64,7 +64,9 @@ validation_system_prompt = system_prompt
 
 validation_prompt_prefix_default = """The following instructions were previously provided to create an output table:\n'"""
 
-previous_table_introduction_default = """'\n\nThe following output table was created based on the above instructions:\n"""
+previous_table_introduction_default = (
+    """'\n\nThe following output table was created based on the above instructions:\n"""
+)
 
 validation_prompt_suffix_default = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
 
@@ -90,10 +92,16 @@ With the above issues in mind, create a new, corrected version of the markdown t
 # SENTIMENT CHOICES
 ###
 
-negative_neutral_positive_sentiment_prompt = "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
-negative_or_positive_sentiment_prompt = "write the sentiment of the Subtopic: Negative or Positive"
-do_not_assess_sentiment_prompt = "write the text 'Not assessed'" # Not used anymore. Instead, the column is filled in automatically with 'Not assessed'
-default_sentiment_prompt = "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+negative_neutral_positive_sentiment_prompt = (
+    "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+)
+negative_or_positive_sentiment_prompt = (
+    "write the sentiment of the Subtopic: Negative or Positive"
+)
+do_not_assess_sentiment_prompt = "write the text 'Not assessed'"  # Not used anymore. Instead, the column is filled in automatically with 'Not assessed'
+default_sentiment_prompt = (
+    "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+)
 
 ###
 # STRUCTURED SUMMARY PROMPT
@@ -250,4 +258,3 @@ create_general_topics_prompt = """Subtopics known to be relevant to this dataset
 Your task is to create a General topic name for each Subtopic. The new Topics table should have the columns 'General topic' and 'Subtopic' only. Write a 'General topic' text label relevant to the Subtopic next to it in the new table. The text label should describe the general theme of the Subtopic. Do not add any other text, thoughts, or notes to your response.
 
 New Topics table:"""
-
