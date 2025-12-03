@@ -882,7 +882,7 @@ def construct_azure_client(in_api_key: str, endpoint: str) -> Tuple[object, dict
         print("Error constructing Azure/OpenAI client:", e)
         raise
 
-def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice:str, bedrock_runtime:boto3.Session.client, assistant_prefill:str="") -> ResponseObject:
+def call_aws_bedrock(prompt: str, system_prompt: str, temperature: float, max_tokens: int, model_choice:str, bedrock_runtime:boto3.Session.client, assistant_prefill:str="") -> ResponseObject:
     """
     This function sends a request to AWS Claude with the following parameters:
     - prompt: The user's input prompt to be processed by the model.
@@ -902,16 +902,10 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
         "temperature":temperature,
     }
 
-    if not assistant_prefill:
-        messages =  [
-                {
-                    "role": "user",
-                    "content": [
-                        {"text": prompt},
-                    ],
-                }
-            ]
-    else:
+    
+    # Using an assistant prefill only works for Anthropic models.
+    if assistant_prefill and "anthropic" in model_choice:
+        assistant_prefill_added = True
         messages =  [
                 {
                     "role": "user",
@@ -925,6 +919,16 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
                     "content": [{"text": assistant_prefill}]
                 }
             ]
+    else:
+        assistant_prefill_added = False
+        messages =  [
+                {
+                    "role": "user",
+                    "content": [
+                        {"text": prompt},
+                    ],
+                }
+            ]
     
     system_prompt_list = [
         {
@@ -932,7 +936,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
         }
     ]
 
-    # The converse API call itself. Note I've renamed the response variable for clarity.
+    # The converse API call.
     api_response = bedrock_runtime.converse(
         modelId=model_choice,
         messages=messages,
@@ -947,9 +951,15 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
         reasoning_text = output_message['content'][0]['reasoningContent']['reasoningText']['text']
 
         # Extract the output text
-        text = assistant_prefill + output_message['content'][1]['text']
+        if assistant_prefill_added:
+            text = assistant_prefill + output_message['content'][1]['text']
+        else:
+            text = output_message['content'][1]['text']
     else:
-        text = assistant_prefill + output_message['content'][0]['text']
+        if assistant_prefill_added:
+            text = assistant_prefill + output_message['content'][0]['text']
+        else:
+            text = output_message['content'][0]['text']
 
     # The usage statistics are neatly provided in the 'usage' key.
     usage = api_response['usage']
@@ -1183,14 +1193,14 @@ def send_request(prompt: str, conversation_history: List[dict], client: ai.Clien
     elif "AWS" in model_source:
         for i in progress_bar:
             try:
-                print("Calling AWS Claude model, attempt", i + 1)
-                response = call_aws_claude(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime, assistant_prefill=assistant_prefill)
+                print("Calling AWS Bedrock model, attempt", i + 1)
+                response = call_aws_bedrock(prompt, system_prompt, temperature, max_tokens, model_choice, bedrock_runtime=bedrock_runtime, assistant_prefill=assistant_prefill)
 
                 #print("Successful call to Claude model.")
                 break
             except Exception as e:
                 # If fails, try again after X seconds in case there is a throttle limit
-                print("Call to Claude model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
+                print("Call to Bedrock model failed:", e, " Waiting for ", str(timeout_wait), "seconds and trying again.")
                 time.sleep(timeout_wait)
 
             if i == number_of_api_retry_attempts:

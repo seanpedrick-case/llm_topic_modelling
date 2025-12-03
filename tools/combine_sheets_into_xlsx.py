@@ -414,7 +414,7 @@ def collect_output_csvs_and_create_excel_output(in_data_files:List, chosen_cols:
     intro_text = [
         "This workbook contains outputs from the large language model topic analysis of open text data. Each sheet corresponds to a different CSV report included in the analysis.",
         f"The file analysed was {short_file_name}, the column analysed was '{chosen_cols}' and the data was grouped by column '{group}'."
-        "Please contact the LLM Topic Modelling app administrator if you need any explanation on how to use the results."
+        " Please contact the LLM Topic Modelling app administrator if you need any explanation on how to use the results."
         "Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this analysis **need to be checked by a human** to check for harmful outputs, false information, and bias."
     ]
 

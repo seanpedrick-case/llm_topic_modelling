@@ -35,13 +35,13 @@ def connect_to_bedrock_runtime(model_name_map:dict, model_choice:str, aws_access
             print(out_message)
             raise Exception(out_message)
     else: 
-        bedrock_runtime = list()
+        bedrock_runtime = None
 
     return bedrock_runtime
 
 def connect_to_s3_client(aws_access_key_textbox:str="", aws_secret_key_textbox:str=""):
     # If running an anthropic model, assume that running an AWS s3 model, load in s3
-    s3_client = list()
+    s3_client = None
 
     if aws_access_key_textbox and aws_secret_key_textbox:
         print("Connecting to s3 using AWS access key and secret keys from user input.")
