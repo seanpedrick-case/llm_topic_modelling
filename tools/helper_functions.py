@@ -402,7 +402,7 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
     return out_topic_summary_df
 
 # Wrap text in each column to the specified max width, including whole words
-def wrap_text(text:str, max_width=100, max_text_length=None):
+def wrap_text(text:str, max_width=80, max_text_length=None):
     if not isinstance(text, str):
         return text
         

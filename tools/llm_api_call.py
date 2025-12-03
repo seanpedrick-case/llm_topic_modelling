@@ -517,7 +517,7 @@ def validate_topics(
         validation_topic_summary_df = create_topic_summary_df_from_reference_table(validation_reference_df)
 
     # Sort output dataframes
-    validation_reference_df["Response References"] = validation_reference_df["Response References"].astype(str).astype(int)
+    validation_reference_df["Response References"] = validation_reference_df["Response References"].astype(float).astype(int)
     validation_reference_df["Start row of group"] = validation_reference_df["Start row of group"].astype(int)
     validation_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
     validation_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
@@ -781,13 +781,13 @@ def validate_topics_wrapper(
             if "General topic" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on=["General topic", "Subtopic", "Sentiment"], how="left")
                 # Sort output dataframes
-                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(float).astype(int)
                 acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
                 acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
             elif "Main heading" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
                 # Sort output dataframes
-                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(float).astype(int)
                 acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
                 acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "Main heading", "Subheading", "Topic number"], inplace=True)
 
@@ -1403,7 +1403,7 @@ def write_llm_output_and_logs(response_text: str,
     # Try converting response references column to int, keep as string if fails
     if existing_reference_numbers is True:
         try:
-            out_reference_df["Response References"] = out_reference_df["Response References"].astype(str).astype(int)
+            out_reference_df["Response References"] = out_reference_df["Response References"].astype(float).astype(int)
         except Exception as e:
             print("Could not convert Response References column to integer due to", e)
 
@@ -2647,13 +2647,13 @@ def wrapper_extract_topics_per_column_value(
             if "General topic" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["General topic", "Subtopic", "Sentiment", "Topic number"]], on=["General topic", "Subtopic", "Sentiment"], how="left")
                 # Sort output dataframes
-                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(float).astype(int)
                 acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
                 acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
             elif "Main heading" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(acc_topic_summary_df[["Main heading", "Subheading", "Topic number"]], on=["Main heading", "Subheading"], how="left")
                 # Sort output dataframes
-                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(str).astype(int)
+                acc_reference_df["Response References"] = acc_reference_df["Response References"].astype(float).astype(int)
                 acc_reference_df["Start row of group"] = acc_reference_df["Start row of group"].astype(int)
                 acc_reference_df.sort_values(["Group", "Start row of group", "Response References", "Main heading", "Subheading", "Topic number"], inplace=True)
 

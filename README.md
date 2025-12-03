@@ -8,7 +8,7 @@ sdk_version: 6.0.2
 app_file: app.py
 pinned: true
 license: agpl-3.0
-short_description: Create thematic summaries for open text data
+short_description: Create thematic summaries for open text data with LLMs
 ---
 
 # Large language model topic modelling

@@ -40,6 +40,29 @@ produce_structured_summary_radio = gr.Radio(label="Ask the model to produce stru
 in_group_col = gr.Dropdown(multiselect = False, label="Select the column to group results by", allow_custom_value=True, interactive=True)
 batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query (batch size)", value = BATCH_SIZE_DEFAULT, precision=0, minimum=1, maximum=50)
 
+css = """
+/* Target tab navigation buttons only - not buttons inside tab content */
+/* Gradio renders tab buttons with role="tab" in the navigation area */
+button[role="tab"] {
+    font-size: 1.1em !important;
+    padding: 0.75em 1.2em !important;
+}
+
+/* Alternative selectors for different Gradio versions */
+.tab-nav button,
+nav button[role="tab"],
+div[class*="tab-nav"] button {
+    font-size: 1.1em !important;
+    padding: 0.75em 1.2em !important;
+}
+"""
+
+# /* Completely hide elements with the class 'hidden_component' from view */
+# .hidden_component {
+#     display: none !important;
+#     visibility: hidden !important;
+# }
+
 # Create the gradio interface
 app = gr.Blocks(fill_width=True)
 
@@ -47,95 +70,102 @@ with app:
 
     ###
     # STATE VARIABLES
-    ###
+    ###    
 
-    # Put initial state variables in hidden tab so they are not visible on front end
-    with gr.Tab("State variables", visible=False):
+    # Workaround for Gradio 6 issue where 'hidden' element are still sometimes visible as a thing line in the UI
+    with gr.Accordion(visible="hidden", elem_classes="hidden_component", open = False):
+        text_output_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="text_output_file_list_state", elem_classes="hidden_component")
+        text_output_modify_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="text_output_modify_file_list_state", elem_classes="hidden_component")
+        log_files_output_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="log_files_output_list_state", elem_classes="hidden_component")
+        first_loop_state = gr.Checkbox(True, visible="hidden", elem_classes="hidden_component")
+        second_loop_state = gr.Checkbox(False, visible="hidden", elem_classes="hidden_component")
+        modified_unique_table_change_bool = gr.Checkbox(True, visible="hidden", elem_classes="hidden_component") # This boolean is used to flag whether a file upload should change just the modified unique table object on the second tab
 
-        text_output_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="text_output_file_list_state")
-        text_output_modify_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="text_output_modify_file_list_state")
-        log_files_output_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="log_files_output_list_state")
-        first_loop_state = gr.Checkbox(True, visible="hidden")
-        second_loop_state = gr.Checkbox(False, visible="hidden")
-        modified_unique_table_change_bool = gr.Checkbox(True, visible="hidden") # This boolean is used to flag whether a file upload should change just the modified unique table object on the second tab
+        file_data_state = gr.Dataframe(value=pd.DataFrame(), label="file_data_state", visible="hidden", type="pandas", interactive=True, elem_classes="hidden_component")
+        master_topic_df_state = gr.Dataframe(value=pd.DataFrame(), label="master_topic_df_state", visible="hidden", type="pandas", interactive=True)
+        master_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), label="master_unique_topics_df_state", visible="hidden", type="pandas", interactive=True, elem_classes="hidden_component")
+        master_reference_df_state = gr.Dataframe(value=pd.DataFrame(), label="master_reference_df_state", visible="hidden", type="pandas", interactive=True, elem_classes="hidden_component")
+        missing_df_state = gr.Dataframe(value=pd.DataFrame(), label="missing_df_state", visible="hidden", type="pandas", interactive=True, elem_classes="hidden_component")
 
-        file_data_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="file_data_state", visible="hidden", type="pandas")
-        master_topic_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_topic_df_state", visible="hidden", type="pandas")
-        master_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_unique_topics_df_state", visible="hidden", type="pandas")
-        master_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_reference_df_state", visible="hidden", type="pandas")
-        missing_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="missing_df_state", visible="hidden", type="pandas")
-
-        master_modify_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_modify_unique_topics_df_state", visible="hidden", type="pandas")
-        master_modify_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_modify_reference_df_state", visible="hidden", type="pandas")   
+        master_modify_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), label="master_modify_unique_topics_df_state", visible="hidden", type="pandas", interactive=True, elem_classes="hidden_component")
+        master_modify_reference_df_state = gr.Dataframe(value=pd.DataFrame(), label="master_modify_reference_df_state", visible="hidden", type="pandas", interactive=True, elem_classes="hidden_component")   
 
         # Blank placeholder for conversation metadata textbox, as logging file output can get too long for large amounts of calls
-        conversation_metadata_textbox_placeholder = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8, visible="hidden") 
-    
+        conversation_metadata_textbox_placeholder = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8, visible="hidden", elem_classes="hidden_component") 
+
         session_hash_state = gr.Textbox(visible="hidden", value=HOST_NAME)
-        output_folder_state = gr.Textbox(visible="hidden", value=OUTPUT_FOLDER)
-        input_folder_state = gr.Textbox(visible="hidden", value=INPUT_FOLDER)
+        output_folder_state = gr.Textbox(visible="hidden", value=OUTPUT_FOLDER, elem_classes="hidden_component")
+        input_folder_state = gr.Textbox(visible="hidden", value=INPUT_FOLDER, elem_classes="hidden_component")
 
         # s3 bucket name
-        s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=S3_LOG_BUCKET, visible="hidden")
-        s3_log_bucket_name = gr.Textbox(visible="hidden", value=S3_LOG_BUCKET)
+        s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=S3_LOG_BUCKET, visible="hidden", elem_classes="hidden_component")
+        s3_log_bucket_name = gr.Textbox(visible="hidden", value=S3_LOG_BUCKET, elem_classes="hidden_component")
 
         # Logging variables
-        access_logs_state = gr.Textbox(label= "access_logs_state", value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME, visible="hidden")
-        access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible="hidden")
-        feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME, visible="hidden")
-        feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible="hidden")
-        usage_logs_state = gr.Textbox(label= "usage_logs_state", value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME, visible="hidden")
-        usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible="hidden")
+        access_logs_state = gr.Textbox(label= "access_logs_state", value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME, visible="hidden", elem_classes="hidden_component")
+        access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible="hidden", elem_classes="hidden_component")
+        feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME, visible="hidden", elem_classes="hidden_component")
+        feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible="hidden", elem_classes="hidden_component")
+        usage_logs_state = gr.Textbox(label= "usage_logs_state", value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME, visible="hidden", elem_classes="hidden_component")
+        usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible="hidden", elem_classes="hidden_component")
 
         # Logging for logged content
-        logged_content_df = gr.Dataframe(label= "logged_content_df", value=pd.DataFrame(), visible="hidden", type="pandas")
-
+        logged_content_df = gr.Dataframe(label= "logged_content_df", value=pd.DataFrame(), visible="hidden", type="pandas", elem_classes="hidden_component")
 
         # Logging for input / output tokens
-        input_tokens_num = gr.Textbox('0', visible="hidden", label="Total input tokens")
-        output_tokens_num = gr.Textbox('0', visible="hidden", label="Total output tokens")
-        number_of_calls_num = gr.Textbox('0', visible="hidden", label="Total LLM calls")
+        input_tokens_num = gr.Textbox('0', visible="hidden", label="Total input tokens", elem_classes="hidden_component")
+        output_tokens_num = gr.Textbox('0', visible="hidden", label="Total output tokens", elem_classes="hidden_component")
+        number_of_calls_num = gr.Textbox('0', visible="hidden", label="Total LLM calls", elem_classes="hidden_component")
         
         # Additional UI components for validation
-        max_tokens_num = gr.Number(value=8192, visible="hidden", label="Max tokens")
-        reasoning_suffix_textbox = gr.Textbox(value="", visible="hidden", label="Reasoning suffix")
+        max_tokens_num = gr.Number(value=8192, visible="hidden", label="Max tokens", elem_classes="hidden_component")
+        reasoning_suffix_textbox = gr.Textbox(value="", visible="hidden", label="Reasoning suffix", elem_classes="hidden_component")
         output_debug_files_radio = gr.Radio(value="False", choices=["True", "False"], visible="hidden", label="Output debug files")
-        max_time_for_loop_num = gr.Number(value=99999, visible="hidden", label="Max time for loop")
+        max_time_for_loop_num = gr.Number(value=99999, visible="hidden", label="Max time for loop", elem_classes="hidden_component")
 
         # Summary state objects
-        summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="summary_reference_table_sample_state", visible="hidden", type="pandas")
-        master_reference_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_reference_df_revised_summaries_state", visible="hidden", type="pandas")
-        master_unique_topics_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_unique_topics_df_revised_summaries_state", visible="hidden", type="pandas")
-        summarised_output_df = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="summarised_output_df", visible="hidden", type="pandas")
-        summarised_references_markdown = gr.Markdown("", visible="hidden")
-        summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible="hidden", label="List of summarised outputs", allow_custom_value=True)
-        latest_summary_completed_num = gr.Number(0, visible="hidden")
+        summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="summary_reference_table_sample_state", visible="hidden", type="pandas", elem_classes="hidden_component")
+        master_reference_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_reference_df_revised_summaries_state", visible="hidden", type="pandas", elem_classes="hidden_component")
+        master_unique_topics_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_unique_topics_df_revised_summaries_state", visible="hidden", type="pandas", elem_classes="hidden_component")
+        summarised_output_df = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="summarised_output_df", visible="hidden", type="pandas", elem_classes="hidden_component")
+        summarised_references_markdown = gr.Markdown("", visible="hidden", elem_classes="hidden_component")
+        summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible="hidden", label="List of summarised outputs", allow_custom_value=True, elem_classes="hidden_component")
+        latest_summary_completed_num = gr.Number(0, visible="hidden", elem_classes="hidden_component")
 
-        summary_xlsx_output_files_list = gr.Dropdown(value= list(), choices= list(), visible="hidden", label="List of xlsx summary output files", allow_custom_value=True)
+        summary_xlsx_output_files_list = gr.Dropdown(value= list(), choices= list(), visible="hidden", label="List of xlsx summary output files", allow_custom_value=True, elem_classes="hidden_component")
 
-        original_data_file_name_textbox = gr.Textbox(label = "Reference data file name", value="", visible="hidden")
-        working_data_file_name_textbox = gr.Textbox(label = "Working data file name", value="", visible="hidden")
-        unique_topics_table_file_name_textbox = gr.Textbox(label="Unique topics data file name textbox", visible="hidden")
+        original_data_file_name_textbox = gr.Textbox(label = "Reference data file name", value="", visible="hidden", elem_classes="hidden_component")
+        working_data_file_name_textbox = gr.Textbox(label = "Working data file name", value="", visible="hidden", elem_classes="hidden_component")
+        unique_topics_table_file_name_textbox = gr.Textbox(label="Unique topics data file name textbox", visible="hidden", elem_classes="hidden_component")
 
-        dummy_consultation_table_textbox = gr.Textbox(value=dummy_consultation_table, visible="hidden", label="Dummy consultation table")
-        case_notes_table_textbox = gr.Textbox(value=case_notes_table, visible="hidden", label="Case notes table")
+        dummy_consultation_table_textbox = gr.Textbox(value=dummy_consultation_table, visible="hidden", label="Dummy consultation table", elem_classes="hidden_component")
+        case_notes_table_textbox = gr.Textbox(value=case_notes_table, visible="hidden", label="Case notes table", elem_classes="hidden_component")
 
-        model_name_map_state = gr.JSON(model_name_map, visible="hidden", label="model_name_map_state")
+        model_name_map_state = gr.JSON(model_name_map, visible="hidden", label="model_name_map_state", elem_classes="hidden_component")
 
         # Cost code elements
-        s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible="hidden")
-        default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible="hidden")
-        enforce_cost_code_textbox = gr.Textbox(label = "Enforce cost code textbox", value=ENFORCE_COST_CODES, visible="hidden")
-        default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible="hidden")
+        s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible="hidden", elem_classes="hidden_component")
+        default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible="hidden", elem_classes="hidden_component")
+        enforce_cost_code_textbox = gr.Textbox(label = "Enforce cost code textbox", value=ENFORCE_COST_CODES, visible="hidden", elem_classes="hidden_component")
+        default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible="hidden", elem_classes="hidden_component")
 
         # Placeholders for elements that may be made visible later below depending on environment variables
         cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(columns=['Cost code', 'Description']),  label="Cost codes", type="pandas", buttons=['fullscreen', 'copy'], show_search='filter', wrap=True, max_height=200, visible="hidden", interactive=True)
-        cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(columns=['Cost code', 'Description']), type="pandas", visible="hidden", wrap=True, interactive=True)
-        cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible="hidden")
+        cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(columns=['Cost code', 'Description']), type="pandas", visible="hidden", wrap=True, interactive=True, elem_classes="hidden_component")
+        cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible="hidden", elem_classes="hidden_component")
 
-        latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible="hidden")
+        latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible="hidden", elem_classes="hidden_component")
         # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
-        latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible="hidden")
+        latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible="hidden", elem_classes="hidden_component")
+
+
+        # Invisible text box to hold the session hash/username just for logging purposes
+        session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible="hidden", elem_classes="hidden_component") 
+        
+        estimated_time_taken_number = gr.Number(label= "Estimated time taken (seconds)", value=0.0, precision=1, visible="hidden", elem_classes="hidden_component") # This keeps track of the time taken to redact files for logging purposes.
+        total_number_of_batches = gr.Number(label = "Current batch number", value = 1, precision=0, visible="hidden", elem_classes="hidden_component")
+        
+        text_output_logs = gr.Textbox(label = "Output summary logs", visible="hidden", elem_classes="hidden_component")
 
     ###
     # UI LAYOUT
@@ -373,13 +403,7 @@ with app:
             export_xlsx_btn = gr.Button("Export output files to xlsx format", variant="primary")
             out_xlsx_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx files will go here.")
 
-        # Invisible text box to hold the session hash/username just for logging purposes
-        session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible="hidden") 
         
-        estimated_time_taken_number = gr.Number(label= "Estimated time taken (seconds)", value=0.0, precision=1, visible="hidden") # This keeps track of the time taken to redact files for logging purposes.
-        total_number_of_batches = gr.Number(label = "Current batch number", value = 1, precision=0, visible="hidden")
-        
-        text_output_logs = gr.Textbox(label = "Output summary logs", visible="hidden")
    
     ###
     # INTERACTIVE ELEMENT FUNCTIONS
@@ -756,6 +780,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER, theme = gr.themes.Default(primary_hue="blue"))
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER, theme = gr.themes.Default(primary_hue="blue"), css=css)
     else:
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER, theme = gr.themes.Default(primary_hue="blue"))
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER, theme = gr.themes.Default(primary_hue="blue"), css=css)
