@@ -31,9 +31,9 @@ in_colnames = gr.Dropdown(choices=[""], multiselect = False, label="Select the o
 if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
     context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')", visible=True)
 else:
-    context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')", visible=False)
+    context_textbox = gr.Textbox(label="Write up to one sentence giving context to the large language model for your task (e.g. 'Consultation for the construction of flats on Main Street')", visible="hidden")
 topic_extraction_output_files_xlsx = gr.File(label="Overall summary xlsx file. CSV outputs are available on the 'Advanced' tab.", scale=1, interactive=False, file_count="multiple")
-display_topic_table_markdown = gr.Markdown(value="", show_copy_button=True)
+display_topic_table_markdown = gr.Markdown(value="", buttons=['copy'])
 output_messages_textbox = gr.Textbox(value="", label="Output messages", scale=1, interactive=False, lines=4)
 candidate_topics = gr.File(height=FILE_INPUT_HEIGHT, label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.", file_count="single")
 produce_structured_summary_radio = gr.Radio(label="Ask the model to produce structured summaries using the suggested topics as headers rather than extract topics", value="No", choices=["Yes", "No"])
@@ -41,7 +41,7 @@ in_group_col = gr.Dropdown(multiselect = False, label="Select the column to grou
 batch_size_number = gr.Number(label = "Number of responses to submit in a single LLM query (batch size)", value = BATCH_SIZE_DEFAULT, precision=0, minimum=1, maximum=50)
 
 # Create the gradio interface
-app = gr.Blocks(theme = gr.themes.Default(primary_hue="blue"), fill_width=True)
+app = gr.Blocks(fill_width=True)
 
 with app:
 
@@ -49,90 +49,93 @@ with app:
     # STATE VARIABLES
     ###
 
-    text_output_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible=False, label="text_output_file_list_state")
-    text_output_modify_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible=False, label="text_output_modify_file_list_state")
-    log_files_output_list_state = gr.Dropdown(list(), allow_custom_value=True, visible=False, label="log_files_output_list_state")
-    first_loop_state = gr.Checkbox(True, visible=False)
-    second_loop_state = gr.Checkbox(False, visible=False)
-    modified_unique_table_change_bool = gr.Checkbox(True, visible=False) # This boolean is used to flag whether a file upload should change just the modified unique table object on the second tab
+    # Put initial state variables in hidden tab so they are not visible on front end
+    with gr.Tab("State variables", visible=False):
 
-    file_data_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="file_data_state", visible=False, type="pandas")
-    master_topic_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_topic_df_state", visible=False, type="pandas")
-    master_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_unique_topics_df_state", visible=False, type="pandas")
-    master_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_reference_df_state", visible=False, type="pandas")
-    missing_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="missing_df_state", visible=False, type="pandas")
+        text_output_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="text_output_file_list_state")
+        text_output_modify_file_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="text_output_modify_file_list_state")
+        log_files_output_list_state = gr.Dropdown(list(), allow_custom_value=True, visible="hidden", label="log_files_output_list_state")
+        first_loop_state = gr.Checkbox(True, visible="hidden")
+        second_loop_state = gr.Checkbox(False, visible="hidden")
+        modified_unique_table_change_bool = gr.Checkbox(True, visible="hidden") # This boolean is used to flag whether a file upload should change just the modified unique table object on the second tab
 
-    master_modify_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_modify_unique_topics_df_state", visible=False, type="pandas")
-    master_modify_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_modify_reference_df_state", visible=False, type="pandas")   
+        file_data_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="file_data_state", visible="hidden", type="pandas")
+        master_topic_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_topic_df_state", visible="hidden", type="pandas")
+        master_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_unique_topics_df_state", visible="hidden", type="pandas")
+        master_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_reference_df_state", visible="hidden", type="pandas")
+        missing_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="missing_df_state", visible="hidden", type="pandas")
 
-    # Blank placeholder for conversation metadata textbox, as logging file output can get too long for large amounts of calls
-    conversation_metadata_textbox_placeholder = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8, visible=False) 
- 
-    session_hash_state = gr.Textbox(visible=False, value=HOST_NAME)
-    output_folder_state = gr.Textbox(visible=False, value=OUTPUT_FOLDER)
-    input_folder_state = gr.Textbox(visible=False, value=INPUT_FOLDER)
+        master_modify_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_modify_unique_topics_df_state", visible="hidden", type="pandas")
+        master_modify_reference_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_modify_reference_df_state", visible="hidden", type="pandas")   
 
-    # s3 bucket name
-    s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=S3_LOG_BUCKET, visible=False)
-    s3_log_bucket_name = gr.Textbox(visible=False, value=S3_LOG_BUCKET)
-
-    # Logging variables
-    access_logs_state = gr.Textbox(label= "access_logs_state", value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME, visible=False)
-    access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible=False)
-    feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME, visible=False)
-    feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible=False)
-    usage_logs_state = gr.Textbox(label= "usage_logs_state", value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME, visible=False)
-    usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible=False)
-
-    # Logging for logged content
-    logged_content_df = gr.Dataframe(label= "logged_content_df", value=pd.DataFrame(), visible=False, type="pandas")
-
-
-    # Logging for input / output tokens
-    input_tokens_num = gr.Textbox('0', visible=False, label="Total input tokens")
-    output_tokens_num = gr.Textbox('0', visible=False, label="Total output tokens")
-    number_of_calls_num = gr.Textbox('0', visible=False, label="Total LLM calls")
+        # Blank placeholder for conversation metadata textbox, as logging file output can get too long for large amounts of calls
+        conversation_metadata_textbox_placeholder = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8, visible="hidden") 
     
-    # Additional UI components for validation
-    max_tokens_num = gr.Number(value=8192, visible=False, label="Max tokens")
-    reasoning_suffix_textbox = gr.Textbox(value="", visible=False, label="Reasoning suffix")
-    output_debug_files_radio = gr.Radio(value="False", choices=["True", "False"], visible=False, label="Output debug files")
-    max_time_for_loop_num = gr.Number(value=99999, visible=False, label="Max time for loop")
+        session_hash_state = gr.Textbox(visible="hidden", value=HOST_NAME)
+        output_folder_state = gr.Textbox(visible="hidden", value=OUTPUT_FOLDER)
+        input_folder_state = gr.Textbox(visible="hidden", value=INPUT_FOLDER)
 
-    # Summary state objects
-    summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="summary_reference_table_sample_state", visible=False, type="pandas")
-    master_reference_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_reference_df_revised_summaries_state", visible=False, type="pandas")
-    master_unique_topics_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="master_unique_topics_df_revised_summaries_state", visible=False, type="pandas")
-    summarised_output_df = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=0, row_count = (0, "dynamic"), label="summarised_output_df", visible=False, type="pandas")
-    summarised_references_markdown = gr.Markdown("", visible=False)
-    summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of summarised outputs", allow_custom_value=True)
-    latest_summary_completed_num = gr.Number(0, visible=False)
+        # s3 bucket name
+        s3_default_bucket = gr.Textbox(label = "Default S3 bucket", value=S3_LOG_BUCKET, visible="hidden")
+        s3_log_bucket_name = gr.Textbox(visible="hidden", value=S3_LOG_BUCKET)
 
-    summary_xlsx_output_files_list = gr.Dropdown(value= list(), choices= list(), visible=False, label="List of xlsx summary output files", allow_custom_value=True)
+        # Logging variables
+        access_logs_state = gr.Textbox(label= "access_logs_state", value=ACCESS_LOGS_FOLDER + LOG_FILE_NAME, visible="hidden")
+        access_s3_logs_loc_state = gr.Textbox(label= "access_s3_logs_loc_state", value=S3_ACCESS_LOGS_FOLDER, visible="hidden")
+        feedback_logs_state = gr.Textbox(label= "feedback_logs_state", value=FEEDBACK_LOGS_FOLDER + FEEDBACK_LOG_FILE_NAME, visible="hidden")
+        feedback_s3_logs_loc_state = gr.Textbox(label= "feedback_s3_logs_loc_state", value=S3_FEEDBACK_LOGS_FOLDER, visible="hidden")
+        usage_logs_state = gr.Textbox(label= "usage_logs_state", value=USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME, visible="hidden")
+        usage_s3_logs_loc_state = gr.Textbox(label= "usage_s3_logs_loc_state", value=S3_USAGE_LOGS_FOLDER, visible="hidden")
 
-    original_data_file_name_textbox = gr.Textbox(label = "Reference data file name", value="", visible=False)
-    working_data_file_name_textbox = gr.Textbox(label = "Working data file name", value="", visible=False)
-    unique_topics_table_file_name_textbox = gr.Textbox(label="Unique topics data file name textbox", visible=False)
+        # Logging for logged content
+        logged_content_df = gr.Dataframe(label= "logged_content_df", value=pd.DataFrame(), visible="hidden", type="pandas")
 
-    dummy_consultation_table_textbox = gr.Textbox(value=dummy_consultation_table, visible=False, label="Dummy consultation table")
-    case_notes_table_textbox = gr.Textbox(value=case_notes_table, visible=False, label="Case notes table")
 
-    model_name_map_state = gr.JSON(model_name_map, visible=False, label="model_name_map_state")
+        # Logging for input / output tokens
+        input_tokens_num = gr.Textbox('0', visible="hidden", label="Total input tokens")
+        output_tokens_num = gr.Textbox('0', visible="hidden", label="Total output tokens")
+        number_of_calls_num = gr.Textbox('0', visible="hidden", label="Total LLM calls")
+        
+        # Additional UI components for validation
+        max_tokens_num = gr.Number(value=8192, visible="hidden", label="Max tokens")
+        reasoning_suffix_textbox = gr.Textbox(value="", visible="hidden", label="Reasoning suffix")
+        output_debug_files_radio = gr.Radio(value="False", choices=["True", "False"], visible="hidden", label="Output debug files")
+        max_time_for_loop_num = gr.Number(value=99999, visible="hidden", label="Max time for loop")
 
-    # Cost code elements
-    s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible=False)
-    default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible=False)
-    enforce_cost_code_textbox = gr.Textbox(label = "Enforce cost code textbox", value=ENFORCE_COST_CODES, visible=False)
-    default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible=False)
+        # Summary state objects
+        summary_reference_table_sample_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="summary_reference_table_sample_state", visible="hidden", type="pandas")
+        master_reference_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_reference_df_revised_summaries_state", visible="hidden", type="pandas")
+        master_unique_topics_df_revised_summaries_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="master_unique_topics_df_revised_summaries_state", visible="hidden", type="pandas")
+        summarised_output_df = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=0,  label="summarised_output_df", visible="hidden", type="pandas")
+        summarised_references_markdown = gr.Markdown("", visible="hidden")
+        summarised_outputs_list = gr.Dropdown(value= list(), choices= list(), visible="hidden", label="List of summarised outputs", allow_custom_value=True)
+        latest_summary_completed_num = gr.Number(0, visible="hidden")
 
-    # Placeholders for elements that may be made visible later below depending on environment variables
-    cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', wrap=True, max_height=200, visible=False)
-    cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(), type="pandas", visible=False, wrap=True)
-    cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=False)
+        summary_xlsx_output_files_list = gr.Dropdown(value= list(), choices= list(), visible="hidden", label="List of xlsx summary output files", allow_custom_value=True)
 
-    latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
-    # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
-    latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible=False)
+        original_data_file_name_textbox = gr.Textbox(label = "Reference data file name", value="", visible="hidden")
+        working_data_file_name_textbox = gr.Textbox(label = "Working data file name", value="", visible="hidden")
+        unique_topics_table_file_name_textbox = gr.Textbox(label="Unique topics data file name textbox", visible="hidden")
+
+        dummy_consultation_table_textbox = gr.Textbox(value=dummy_consultation_table, visible="hidden", label="Dummy consultation table")
+        case_notes_table_textbox = gr.Textbox(value=case_notes_table, visible="hidden", label="Case notes table")
+
+        model_name_map_state = gr.JSON(model_name_map, visible="hidden", label="model_name_map_state")
+
+        # Cost code elements
+        s3_default_cost_codes_file = gr.Textbox(label = "Default cost centre file", value=S3_COST_CODES_PATH, visible="hidden")
+        default_cost_codes_output_folder_location = gr.Textbox(label = "Output default cost centre location", value=OUTPUT_COST_CODES_PATH, visible="hidden")
+        enforce_cost_code_textbox = gr.Textbox(label = "Enforce cost code textbox", value=ENFORCE_COST_CODES, visible="hidden")
+        default_cost_code_textbox = gr.Textbox(label = "Default cost code textbox", value=DEFAULT_COST_CODE, visible="hidden")
+
+        # Placeholders for elements that may be made visible later below depending on environment variables
+        cost_code_dataframe_base = gr.Dataframe(value=pd.DataFrame(columns=['Cost code', 'Description']),  label="Cost codes", type="pandas", buttons=['fullscreen', 'copy'], show_search='filter', wrap=True, max_height=200, visible="hidden", interactive=True)
+        cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(columns=['Cost code', 'Description']), type="pandas", visible="hidden", wrap=True, interactive=True)
+        cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis. Please contact Finance if you can't find your cost code in the given list.", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible="hidden")
+
+        latest_batch_completed = gr.Number(value=0, label="Number of files prepared", interactive=False, visible="hidden")
+        # Duplicate version of the above variable for when you don't want to initiate the summarisation loop
+        latest_batch_completed_no_loop = gr.Number(value=0, label="Number of files prepared", interactive=False, visible="hidden")
 
     ###
     # UI LAYOUT
@@ -180,7 +183,7 @@ with app:
         with gr.Accordion("Upload xlsx, csv, or parquet file", open = True):
             in_data_files.render()
         
-            in_excel_sheets = gr.Dropdown(multiselect = False, label="Select the Excel sheet of interest.", visible=False, allow_custom_value=True)
+            in_excel_sheets = gr.Dropdown(multiselect = False, label="Select the Excel sheet of interest.", visible="hidden", allow_custom_value=True)
             in_colnames.render()
 
         with gr.Accordion("Group analysis by values in another column", open=False):
@@ -202,7 +205,7 @@ with app:
                 with gr.Row(equal_height=True):
                     with gr.Column():
                         with gr.Accordion("Cost code table", open = False, visible=True):
-                            cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(), row_count = (0, "dynamic"), label="Existing cost codes", type="pandas", interactive=True, show_fullscreen_button=True, show_copy_button=True, show_search='filter', visible=True, wrap=True, max_height=200)
+                            cost_code_dataframe = gr.Dataframe(value=pd.DataFrame(),  label="Existing cost codes", type="pandas", interactive=True, buttons=['fullscreen', 'copy'], show_search='filter', visible=True, wrap=True, max_height=200)
                             reset_cost_code_dataframe_button = gr.Button(value="Reset code code table filter")
                     with gr.Column():                    
                         cost_code_choice_drop = gr.Dropdown(value=DEFAULT_COST_CODE, label="Choose cost code for analysis", choices=[DEFAULT_COST_CODE], allow_custom_value=False, visible=True)
@@ -216,14 +219,14 @@ with app:
 
         display_topic_table_markdown.render()
         
-        data_feedback_title = gr.Markdown(value="## Please give feedback", visible=False)
+        data_feedback_title = gr.Markdown(value="## Please give feedback", visible="hidden")
         data_feedback_radio = gr.Radio(label="Please give some feedback about the results of the topic extraction.",
-                choices=["The results were good", "The results were not good"], visible=False)
-        data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible=False)
-        data_submit_feedback_btn = gr.Button(value="Submit feedback", visible=False)
+                choices=["The results were good", "The results were not good"], visible="hidden")
+        data_further_details_text = gr.Textbox(label="Please give more detailed feedback about the results:", visible="hidden")
+        data_submit_feedback_btn = gr.Button(value="Submit feedback", visible="hidden")
 
         with gr.Row():
-            s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible=False)
+            s3_logs_output_textbox = gr.Textbox(label="Feedback submission logs", visible="hidden")
 
     with gr.Tab(label="Advanced - Step by step topic extraction and summarisation"):
 
@@ -232,7 +235,7 @@ with app:
             if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
                 additional_summary_instructions_textbox = gr.Textbox(value="", visible=True, label="Additional summary instructions")
             else:
-                additional_summary_instructions_textbox = gr.Textbox(value="", visible=False, label="Additional summary instructions")
+                additional_summary_instructions_textbox = gr.Textbox(value="", visible="hidden", label="Additional summary instructions")
 
             extract_topics_btn = gr.Button("1. Extract topics", variant="secondary")
             topic_extraction_output_files = gr.File(label="Extract topics output files", scale=1, interactive=True, height=FILE_INPUT_HEIGHT, file_count="multiple")
@@ -244,8 +247,8 @@ with app:
                     additional_validation_issues_textbox = gr.Textbox(value="", visible=True, label="Additional validation issues for the model to consider (bullet-point list)", scale=3)
             else:
                 with gr.Row():
-                    show_previous_table_radio = gr.Radio(label="Provide response data to validation process", value="Yes", choices=["Yes", "No"], visible=False, scale=1)
-                    additional_validation_issues_textbox = gr.Textbox(value="", visible=False, label="Additional validation issues for the model to consider (bullet-point list)", scale=3)
+                    show_previous_table_radio = gr.Radio(label="Provide response data to validation process", value="Yes", choices=["Yes", "No"], visible="hidden", scale=1)
+                    additional_validation_issues_textbox = gr.Textbox(value="", visible="hidden", label="Additional validation issues for the model to consider (bullet-point list)", scale=3)
             validate_topics_btn = gr.Button("1b. Validate topics", variant="secondary")
             validation_output_files = gr.File(label="Validation output files", scale=1, interactive=False, height=FILE_INPUT_HEIGHT)
 
@@ -254,14 +257,14 @@ with app:
 
             modification_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload reference and unique topic files to modify topics", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
-            modifiable_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, col_count=(4, "fixed"), row_count = (1, "fixed"), visible=True, type="pandas")
+            modifiable_unique_topics_df_state = gr.Dataframe(value=pd.DataFrame(), headers=None, column_count=(4, "fixed"), row_count = (1, "fixed"), visible=True, type="pandas")
 
             save_modified_files_button = gr.Button(value="Save modified topic names")
 
         with gr.Accordion("3. Deduplicate topics using fuzzy matching or LLMs", open = False):            
             ### DEDUPLICATION
             deduplication_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload reference and unique topic files to deduplicate topics. Optionally upload suggested topics on the first tab to match to these where possible with LLM deduplication", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
-            deduplication_input_files_status = gr.Textbox(value = "", label="Previous file input", visible=False)
+            deduplication_input_files_status = gr.Textbox(value = "", label="Previous file input", visible="hidden")
 
             with gr.Row():
                 merge_general_topics_drop = gr.Dropdown(label="Merge general topic values together for duplicate subtopics.", value="Yes", choices=["Yes", "No"])
@@ -288,7 +291,7 @@ with app:
                 summary_output_files = gr.File(height=FILE_INPUT_HEIGHT, label="Summarised output files", interactive=False, scale=3)
                 summary_output_files_xlsx = gr.File(height=FILE_INPUT_HEIGHT, label="xlsx file summary", interactive=False, scale=1)
 
-            summarised_output_markdown = gr.Markdown(value="### Summarised table will appear here", show_copy_button=True)
+            summarised_output_markdown = gr.Markdown(value="### Summarised table will appear here", buttons=['copy'])
 
         with gr.Accordion("5. Create overall summary", open = False):
             gr.Markdown("""### Create an overall summary from an existing topic summary table.""")
@@ -296,7 +299,7 @@ with app:
             ### SUMMARISATION
             overall_summarisation_input_files = gr.File(height=FILE_INPUT_HEIGHT, label="Upload a '...unique_topic' file to summarise", file_count= "multiple", file_types=['.xlsx', '.xls', '.csv', '.parquet'])
 
-            overall_summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt], visible=False) # This is currently an invisible placeholder in case in future I want to add in overall summarisation customisation
+            overall_summarise_format_radio = gr.Radio(label="Choose summary type", value=two_para_summary_format_prompt, choices=[two_para_summary_format_prompt, single_para_summary_format_prompt], visible="hidden") # This is currently an invisible placeholder in case in future I want to add in overall summarisation customisation
             
             overall_summarise_previous_data_btn = gr.Button("5. Create overall summary", variant="primary")
 
@@ -306,13 +309,13 @@ with app:
             
             overall_summarised_output_markdown = gr.HTML(value="### Overall summary will appear here")
     
-    with gr.Tab(label="Topic table viewer", visible=False):
+    with gr.Tab(label="Topic table viewer", visible="hidden"):
         gr.Markdown("""### View a 'unique_topic_table' csv file in markdown format.""")
     
         in_view_table = gr.File(height=FILE_INPUT_HEIGHT, label="Choose unique topic csv files", file_count= "single", file_types=['.csv', '.parquet'])
-        view_table_markdown = gr.Markdown(value = "", label="View table", show_copy_button=True)
+        view_table_markdown = gr.Markdown(value = "", label="View table", buttons=['copy'])
 
-    with gr.Tab(label="Continue unfinished topic extraction", visible=False):
+    with gr.Tab(label="Continue unfinished topic extraction", visible="hidden"):
         gr.Markdown("""### Load in output files from a previous topic extraction process and continue topic extraction with new data.""")
 
         with gr.Accordion("Upload reference data file and unique data files", open = True):
@@ -326,7 +329,7 @@ with app:
             with gr.Row():
                 temperature_slide = gr.Slider(minimum=0.0, maximum=1.0, value=LLM_TEMPERATURE, label="Choose LLM temperature setting", precision=1, step=0.1)
                 batch_size_number.render()
-            random_seed = gr.Number(value=LLM_SEED, label="Random seed for LLM generation", visible=False)
+            random_seed = gr.Number(value=LLM_SEED, label="Random seed for LLM generation", visible="hidden")
 
         with gr.Accordion("AWS API keys", open = False):
             gr.Markdown("""Querying Bedrock models with API keys requires a role with IAM permissions for the bedrock:InvokeModel action.""")
@@ -352,8 +355,8 @@ with app:
             log_files_output = gr.File(height=FILE_INPUT_HEIGHT, label="Log file output", interactive=False)
             conversation_metadata_textbox = gr.Textbox(value="", label="Query metadata - usage counts and other parameters", lines=8)
 
-        with gr.Accordion("Prompt settings", open = False, visible=False):
-            number_of_prompts = gr.Number(value=1, label="Number of prompts to send to LLM in sequence", minimum=1, maximum=3, visible=False)
+        with gr.Accordion("Prompt settings", open = False, visible="hidden"):
+            number_of_prompts = gr.Number(value=1, label="Number of prompts to send to LLM in sequence", minimum=1, maximum=3, visible="hidden")
             system_prompt_textbox = gr.Textbox(label="Initial system prompt", lines = 4, value = system_prompt)
             initial_table_prompt_textbox = gr.Textbox(label = "Initial topics prompt", lines = 8, value = initial_table_prompt)
             add_to_existing_topics_system_prompt_textbox = gr.Textbox(label="Additional topics system prompt", lines = 4, value = add_existing_topics_system_prompt)
@@ -366,17 +369,17 @@ with app:
                 join_cols_btn = gr.Button("Join columns to reference output", variant="primary")
             out_join_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output joined reference files will go here.")
 
-        with gr.Accordion("Export output files to xlsx format", open = False, visible=False):
+        with gr.Accordion("Export output files to xlsx format", open = False, visible="hidden"):
             export_xlsx_btn = gr.Button("Export output files to xlsx format", variant="primary")
             out_xlsx_files = gr.File(height=FILE_INPUT_HEIGHT, label="Output xlsx files will go here.")
 
         # Invisible text box to hold the session hash/username just for logging purposes
-        session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible=False) 
+        session_hash_textbox = gr.Textbox(label = "Session hash", value="", visible="hidden") 
         
-        estimated_time_taken_number = gr.Number(label= "Estimated time taken (seconds)", value=0.0, precision=1, visible=False) # This keeps track of the time taken to redact files for logging purposes.
-        total_number_of_batches = gr.Number(label = "Current batch number", value = 1, precision=0, visible=False)
+        estimated_time_taken_number = gr.Number(label= "Estimated time taken (seconds)", value=0.0, precision=1, visible="hidden") # This keeps track of the time taken to redact files for logging purposes.
+        total_number_of_batches = gr.Number(label = "Current batch number", value = 1, precision=0, visible="hidden")
         
-        text_output_logs = gr.Textbox(label = "Output summary logs", visible=False)
+        text_output_logs = gr.Textbox(label = "Output summary logs", visible="hidden")
    
     ###
     # INTERACTIVE ELEMENT FUNCTIONS
@@ -692,8 +695,8 @@ with app:
     # LLM SETTINGS PAGE
     ###
 
-    reference_df_data_file_name_textbox = gr.Textbox(label="reference_df_data_file_name_textbox", visible=False)
-    master_reference_df_state_joined = gr.Dataframe(visible=False)
+    reference_df_data_file_name_textbox = gr.Textbox(label="reference_df_data_file_name_textbox", visible="hidden")
+    master_reference_df_state_joined = gr.Dataframe(visible="hidden")
 
     join_cols_btn.click(fn=load_in_previous_reference_file, inputs=[in_join_files], outputs=[master_reference_df_state, reference_df_data_file_name_textbox]).\
     success(load_in_data_file,                           
@@ -753,6 +756,6 @@ with app:
 
 if __name__ == "__main__":
     if COGNITO_AUTH == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, auth=authenticate_user, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER, theme = gr.themes.Default(primary_hue="blue"))
     else:
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER)
+        app.queue(max_size=MAX_QUEUE_SIZE).launch(show_error=True, inbrowser=True, max_file_size=MAX_FILE_SIZE, server_port=GRADIO_SERVER_PORT, root_path=ROOT_PATH, mcp_server=RUN_MCP_SERVER, theme = gr.themes.Default(primary_hue="blue"))
