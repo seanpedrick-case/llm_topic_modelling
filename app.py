@@ -57,14 +57,12 @@ div[class*="tab-nav"] button {
 }
 """
 
-# /* Completely hide elements with the class 'hidden_component' from view */
-# .hidden_component {
-#     display: none !important;
-#     visibility: hidden !important;
-# }
-
 # Create the gradio interface
-app = gr.Blocks(fill_width=True)
+app = gr.Blocks(fill_width=True,
+    analytics_enabled=False,
+    title="LLM topic modelling",
+    delete_cache=(43200, 43200),
+    )
 
 with app:
 

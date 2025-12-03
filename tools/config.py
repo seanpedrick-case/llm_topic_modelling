@@ -261,7 +261,6 @@ model_short_names = list()
 model_source = list()
 
 CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Qwen 3 4B") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
-print("CHOSEN_LOCAL_MODEL_TYPE:", CHOSEN_LOCAL_MODEL_TYPE)
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
@@ -269,9 +268,9 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_source.append("Local")
 
 if RUN_AWS_BEDROCK_MODELS == "1":
-    amazon_models = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0", "anthropic.claude-sonnet-4-5-20250929-v1:0", "amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0",  "deepseek.v3-v1:0", "openai.gpt-oss-20b-1:0", "openai.gpt-oss-120b-1:0"]
+    amazon_models = ["anthropic.claude-3-haiku-20240307-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0", "anthropic.claude-sonnet-4-5-20250929-v1:0", "amazon.nova-micro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-pro-v1:0",  "deepseek.v3-v1:0", "openai.gpt-oss-20b-1:0", "openai.gpt-oss-120b-1:0", "google.gemma-3-12b-it", "mistral.ministral-3-14b-instruct"]
     model_full_names.extend(amazon_models)
-    model_short_names.extend(["haiku", "sonnet_3_7", "sonnet_4_5", "nova_micro", "nova_lite", "nova_pro", "deepseek_v3", "gpt_oss_20b_aws", "gpt_oss_120b_aws"])
+    model_short_names.extend(["haiku", "sonnet_3_7", "sonnet_4_5", "nova_micro", "nova_lite", "nova_pro", "deepseek_v3", "gpt_oss_20b_aws", "gpt_oss_120b_aws", "gemma_3_12b_it", "ministral_3_14b_instruct"])
     model_source.extend(["AWS"] * len(amazon_models))
 
 if RUN_GEMINI_MODELS == "1":
@@ -437,9 +436,6 @@ else:
     LOCAL_REPO_ID = ""
     LOCAL_MODEL_FILE = ""
     LOCAL_MODEL_FOLDER = ""
-
-print("LOCAL_REPO_ID:", LOCAL_REPO_ID)
-
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
 
