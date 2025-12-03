@@ -16,6 +16,7 @@ feedback/*
 test_code/*
 unsloth_compiled_cache/*
 .vscode/*
+llm_topic_modelling.egg-info/*
 input/
 output/
 logs/

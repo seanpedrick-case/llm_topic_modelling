@@ -261,6 +261,7 @@ model_short_names = list()
 model_source = list()
 
 CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var("CHOSEN_LOCAL_MODEL_TYPE", "Qwen 3 4B") # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
+print("CHOSEN_LOCAL_MODEL_TYPE:", CHOSEN_LOCAL_MODEL_TYPE)
 
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
@@ -329,6 +330,8 @@ LOAD_LOCAL_MODEL_AT_START = get_or_create_env_var('LOAD_LOCAL_MODEL_AT_START', '
 # If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
 LOW_VRAM_SYSTEM = get_or_create_env_var('LOW_VRAM_SYSTEM', 'False')
 
+MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
+
 if LOW_VRAM_SYSTEM == 'True':
     print("Using settings for low VRAM system")
     USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True')
@@ -340,6 +343,10 @@ if LOW_VRAM_SYSTEM == 'True':
 
 USE_LLAMA_CPP = get_or_create_env_var('USE_LLAMA_CPP', 'True') # Llama.cpp or transformers with unsloth
 
+LOCAL_REPO_ID = get_or_create_env_var("LOCAL_REPO_ID", "")
+LOCAL_MODEL_FILE = get_or_create_env_var("LOCAL_MODEL_FILE", "")
+LOCAL_MODEL_FOLDER = get_or_create_env_var("LOCAL_MODEL_FOLDER", "")
+
 GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
 GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit")
 if USE_LLAMA_CPP == "False": GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
@@ -347,7 +354,7 @@ GEMMA2_MODEL_FILE = get_or_create_env_var("GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it
 GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
 
 GEMMA3_4B_REPO_ID = get_or_create_env_var("GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF")
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "https://huggingface.co/unsloth/gemma-3-4b-it-bnb-4bit" )
+GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var("GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-bnb-4bit" )
 if USE_LLAMA_CPP == "False":  GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
 GEMMA3_4B_MODEL_FILE = get_or_create_env_var("GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf")
 GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var("GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b")
@@ -392,11 +399,13 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     LOCAL_REPO_ID = GEMMA3_4B_REPO_ID
     LOCAL_MODEL_FILE = GEMMA3_4B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
 
 elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 12B":
     LOCAL_REPO_ID = GEMMA3_12B_REPO_ID
     LOCAL_MODEL_FILE = GEMMA3_12B_MODEL_FILE
     LOCAL_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
 
 elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
     LOCAL_REPO_ID = QWEN3_4B_REPO_ID
@@ -419,9 +428,17 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Granite 4 Micro":
     LOCAL_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
 
 elif not CHOSEN_LOCAL_MODEL_TYPE:
+    print("No local model type chosen")
     LOCAL_REPO_ID = ""
     LOCAL_MODEL_FILE = ""
     LOCAL_MODEL_FOLDER = ""
+else:
+    print("CHOSEN_LOCAL_MODEL_TYPE not found")
+    LOCAL_REPO_ID = ""
+    LOCAL_MODEL_FILE = ""
+    LOCAL_MODEL_FOLDER = ""
+
+print("LOCAL_REPO_ID:", LOCAL_REPO_ID)
 
 
 USE_SPECULATIVE_DECODING = get_or_create_env_var("USE_SPECULATIVE_DECODING", "False")
@@ -456,7 +473,7 @@ LLM_BATCH_SIZE = int(get_or_create_env_var('LLM_BATCH_SIZE', '2048'))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var('LLM_CONTEXT_LENGTH', '24576'))
 LLM_SAMPLE = get_or_create_env_var('LLM_SAMPLE', 'True')
 LLM_STOP_STRINGS = get_or_create_env_var('LLM_STOP_STRINGS', r"['\n\n\n\n\n\n']")
-MULTIMODAL_PROMPT_FORMAT = get_or_create_env_var('MULTIMODAL_PROMPT_FORMAT', 'False')
+
 SPECULATIVE_DECODING = get_or_create_env_var('SPECULATIVE_DECODING', 'False')
 NUM_PRED_TOKENS = int(get_or_create_env_var('NUM_PRED_TOKENS', '2'))
 K_QUANT_LEVEL = get_or_create_env_var('K_QUANT_LEVEL', '')  # 2 = q4_0, 8 = q8_0, 4 = fp16
