@@ -616,7 +616,7 @@ def validate_topics_wrapper(
     if file_data.empty:
         print("No data table found, loading from file")
         try:
-            in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_files)
+            in_colnames_drop, in_excel_sheets, file_name, join_colnames, join_colnames_drop = put_columns_in_df(in_data_files)
             file_data, file_name, num_batches = load_in_data_file(in_data_files, chosen_cols, batch_size_default, in_excel_sheets)
         except:
             # Check if files and text exist
@@ -1786,7 +1786,7 @@ def extract_topics(in_data_file: gr.FileData,
     if file_data.empty:
         print("No data table found, loading from file")
         try:
-            in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_file)
+            in_colnames_drop, in_excel_sheets, file_name, join_colnames, join_colnames_drop = put_columns_in_df(in_data_file)
             file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default, in_excel_sheets)
         except:
             # Check if files and text exist
@@ -2434,7 +2434,7 @@ def wrapper_extract_topics_per_column_value(
     if file_data.empty:
         print("No data table found, loading from file")
         try:
-            in_colnames_drop, in_excel_sheets, file_name = put_columns_in_df(in_data_file)
+            in_colnames_drop, in_excel_sheets, file_name, join_colnames, join_colnames_drop = put_columns_in_df(in_data_file)
             file_data, file_name, num_batches = load_in_data_file(in_data_file, chosen_cols, batch_size_default, in_excel_sheets)
         except:
             # Check if files and text exist

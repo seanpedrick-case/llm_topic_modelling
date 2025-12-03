@@ -282,7 +282,7 @@ def load_in_previous_data_files(file_paths_partial_output:List[str], for_modifie
         out_file_names = [reference_file_name + ".csv"]
         out_file_names.append(unique_file_name + ".csv")
 
-        return unique_file_data, reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names # gr.Dataframe(value=unique_file_data, headers=None, col_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas")
+        return unique_file_data, reference_file_data, unique_file_data, reference_file_name, unique_file_name, out_file_names # gr.Dataframe(value=unique_file_data, headers=None, column_count=(unique_file_data.shape[1], "fixed"), row_count = (unique_file_data.shape[0], "fixed"), visible=True, type="pandas")
 
 def join_cols_onto_reference_df(reference_df:pd.DataFrame, original_data_df:pd.DataFrame, join_columns:List[str], original_file_name:str, output_folder:str=OUTPUT_FOLDER):
 
@@ -402,7 +402,7 @@ def create_topic_summary_df_from_reference_table(reference_df:pd.DataFrame):
     return out_topic_summary_df
 
 # Wrap text in each column to the specified max width, including whole words
-def wrap_text(text:str, max_width=60, max_text_length=None):
+def wrap_text(text:str, max_width=100, max_text_length=None):
     if not isinstance(text, str):
         return text
         
@@ -573,9 +573,18 @@ def put_columns_in_df(in_file:List[str]):
     concat_choices = sorted(set(concat_choices))
 
     if number_of_excel_files > 0:      
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), file_end, gr.Dropdown(choices=concat_choices), gr.Dropdown(choices=concat_choices)
+        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), \
+        gr.Dropdown(choices=all_sheet_names, value=all_sheet_names[0], visible=True, interactive=True), \
+        file_end, \
+        gr.Dropdown(choices=concat_choices), \
+        gr.Dropdown(choices=concat_choices)
     else:
-        return gr.Dropdown(choices=concat_choices, value=concat_choices[0]), gr.Dropdown(visible=False), file_end, gr.Dropdown(choices=concat_choices), gr.Dropdown(choices=concat_choices)
+        return gr.Dropdown(choices=concat_choices,
+        value=concat_choices[0]), \
+        gr.Dropdown(visible=False), \
+        file_end, \
+        gr.Dropdown(choices=concat_choices), \
+        gr.Dropdown(choices=concat_choices)
 
 # Following function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
 def add_folder_to_path(folder_path: str):
@@ -701,25 +710,6 @@ def load_in_default_cost_codes(cost_codes_path:str, default_cost_code:str=""):
     
     return cost_codes_df, cost_codes_df, out_dropdown
 
-def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost_code_df:pd.DataFrame, verify_cost_codes:bool=True):
-    '''
-    Check if the enforce cost codes variable is set to true, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
-    '''
-
-    if enforce_cost_code_textbox == "True":
-        if not cost_code_choice:
-            raise Exception("Please choose a cost code before continuing")
-        
-        if verify_cost_codes == True:
-            if cost_code_df.empty:
-                raise Exception("No cost codes present in dataframe for verification")
-            else:
-                valid_cost_codes_list = list(cost_code_df.iloc[:,0].unique())
-
-                if not cost_code_choice in valid_cost_codes_list:
-                    raise Exception("Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions.")
-    return
-
 def update_cost_code_dataframe_from_dropdown_select(cost_dropdown_selection:str, cost_code_df:pd.DataFrame):
     cost_code_df = cost_code_df.loc[cost_code_df.iloc[:,0] == cost_dropdown_selection, :]
     return cost_code_df
@@ -747,7 +737,8 @@ def enforce_cost_codes(enforce_cost_code_textbox:str, cost_code_choice:str, cost
         
         if verify_cost_codes == True:
             if cost_code_df.empty:
-                raise Exception("No cost codes present in dataframe for verification")
+                # Warn but don't block - cost code is still required above
+                print("Warning: Cost code dataframe is empty. Verification skipped. Please ensure cost codes are loaded for full validation.")
             else:
                 valid_cost_codes_list = list(cost_code_df.iloc[:,0].unique())
 

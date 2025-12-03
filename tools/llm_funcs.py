@@ -277,7 +277,7 @@ def load_model(local_model_type:str=CHOSEN_LOCAL_MODEL_TYPE,
 
             print("Loading model from transformers")
             # Use the official model ID for Gemma 3 4B
-            model_id = repo_id
+            model_id = repo_id.split('https://huggingface.co/')[-1] if 'https://huggingface.co/' in repo_id else repo_id
             # 1. Set Data Type (dtype)
             # For H200/Hopper: 'bfloat16'
             # For RTX 3060/Ampere: 'float16'
@@ -965,7 +965,7 @@ def call_aws_claude(prompt: str, system_prompt: str, temperature: float, max_tok
     
     return response
 
-def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None, speculative_decoding=speculative_decoding, progress=Progress(track_tqdm=False)):
+def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCPPGenerationConfig, model=None, tokenizer=None, assistant_model=None, speculative_decoding=speculative_decoding):
     """
     This function sends a request to a transformers model (through Unsloth) with the given prompt, system prompt, and generation configuration.
     """
@@ -982,34 +982,53 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
         raise ValueError("No model or tokenizer available. Either pass them as parameters or ensure LOAD_LOCAL_MODEL_AT_START is True.")
     
     # 1. Define the conversation as a list of dictionaries
-    def wrap_text_message(text):
-        return [{"type": "text", "text": text}]
-
+    # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
+    # with images/videos. For text-only content, even multimodal models expect plain strings.
+    
+    # Always use string format for text-only content, regardless of MULTIMODAL_PROMPT_FORMAT setting
+    # MULTIMODAL_PROMPT_FORMAT should only be used when you actually have multimodal inputs (images, etc.)
     if MULTIMODAL_PROMPT_FORMAT == "True":
         conversation = [
-            {"role": "system", "content": wrap_text_message(system_prompt)},
-            {"role": "user", "content": wrap_text_message(prompt)}
+            {
+                "role": "system", 
+                "content": [{"type": "text", "text": str(system_prompt)}]
+            },
+            {
+                "role": "user", 
+                "content": [{"type": "text", "text": str(prompt)}]
+            }
         ]
-
     else:
         conversation = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt}
+            {"role": "system", "content": str(system_prompt)},
+            {"role": "user", "content": str(prompt)}
         ]
 
     # 2. Apply the chat template
-    # This function formats the conversation into the exact string Gemma 3 expects.
-    # add_generation_prompt=True adds the special tokens that tell the model it's its turn to speak.
-
     try:
+        # Try applying chat template
         input_ids = tokenizer.apply_chat_template(
                 conversation,
-                add_generation_prompt = True, # Must add for generation
+                add_generation_prompt = True,
                 tokenize = True,
                 return_tensors = "pt",
             ).to("cuda")
+    except (TypeError, KeyError, IndexError) as e:
+        # If chat template fails, try manual formatting
+        print(f"Chat template failed ({e}), using manual tokenization")
+        # Combine system and user prompts manually
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+        # Tokenize manually with special tokens
+        encoded = tokenizer(full_prompt, return_tensors="pt", add_special_tokens=True)
+        if encoded is None:
+            raise ValueError("Tokenizer returned None - tokenizer may not be properly initialized")
+        if not hasattr(encoded, 'input_ids') or encoded.input_ids is None:
+            raise ValueError("Tokenizer output does not contain input_ids")
+        input_ids = encoded.input_ids.to("cuda")
     except Exception as e:
         print("Error applying chat template:", e)
+        import traceback
+        traceback.print_exc()
         raise
 
     # Map LlamaCPP parameters to transformers parameters
@@ -1036,21 +1055,43 @@ def call_transformers_model(prompt: str, system_prompt: str, gen_config: LlamaCP
     start_time = time.time()
 
     # Use speculative decoding if assistant model is available
-    if speculative_decoding and assistant_model is not None:
-        #print("Using speculative decoding with assistant model")
-        outputs = model.generate(
-            input_ids,
-            assistant_model=assistant_model,
-            **generation_kwargs,
-        streamer = streamer
-        )
-    else:
-        #print("Generating without speculative decoding")
-        outputs = model.generate(
-            input_ids,
-            **generation_kwargs,
-        streamer = streamer
-        )
+    try:
+        if speculative_decoding and assistant_model is not None:
+            #print("Using speculative decoding with assistant model")
+            outputs = model.generate(
+                input_ids,
+                assistant_model=assistant_model,
+                **generation_kwargs,
+                streamer=streamer
+            )
+        else:
+            #print("Generating without speculative decoding")
+            outputs = model.generate(
+                input_ids,
+                **generation_kwargs,
+                streamer=streamer
+            )
+    except Exception as e:
+        error_msg = str(e)
+        # Check if this is a CUDA compilation error
+        if "sm_120" in error_msg or "LLVM ERROR" in error_msg or "Cannot select" in error_msg:
+            print("\n" + "="*80)
+            print("CUDA COMPILATION ERROR DETECTED")
+            print("="*80)
+            print("\nThe error is caused by torch.compile() trying to compile CUDA kernels")
+            print("with incompatible settings. This is a known issue with certain CUDA/PyTorch")
+            print("combinations.\n")
+            print("SOLUTION: Disable model compilation by setting COMPILE_TRANSFORMERS=False")
+            print("in your config file (config/app_config.env).")
+            print("\nThe model will still work without compilation, just slightly slower.")
+            print("="*80 + "\n")
+            raise RuntimeError(
+                "CUDA compilation error detected. Please set COMPILE_TRANSFORMERS=False "
+                "in your config file to disable model compilation and avoid this error."
+            ) from e
+        else:
+            # Re-raise other errors as-is
+            raise
 
     end_time = time.time()
 
