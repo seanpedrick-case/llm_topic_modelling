@@ -154,6 +154,7 @@ FEEDBACK_LOGS_FOLDER = get_or_create_env_var('FEEDBACK_LOGS_FOLDER', 'feedback/'
 ACCESS_LOGS_FOLDER = get_or_create_env_var('ACCESS_LOGS_FOLDER', 'logs/')
 USAGE_LOGS_FOLDER = get_or_create_env_var('USAGE_LOGS_FOLDER', 'usage/')
 
+# Initialize full_log_subfolder based on USE_LOG_SUBFOLDERS setting
 if USE_LOG_SUBFOLDERS == "True":
     day_log_subfolder = today_rev + '/'
     host_name_subfolder = HOST_NAME + '/'
@@ -162,6 +163,8 @@ if USE_LOG_SUBFOLDERS == "True":
     FEEDBACK_LOGS_FOLDER = FEEDBACK_LOGS_FOLDER + full_log_subfolder
     ACCESS_LOGS_FOLDER = ACCESS_LOGS_FOLDER + full_log_subfolder
     USAGE_LOGS_FOLDER = USAGE_LOGS_FOLDER + full_log_subfolder
+else:
+    full_log_subfolder = ''  # Empty string when subfolders are not used
 
 S3_FEEDBACK_LOGS_FOLDER = get_or_create_env_var('S3_FEEDBACK_LOGS_FOLDER', 'feedback/' + full_log_subfolder)
 S3_ACCESS_LOGS_FOLDER = get_or_create_env_var('S3_ACCESS_LOGS_FOLDER', 'logs/' + full_log_subfolder)
