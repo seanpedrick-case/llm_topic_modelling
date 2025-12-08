@@ -91,7 +91,7 @@ NOTE: Alternatively you could also create and activate a Conda environment inste
 
 ### Step 3: Install Dependencies
 
-Now that your virtual environment is active, you can install all the required packages . Here you have two options, install from the pyproject.toml file (recommended), or install from requirements files.
+Now that your virtual environment is active, you can install all the required packages. Here you have two options, install from the pyproject.toml file (recommended), or install from requirements files.
 
 1. **Install from pyproject.toml (recommended)**
 

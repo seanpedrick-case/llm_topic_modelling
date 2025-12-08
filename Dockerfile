@@ -1,6 +1,6 @@
-# This Dockerfile is optimised for AWS ECS using Python 3.12, and assumes CPU inference with OpenBLAS for local models.
+# This Dockerfile is optimised for AWS ECS using Python 3.11, and assumes CPU inference with OpenBLAS for local models.
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.11.13-slim-trixie AS builder
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -17,22 +17,34 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /src
 
-COPY requirements_no_local.txt .
+COPY requirements_lightweight.txt .
 
 # Set environment variables for OpenBLAS - not necessary if not building from source
 # ENV OPENBLAS_VERBOSE=1
 # ENV CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS"
 
-RUN pip install --no-cache-dir --target=/install torch==2.9.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu \
-&& pip install --no-cache-dir --target=/install https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl \
-&& pip install --no-cache-dir --target=/install -r requirements_lightweight.txt
+ARG INSTALL_TORCH=False
+ENV INSTALL_TORCH=${INSTALL_TORCH}
 
-RUN rm requirements_no_local.txt
+RUN if [ "$INSTALL_TORCH" = "True" ]; then \
+    pip install --no-cache-dir --target=/install torch==2.9.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu; \
+    fi
+
+ARG INSTALL_LLAMA_CPP_PYTHON=False
+ENV INSTALL_LLAMA_CPP_PYTHON=${INSTALL_LLAMA_CPP_PYTHON}
+
+RUN if [ "$INSTALL_LLAMA_CPP_PYTHON" = "True" ]; then \
+    pip install --no-cache-dir --target=/install https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl; \
+    fi
+
+RUN pip install --no-cache-dir --target=/install -r requirements_lightweight.txt
+
+RUN rm requirements_lightweight.txt
 
 # ===================================================================
 # Stage 2: A common 'base' for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.11.13-slim-trixie AS base
 
 # Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
@@ -66,7 +78,7 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     SYSTEM=spaces
 
 # Copy Python packages from the builder stage
-COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Copy your application code and entrypoint
