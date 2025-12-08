@@ -653,108 +653,160 @@ with app:
                 "Example data loaded. Now click on the 'Extract topics...' button below to run the full suite of topic extraction, deduplication, and summarisation."
             )
 
-        examples = gr.Examples(
-            examples=[
-                [
-                    ["example_data/dummy_consultation_response.csv"],
-                    "Response text",
-                    "Consultation for the construction of flats on Main Street",
-                    "dummy_consultation_response.csv",
-                    [
-                        "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"
+        # Check if required example files exist before creating Examples
+        # This prevents errors in CI environments where example files may not be present
+        required_example_files = [
+            "example_data/dummy_consultation_response.csv",
+            "example_data/combined_case_notes.csv",
+        ]
+        example_files_exist = all(os.path.exists(f) for f in required_example_files)
+
+        # Only create Examples if files exist, otherwise create empty Examples to avoid errors
+        if example_files_exist:
+            try:
+                examples = gr.Examples(
+                    examples=[
+                        [
+                            ["example_data/dummy_consultation_response.csv"],
+                            "Response text",
+                            "Consultation for the construction of flats on Main Street",
+                            "dummy_consultation_response.csv",
+                            [
+                                "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"
+                            ],
+                            dummy_consultation_table,
+                            "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            None,
+                            "No",
+                            None,
+                            5,
+                        ],
+                        [
+                            ["example_data/combined_case_notes.csv"],
+                            "Case Note",
+                            "Social Care case notes for young people",
+                            "combined_case_notes.csv",
+                            [
+                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"
+                            ],
+                            case_notes_table,
+                            "Example output from the case notes dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            None,
+                            "No",
+                            None,
+                            5,
+                        ],
+                        [
+                            ["example_data/dummy_consultation_response.csv"],
+                            "Response text",
+                            "Consultation for the construction of flats on Main Street",
+                            "dummy_consultation_response.csv",
+                            [
+                                "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis_zero_shot.xlsx"
+                            ],
+                            dummy_consultation_table_zero_shot,
+                            "Example output from the dummy consultation dataset with suggested topics successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            "example_data/dummy_consultation_response_themes.csv",
+                            "No",
+                            None,
+                            5,
+                        ],
+                        [
+                            ["example_data/combined_case_notes.csv"],
+                            "Case Note",
+                            "Social Care case notes for young people",
+                            "combined_case_notes.csv",
+                            [
+                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis_grouped.xlsx"
+                            ],
+                            case_notes_table_grouped,
+                            "Example data from the case notes dataset with groups successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            "example_data/case_note_headers_specific.csv",
+                            "No",
+                            "Client",
+                            5,
+                        ],
+                        [
+                            ["example_data/combined_case_notes.csv"],
+                            "Case Note",
+                            "Social Care case notes for young people",
+                            "combined_case_notes.csv",
+                            [
+                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_structured_summaries.xlsx"
+                            ],
+                            case_notes_table_structured_summary,
+                            "Example data from the case notes dataset for structured summaries successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            "example_data/case_note_headers_specific.csv",
+                            "Yes",
+                            "Client",
+                            50,
+                        ],
                     ],
-                    dummy_consultation_table,
-                    "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    None,
-                    "No",
-                    None,
-                    5,
-                ],
-                [
-                    ["example_data/combined_case_notes.csv"],
-                    "Case Note",
-                    "Social Care case notes for young people",
-                    "combined_case_notes.csv",
-                    [
-                        "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"
+                    inputs=[
+                        in_data_files,
+                        in_colnames,
+                        context_textbox,
+                        original_data_file_name_textbox,
+                        topic_extraction_output_files_xlsx,
+                        display_topic_table_markdown,
+                        output_messages_textbox,
+                        candidate_topics,
+                        produce_structured_summary_radio,
+                        in_group_col,
+                        batch_size_number,
                     ],
-                    case_notes_table,
-                    "Example output from the case notes dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    None,
-                    "No",
-                    None,
-                    5,
-                ],
-                [
-                    ["example_data/dummy_consultation_response.csv"],
-                    "Response text",
-                    "Consultation for the construction of flats on Main Street",
-                    "dummy_consultation_response.csv",
-                    [
-                        "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis_zero_shot.xlsx"
+                    example_labels=[
+                        "Main Street construction consultation",
+                        "Case notes for young people",
+                        "Main Street construction consultation with suggested topics",
+                        "Case notes grouped by person with suggested topics",
+                        "Case notes structured summary with suggested topics",
                     ],
-                    dummy_consultation_table_zero_shot,
-                    "Example output from the dummy consultation dataset with suggested topics successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    "example_data/dummy_consultation_response_themes.csv",
-                    "No",
-                    None,
-                    5,
-                ],
-                [
-                    ["example_data/combined_case_notes.csv"],
-                    "Case Note",
-                    "Social Care case notes for young people",
-                    "combined_case_notes.csv",
-                    [
-                        "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis_grouped.xlsx"
+                    label="Try topic extraction and summarisation with an example dataset. Example outputs are displayed. Click the 'Extract topics...' button below to rerun the analysis.",
+                    fn=show_info_box_on_click,
+                    run_on_click=True,
+                )
+            except (FileNotFoundError, OSError) as e:
+                # If example files don't exist (e.g., in CI environment), create empty Examples
+                # This allows the app to load without errors
+                print(f"Warning: Example files not found, skipping Examples creation: {e}")
+                examples = gr.Examples(
+                    examples=[],
+                    inputs=[
+                        in_data_files,
+                        in_colnames,
+                        context_textbox,
+                        original_data_file_name_textbox,
+                        topic_extraction_output_files_xlsx,
+                        display_topic_table_markdown,
+                        output_messages_textbox,
+                        candidate_topics,
+                        produce_structured_summary_radio,
+                        in_group_col,
+                        batch_size_number,
                     ],
-                    case_notes_table_grouped,
-                    "Example data from the case notes dataset with groups successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    "example_data/case_note_headers_specific.csv",
-                    "No",
-                    "Client",
-                    5,
+                    label="Examples not available (example files not found).",
+                )
+        else:
+            # Example files don't exist, create empty Examples
+            print("Warning: Required example files not found, skipping Examples creation.")
+            examples = gr.Examples(
+                examples=[],
+                inputs=[
+                    in_data_files,
+                    in_colnames,
+                    context_textbox,
+                    original_data_file_name_textbox,
+                    topic_extraction_output_files_xlsx,
+                    display_topic_table_markdown,
+                    output_messages_textbox,
+                    candidate_topics,
+                    produce_structured_summary_radio,
+                    in_group_col,
+                    batch_size_number,
                 ],
-                [
-                    ["example_data/combined_case_notes.csv"],
-                    "Case Note",
-                    "Social Care case notes for young people",
-                    "combined_case_notes.csv",
-                    [
-                        "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_structured_summaries.xlsx"
-                    ],
-                    case_notes_table_structured_summary,
-                    "Example data from the case notes dataset for structured summaries successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    "example_data/case_note_headers_specific.csv",
-                    "Yes",
-                    "Client",
-                    50,
-                ],
-            ],
-            inputs=[
-                in_data_files,
-                in_colnames,
-                context_textbox,
-                original_data_file_name_textbox,
-                topic_extraction_output_files_xlsx,
-                display_topic_table_markdown,
-                output_messages_textbox,
-                candidate_topics,
-                produce_structured_summary_radio,
-                in_group_col,
-                batch_size_number,
-            ],
-            example_labels=[
-                "Main Street construction consultation",
-                "Case notes for young people",
-                "Main Street construction consultation with suggested topics",
-                "Case notes grouped by person with suggested topics",
-                "Case notes structured summary with suggested topics",
-            ],
-            label="Try topic extraction and summarisation with an example dataset. Example outputs are displayed. Click the 'Extract topics...' button below to rerun the analysis.",
-            fn=show_info_box_on_click,
-            run_on_click=True,
-        )
+                label="Examples not available (example files not found).",
+            )
 
     with gr.Tab(label="All in one topic extraction and summarisation"):
         with gr.Row():
