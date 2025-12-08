@@ -240,11 +240,37 @@ def deduplicate_topics(
             "Data file outputs are too short for deduplicating. Returning original data."
         )
 
-        reference_file_out_path = output_folder + reference_table_file_name
-        unique_topics_file_out_path = output_folder + unique_topics_table_file_name
+        # Get file name without extension and create proper output paths
+        reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+        unique_topics_table_file_name_no_ext = get_file_name_no_ext(
+            unique_topics_table_file_name
+        )
+
+        # Create output paths with _dedup suffix to match normal path
+        reference_file_out_path = (
+            output_folder + reference_table_file_name_no_ext + "_dedup.csv"
+        )
+        unique_topics_file_out_path = (
+            output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
+        )
+
+        # Save the DataFrames to CSV files
+        reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
+        topic_summary_df.to_csv(
+            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+        )
 
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
+
+        # Create markdown output for display
+        topic_summary_df_revised_display = topic_summary_df.apply(
+            lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
+        )
+        deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(
+            index=False
+        )
+
         return (
             reference_df,
             topic_summary_df,
@@ -645,20 +671,48 @@ def deduplicate_topics_llm(
             "Data file outputs are too short for deduplicating. Returning original data."
         )
 
-        # print("reference_df:", reference_df)
-        # print("topic_summary_df:", topic_summary_df)
+        # Get file name without extension and create proper output paths
+        reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+        unique_topics_table_file_name_no_ext = get_file_name_no_ext(
+            unique_topics_table_file_name
+        )
 
-        reference_file_out_path = output_folder + reference_table_file_name
-        unique_topics_file_out_path = output_folder + unique_topics_table_file_name
+        # Create output paths with _dedup suffix to match normal path
+        reference_file_out_path = (
+            output_folder + reference_table_file_name_no_ext + "_dedup.csv"
+        )
+        unique_topics_file_out_path = (
+            output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
+        )
+
+        # Save the DataFrames to CSV files
+        reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
+        topic_summary_df.to_csv(
+            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+        )
 
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
+
+        # Create markdown output for display
+        topic_summary_df_revised_display = topic_summary_df.apply(
+            lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
+        )
+        deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(
+            index=False
+        )
+
+        # Return with token counts set to 0 for early return
         return (
             reference_df,
             topic_summary_df,
             output_files,
             log_output_files,
             deduplicated_unique_table_markdown,
+            0,  # input_tokens
+            0,  # output_tokens
+            0,  # number_of_calls
+            0.0,  # estimated_time_taken
         )
 
     # For checking that data is not lost during the process
@@ -1104,6 +1158,10 @@ def sample_reference_table_summaries(
         # If no responses/topics qualify, just go ahead with the original reference dataframe
         if all_summaries.empty:
             sampled_reference_table_df = reference_df
+            # Filter by sentiment only (Response References is a string in original df, not a count)
+            sampled_reference_table_df = sampled_reference_table_df.loc[
+                sampled_reference_table_df["Sentiment"] != "Not Mentioned"
+            ]
         else:
             # FIXED: Preserve Group column in aggregation to maintain group-specific summaries
             sampled_reference_table_df = (
@@ -1120,11 +1178,11 @@ def sample_reference_table_summaries(
                 )
                 .reset_index()
             )
-
-        sampled_reference_table_df = sampled_reference_table_df.loc[
-            (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
-            & (sampled_reference_table_df["Response References"] > 1)
-        ]
+            # Filter by sentiment and count (Response References is now a numeric count after aggregation)
+            sampled_reference_table_df = sampled_reference_table_df.loc[
+                (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
+                & (sampled_reference_table_df["Response References"] > 1)
+            ]
     else:
         sampled_reference_table_df = reference_df
 
