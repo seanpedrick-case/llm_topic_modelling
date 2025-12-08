@@ -404,7 +404,7 @@ if RUN_AZURE_MODELS == "1":
 CHOSEN_INFERENCE_SERVER_MODEL = ""
 if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
-    inference_server_models = ["unnamed-inference-server-model", "gemma_3_12b", "gpt_oss_20b", "qwen_3_4b_it"]
+    inference_server_models = ["unnamed-inference-server-model", "gemma_3_12b", "gpt_oss_20b", "qwen_3_4b_it", "ministral_3_14b_instruct"]
     model_full_names.extend(inference_server_models)
     model_short_names.extend(inference_server_models)    
     model_source.extend(["inference-server"] * len(inference_server_models))
