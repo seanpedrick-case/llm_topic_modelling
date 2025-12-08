@@ -401,6 +401,7 @@ if RUN_AZURE_MODELS == "1":
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
 # Register inference-server models
+CHOSEN_INFERENCE_SERVER_MODEL = ""
 if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
     inference_server_models = ["unnamed-inference-server-model", "gemma_3_12b", "gpt_oss_20b", "qwen_3_4b_it"]
@@ -735,6 +736,40 @@ COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
 
 RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
 
+# Direct mode environment variables
+DIRECT_MODE_TASK = get_or_create_env_var("DIRECT_MODE_TASK", "extract")
+DIRECT_MODE_INPUT_FILE = get_or_create_env_var("DIRECT_MODE_INPUT_FILE", "")
+DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var("DIRECT_MODE_OUTPUT_DIR", OUTPUT_FOLDER)
+DIRECT_MODE_TEXT_COLUMN = get_or_create_env_var("DIRECT_MODE_TEXT_COLUMN", "")
+DIRECT_MODE_PREVIOUS_OUTPUT_FILES = get_or_create_env_var("DIRECT_MODE_PREVIOUS_OUTPUT_FILES", "")
+DIRECT_MODE_USERNAME = get_or_create_env_var("DIRECT_MODE_USERNAME", "")
+DIRECT_MODE_GROUP_BY = get_or_create_env_var("DIRECT_MODE_GROUP_BY", "")
+DIRECT_MODE_EXCEL_SHEETS = get_or_create_env_var("DIRECT_MODE_EXCEL_SHEETS", "")
+DIRECT_MODE_MODEL_CHOICE = get_or_create_env_var("DIRECT_MODE_MODEL_CHOICE", default_model_choice)
+DIRECT_MODE_TEMPERATURE = get_or_create_env_var("DIRECT_MODE_TEMPERATURE", str(LLM_TEMPERATURE))
+DIRECT_MODE_BATCH_SIZE = get_or_create_env_var("DIRECT_MODE_BATCH_SIZE", str(BATCH_SIZE_DEFAULT))
+DIRECT_MODE_MAX_TOKENS = get_or_create_env_var("DIRECT_MODE_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS))
+DIRECT_MODE_CONTEXT = get_or_create_env_var("DIRECT_MODE_CONTEXT", "")
+DIRECT_MODE_CANDIDATE_TOPICS = get_or_create_env_var("DIRECT_MODE_CANDIDATE_TOPICS", "")
+DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var("DIRECT_MODE_FORCE_ZERO_SHOT", "No")
+DIRECT_MODE_FORCE_SINGLE_TOPIC = get_or_create_env_var("DIRECT_MODE_FORCE_SINGLE_TOPIC", "No")
+DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY = get_or_create_env_var("DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY", "No")
+DIRECT_MODE_SENTIMENT = get_or_create_env_var("DIRECT_MODE_SENTIMENT", "Negative or Positive")
+DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS = get_or_create_env_var("DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS", "")
+DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES = get_or_create_env_var("DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES", "")
+DIRECT_MODE_SHOW_PREVIOUS_TABLE = get_or_create_env_var("DIRECT_MODE_SHOW_PREVIOUS_TABLE", "Yes")
+DIRECT_MODE_MAX_TIME_FOR_LOOP = get_or_create_env_var("DIRECT_MODE_MAX_TIME_FOR_LOOP", str(MAX_TIME_FOR_LOOP))
+DIRECT_MODE_DEDUP_METHOD = get_or_create_env_var("DIRECT_MODE_DEDUP_METHOD", "fuzzy")
+DIRECT_MODE_SIMILARITY_THRESHOLD = get_or_create_env_var("DIRECT_MODE_SIMILARITY_THRESHOLD", str(DEDUPLICATION_THRESHOLD))
+DIRECT_MODE_MERGE_SENTIMENT = get_or_create_env_var("DIRECT_MODE_MERGE_SENTIMENT", "No")
+DIRECT_MODE_MERGE_GENERAL_TOPICS = get_or_create_env_var("DIRECT_MODE_MERGE_GENERAL_TOPICS", "Yes")
+DIRECT_MODE_SUMMARY_FORMAT = get_or_create_env_var("DIRECT_MODE_SUMMARY_FORMAT", "two_paragraph")
+DIRECT_MODE_SAMPLE_REFERENCE_TABLE = get_or_create_env_var("DIRECT_MODE_SAMPLE_REFERENCE_TABLE", "True")
+DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES = get_or_create_env_var("DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES", str(DEFAULT_SAMPLED_SUMMARIES))
+DIRECT_MODE_RANDOM_SEED = get_or_create_env_var("DIRECT_MODE_RANDOM_SEED", str(LLM_SEED))
+DIRECT_MODE_CREATE_XLSX_OUTPUT = get_or_create_env_var("DIRECT_MODE_CREATE_XLSX_OUTPUT", "True")
+# CHOSEN_INFERENCE_SERVER_MODEL is defined later, so we'll handle it after that definition
+
 MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
 MAX_FILE_SIZE = get_or_create_env_var("MAX_FILE_SIZE", "250mb")
@@ -847,3 +882,9 @@ if DYNAMODB_FEEDBACK_LOG_HEADERS:
     DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
 if DYNAMODB_USAGE_LOG_HEADERS:
     DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
+
+# Set DIRECT_MODE_INFERENCE_SERVER_MODEL after CHOSEN_INFERENCE_SERVER_MODEL is defined
+DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
+    "DIRECT_MODE_INFERENCE_SERVER_MODEL", 
+    CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else ""
+)
