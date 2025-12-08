@@ -35,12 +35,12 @@ jobs:
         echo "Checking for specific CSV files:"
         ls -la example_data/*.csv || echo "No CSV files found"
     
-    - name: Run CLI tests
+    - name: Run CLI and GUI tests
       run: |
         cd test
         python run_tests.py
     
     - name: Run tests with pytest
       run: |
-        pytest test/test.py -v --tb=short
+        pytest test/test.py test/test_gui_only.py -v --tb=short
 

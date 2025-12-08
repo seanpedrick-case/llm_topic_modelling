@@ -682,6 +682,7 @@ def run_all_tests():
     print("=" * 80)
     print("This test suite includes:")
     print("- CLI examples from the epilog")
+    print("- GUI application tests")
     print("- Tests use a mock inference-server to avoid API costs")
     print("Tests will be skipped if required example files are not found.")
     print("=" * 80)
@@ -693,6 +694,16 @@ def run_all_tests():
     # Add CLI tests
     cli_suite = loader.loadTestsFromTestCase(TestCLITopicsExamples)
     suite.addTests(cli_suite)
+
+    # Add GUI tests
+    try:
+        from test.test_gui_only import TestGUIAppOnly
+        gui_suite = loader.loadTestsFromTestCase(TestGUIAppOnly)
+        suite.addTests(gui_suite)
+        print("GUI tests included in test suite.")
+    except ImportError as e:
+        print(f"Warning: Could not import GUI tests: {e}")
+        print("Skipping GUI tests.")
 
     # Run tests with detailed output
     runner = unittest.TextTestRunner(verbosity=2, stream=None)

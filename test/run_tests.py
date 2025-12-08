@@ -17,8 +17,10 @@ sys.path.insert(0, parent_dir)
 from test.test import run_all_tests
 
 if __name__ == "__main__":
-    print("Starting CLI Topics Test Suite...")
-    print("This will test all examples from the CLI epilog.")
+    print("Starting LLM Topic Modeller Test Suite...")
+    print("This will test:")
+    print("- CLI examples from the epilog")
+    print("- GUI application functionality")
     print("Using a mock inference-server to avoid API costs.")
     print("=" * 60)
 

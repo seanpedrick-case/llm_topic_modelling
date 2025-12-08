@@ -75,18 +75,18 @@ jobs:
         echo "Checking for specific CSV files:"
         ls -la example_data/*.csv || echo "No CSV files found"
     
-    - name: Run CLI tests
+    - name: Run CLI and GUI tests
       run: |
         cd test
         python run_tests.py
     
     - name: Run tests with pytest
       run: |
-        pytest test/test.py -v --tb=short --junitxml=test-results.xml
+        pytest test/test.py test/test_gui_only.py -v --tb=short --junitxml=test-results.xml
     
     - name: Run tests with coverage
       run: |
-        pytest test/test.py --cov=. --cov-report=xml --cov-report=html --cov-report=term
+        pytest test/test.py test/test_gui_only.py --cov=. --cov-report=xml --cov-report=html --cov-report=term
     
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -123,7 +123,7 @@ jobs:
         echo "Checking for specific CSV files:"
         ls -la example_data/*.csv || echo "No CSV files found"
     
-    - name: Run integration tests
+    - name: Run integration tests (CLI and GUI)
       run: |
         cd test
         python run_tests.py
