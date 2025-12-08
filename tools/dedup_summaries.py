@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import time
 from typing import List, Tuple
 
@@ -691,7 +692,11 @@ def deduplicate_topics_llm(
         try:
 
             # Read and process candidate topics
-            candidate_topics_df = read_file(candidate_topics.name)
+            # Handle both string paths (CLI) and gr.FileData objects (Gradio)
+            candidate_topics_path = candidate_topics if isinstance(candidate_topics, str) else getattr(candidate_topics, 'name', None)
+            if candidate_topics_path is None:
+                raise ValueError("candidate_topics must be a file path string or a FileData object with a 'name' attribute")
+            candidate_topics_df = read_file(candidate_topics_path)
             candidate_topics_df = candidate_topics_df.fillna("")
             candidate_topics_df = candidate_topics_df.astype(str)
 
@@ -752,6 +757,15 @@ def deduplicate_topics_llm(
         client = None
         config = None
         bedrock_runtime = None
+    elif "inference-server" in model_source:
+        client = None
+        config = None
+        bedrock_runtime = None
+        # api_url is already passed to call_llm_with_markdown_table_checks
+        if api_url is None:
+            raise ValueError(
+                "api_url is required when model_source is 'inference-server'"
+            )
     else:
         raise ValueError(f"Unsupported model source: {model_source}")
 
@@ -1588,6 +1602,7 @@ def summarise_output_topics(
         raise Exception(out_message)
 
     # Load in data file and chosen columns if exists to create pivot table later
+    file_data = pd.DataFrame()
     if in_data_files and chosen_cols:
         file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(
             in_data_files, chosen_cols, 1, in_excel_sheets=in_excel_sheets
@@ -1595,7 +1610,10 @@ def summarise_output_topics(
     else:
         out_message = "No file data found, pivot table output will not be created."
         print(out_message)
-        raise Exception(out_message)
+        # Use sys.stdout.write to avoid issues with progress bars
+        #sys.stdout.write(out_message + "\n")
+        #sys.stdout.flush()
+        # Note: file_data will remain empty, pivot tables will not be created
 
     reference_table_df = reference_table_df.rename(
         columns={"General Topic": "General topic"}, errors="ignore"
@@ -1987,11 +2005,14 @@ def summarise_output_topics(
         toc = time.perf_counter()
         time_taken = toc - tic
 
-        out_message = "\n".join(out_message)
+        if isinstance(out_message, list):
+            out_message = "\n".join(out_message)
+        else:
+            out_message = out_message
+
         out_message = (
-            out_message
-            + " "
-            + f"Topic summarisation finished processing. Total time: {time_taken:.2f}s"
+            out_message + 
+            f"\nTopic summarisation finished processing. Total time: {round(float(time_taken), 1)}s"
         )
         print(out_message)
 
@@ -2127,8 +2148,9 @@ def wrapper_summarise_output_topics_per_group(
     all_groups_logged_content = existing_logged_content
 
     # Check if we have data to process
+    # Allow empty sampled_reference_table_df if sample_reference_table is True (it will be created from reference_table_df)
     if (
-        sampled_reference_table_df.empty
+        (sampled_reference_table_df.empty and not sample_reference_table)
         or topic_summary_df.empty
         or reference_table_df.empty
     ):

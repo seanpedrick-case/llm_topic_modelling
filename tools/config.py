@@ -403,10 +403,17 @@ if RUN_AZURE_MODELS == "1":
 # Register inference-server models
 if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
-    inference_server_models = ["gpt_oss_20b", "gemma_3_12b"]
+    inference_server_models = ["unnamed-inference-server-model", "gemma_3_12b", "gpt_oss_20b", "qwen_3_4b_it"]
     model_full_names.extend(inference_server_models)
-    model_short_names.extend(inference_server_models)
+    model_short_names.extend(inference_server_models)    
     model_source.extend(["inference-server"] * len(inference_server_models))
+
+    CHOSEN_INFERENCE_SERVER_MODEL = get_or_create_env_var("CHOSEN_INFERENCE_SERVER_MODEL", inference_server_models[0])
+
+    if CHOSEN_INFERENCE_SERVER_MODEL not in inference_server_models:
+        model_full_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
+        model_short_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
+        model_source.append("inference-server")
 
 model_name_map = {
     full: {"short_name": short, "source": source}
@@ -416,7 +423,7 @@ model_name_map = {
 if RUN_LOCAL_MODEL == "1":
     default_model_choice = CHOSEN_LOCAL_MODEL_TYPE
 elif RUN_INFERENCE_SERVER == "1":
-    default_model_choice = inference_server_models[0]
+    default_model_choice = CHOSEN_INFERENCE_SERVER_MODEL
 elif RUN_AWS_FUNCTIONS == "1":
     default_model_choice = amazon_models[0]
 else:

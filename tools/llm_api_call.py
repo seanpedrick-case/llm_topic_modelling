@@ -2806,7 +2806,11 @@ def extract_topics(
                     if candidate_topics and existing_topic_summary_df.empty:
 
                         # 'Zero shot topics' are those supplied by the user
-                        zero_shot_topics = read_file(candidate_topics.name)
+                        # Handle both string paths (CLI) and gr.FileData objects (Gradio)
+                        candidate_topics_path = candidate_topics if isinstance(candidate_topics, str) else getattr(candidate_topics, 'name', None)
+                        if candidate_topics_path is None:
+                            raise ValueError("candidate_topics must be a file path string or a FileData object with a 'name' attribute")
+                        zero_shot_topics = read_file(candidate_topics_path)
                         zero_shot_topics = zero_shot_topics.fillna(
                             ""
                         )  # Replace NaN with empty string
