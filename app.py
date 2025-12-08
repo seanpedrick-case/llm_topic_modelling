@@ -24,6 +24,39 @@ from tools.config import (
     CSV_FEEDBACK_LOG_HEADERS,
     CSV_USAGE_LOG_HEADERS,
     DEFAULT_COST_CODE,
+    DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS,
+    DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES,
+    DIRECT_MODE_BATCH_SIZE,
+    DIRECT_MODE_CANDIDATE_TOPICS,
+    DIRECT_MODE_CONTEXT,
+    DIRECT_MODE_CREATE_XLSX_OUTPUT,
+    DIRECT_MODE_DEDUP_METHOD,
+    DIRECT_MODE_EXCEL_SHEETS,
+    DIRECT_MODE_FORCE_SINGLE_TOPIC,
+    DIRECT_MODE_FORCE_ZERO_SHOT,
+    DIRECT_MODE_GROUP_BY,
+    DIRECT_MODE_INFERENCE_SERVER_MODEL,
+    DIRECT_MODE_INPUT_FILE,
+    DIRECT_MODE_MAX_TIME_FOR_LOOP,
+    DIRECT_MODE_MAX_TOKENS,
+    DIRECT_MODE_MERGE_GENERAL_TOPICS,
+    DIRECT_MODE_MERGE_SENTIMENT,
+    DIRECT_MODE_MODEL_CHOICE,
+    DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES,
+    DIRECT_MODE_OUTPUT_DIR,
+    DIRECT_MODE_PREVIOUS_OUTPUT_FILES,
+    DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
+    DIRECT_MODE_RANDOM_SEED,
+    DIRECT_MODE_SAMPLE_REFERENCE_TABLE,
+    DIRECT_MODE_SENTIMENT,
+    DIRECT_MODE_SHOW_PREVIOUS_TABLE,
+    DIRECT_MODE_SIMILARITY_THRESHOLD,
+    DIRECT_MODE_SUMMARY_FORMAT,
+    # Direct mode variables
+    DIRECT_MODE_TASK,
+    DIRECT_MODE_TEMPERATURE,
+    DIRECT_MODE_TEXT_COLUMN,
+    DIRECT_MODE_USERNAME,
     DYNAMODB_ACCESS_LOG_HEADERS,
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
@@ -47,12 +80,13 @@ from tools.config import (
     MAX_QUEUE_SIZE,
     MPLCONFIGDIR,
     OUTPUT_COST_CODES_PATH,
+    OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
     ROOT_PATH,
     RUN_AWS_FUNCTIONS,
+    RUN_DIRECT_MODE,
     RUN_INFERENCE_SERVER,
     RUN_MCP_SERVER,
-    RUN_DIRECT_MODE,
     S3_ACCESS_LOGS_FOLDER,
     S3_COST_CODES_PATH,
     S3_FEEDBACK_LOGS_FOLDER,
@@ -60,6 +94,7 @@ from tools.config import (
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
+    SESSION_OUTPUT_FOLDER,
     SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES,
     SHOW_COSTS,
     SHOW_EXAMPLES,
@@ -72,46 +107,6 @@ from tools.config import (
     ensure_folder_exists,
     model_name_map,
     model_sources,
-    # Direct mode variables
-    DIRECT_MODE_TASK,
-    DIRECT_MODE_INPUT_FILE,
-    DIRECT_MODE_OUTPUT_DIR,
-    DIRECT_MODE_TEXT_COLUMN,
-    DIRECT_MODE_PREVIOUS_OUTPUT_FILES,
-    DIRECT_MODE_USERNAME,
-    DIRECT_MODE_GROUP_BY,
-    DIRECT_MODE_EXCEL_SHEETS,
-    DIRECT_MODE_MODEL_CHOICE,
-    DIRECT_MODE_TEMPERATURE,
-    DIRECT_MODE_BATCH_SIZE,
-    DIRECT_MODE_MAX_TOKENS,
-    DIRECT_MODE_CONTEXT,
-    DIRECT_MODE_CANDIDATE_TOPICS,
-    DIRECT_MODE_FORCE_ZERO_SHOT,
-    DIRECT_MODE_FORCE_SINGLE_TOPIC,
-    DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
-    DIRECT_MODE_SENTIMENT,
-    DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS,
-    DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES,
-    DIRECT_MODE_SHOW_PREVIOUS_TABLE,
-    DIRECT_MODE_MAX_TIME_FOR_LOOP,
-    DIRECT_MODE_DEDUP_METHOD,
-    DIRECT_MODE_SIMILARITY_THRESHOLD,
-    DIRECT_MODE_MERGE_SENTIMENT,
-    DIRECT_MODE_MERGE_GENERAL_TOPICS,
-    DIRECT_MODE_SUMMARY_FORMAT,
-    DIRECT_MODE_SAMPLE_REFERENCE_TABLE,
-    DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES,
-    DIRECT_MODE_RANDOM_SEED,
-    DIRECT_MODE_CREATE_XLSX_OUTPUT,
-    DIRECT_MODE_INFERENCE_SERVER_MODEL,
-    SESSION_OUTPUT_FOLDER,
-    OUTPUT_DEBUG_FILES,
-    DEDUPLICATION_THRESHOLD,
-    DEFAULT_SAMPLED_SUMMARIES,
-    MAX_TIME_FOR_LOOP,
-    CHOSEN_INFERENCE_SERVER_MODEL,
-    LLM_MAX_NEW_TOKENS,
 )
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.dedup_summaries import (
@@ -811,7 +806,9 @@ with app:
             except (FileNotFoundError, OSError) as e:
                 # If example files don't exist (e.g., in CI environment), create empty Examples
                 # This allows the app to load without errors
-                print(f"Warning: Example files not found, skipping Examples creation: {e}")
+                print(
+                    f"Warning: Example files not found, skipping Examples creation: {e}"
+                )
                 examples = gr.Examples(
                     examples=[],
                     inputs=[
@@ -831,7 +828,9 @@ with app:
                 )
         else:
             # Example files don't exist, create empty Examples
-            print("Warning: Required example files not found, skipping Examples creation.")
+            print(
+                "Warning: Required example files not found, skipping Examples creation."
+            )
             examples = gr.Examples(
                 examples=[],
                 inputs=[
@@ -2579,16 +2578,21 @@ if __name__ == "__main__":
         from cli_topics import main
 
         # Validate required direct mode configuration
-        if not DIRECT_MODE_INPUT_FILE and DIRECT_MODE_TASK in ["extract", "validate", "all_in_one"]:
+        if not DIRECT_MODE_INPUT_FILE and DIRECT_MODE_TASK in [
+            "extract",
+            "validate",
+            "all_in_one",
+        ]:
             print(
                 "Error: DIRECT_MODE_INPUT_FILE environment variable must be set for direct mode."
             )
-            print(
-                "Please set DIRECT_MODE_INPUT_FILE to the path of your input file."
-            )
+            print("Please set DIRECT_MODE_INPUT_FILE to the path of your input file.")
             exit(1)
 
-        if DIRECT_MODE_TASK in ["extract", "validate", "all_in_one"] and not DIRECT_MODE_TEXT_COLUMN:
+        if (
+            DIRECT_MODE_TASK in ["extract", "validate", "all_in_one"]
+            and not DIRECT_MODE_TEXT_COLUMN
+        ):
             print(
                 "Error: DIRECT_MODE_TEXT_COLUMN environment variable must be set for direct mode tasks: extract, validate, all_in_one."
             )
@@ -2597,7 +2601,11 @@ if __name__ == "__main__":
             )
             exit(1)
 
-        if DIRECT_MODE_TASK in ["validate", "deduplicate", "summarise", "overall_summary"] and not DIRECT_MODE_PREVIOUS_OUTPUT_FILES:
+        if (
+            DIRECT_MODE_TASK
+            in ["validate", "deduplicate", "summarise", "overall_summary"]
+            and not DIRECT_MODE_PREVIOUS_OUTPUT_FILES
+        ):
             print(
                 "Error: DIRECT_MODE_PREVIOUS_OUTPUT_FILES environment variable must be set for direct mode tasks: validate, deduplicate, summarise, overall_summary."
             )
@@ -2610,12 +2618,18 @@ if __name__ == "__main__":
         previous_output_files_list = []
         if DIRECT_MODE_PREVIOUS_OUTPUT_FILES:
             # Use pipe separator to handle file paths with spaces
-            previous_output_files_list = [f.strip() for f in DIRECT_MODE_PREVIOUS_OUTPUT_FILES.split("|") if f.strip()]
+            previous_output_files_list = [
+                f.strip()
+                for f in DIRECT_MODE_PREVIOUS_OUTPUT_FILES.split("|")
+                if f.strip()
+            ]
 
         # Parse excel_sheets if provided (comma-separated string)
         excel_sheets_list = []
         if DIRECT_MODE_EXCEL_SHEETS:
-            excel_sheets_list = [s.strip() for s in DIRECT_MODE_EXCEL_SHEETS.split(",") if s.strip()]
+            excel_sheets_list = [
+                s.strip() for s in DIRECT_MODE_EXCEL_SHEETS.split(",") if s.strip()
+            ]
 
         # Parse input_file if provided (pipe-separated string for multiple files to handle paths with spaces)
         input_file_list = []
@@ -2623,7 +2637,9 @@ if __name__ == "__main__":
             # Use pipe separator to handle file paths with spaces
             # First check if it's a single file (no pipe), then split if multiple files
             if "|" in DIRECT_MODE_INPUT_FILE:
-                input_file_list = [f.strip() for f in DIRECT_MODE_INPUT_FILE.split("|") if f.strip()]
+                input_file_list = [
+                    f.strip() for f in DIRECT_MODE_INPUT_FILE.split("|") if f.strip()
+                ]
             else:
                 # Single file - use as-is to preserve paths with spaces
                 input_file_list = [DIRECT_MODE_INPUT_FILE.strip()]
@@ -2637,7 +2653,9 @@ if __name__ == "__main__":
             "output_dir": DIRECT_MODE_OUTPUT_DIR,
             "input_dir": INPUT_FOLDER,
             "text_column": DIRECT_MODE_TEXT_COLUMN if DIRECT_MODE_TEXT_COLUMN else None,
-            "previous_output_files": previous_output_files_list if previous_output_files_list else None,
+            "previous_output_files": (
+                previous_output_files_list if previous_output_files_list else None
+            ),
             "username": DIRECT_MODE_USERNAME,
             "save_to_user_folders": SESSION_OUTPUT_FOLDER,
             "excel_sheets": excel_sheets_list,
@@ -2656,17 +2674,31 @@ if __name__ == "__main__":
             "azure_api_key": AZURE_OPENAI_API_KEY,
             "azure_endpoint": AZURE_OPENAI_INFERENCE_ENDPOINT,
             "api_url": API_URL,
-            "inference_server_model": DIRECT_MODE_INFERENCE_SERVER_MODEL if DIRECT_MODE_INFERENCE_SERVER_MODEL else None,
+            "inference_server_model": (
+                DIRECT_MODE_INFERENCE_SERVER_MODEL
+                if DIRECT_MODE_INFERENCE_SERVER_MODEL
+                else None
+            ),
             # Topic Extraction Arguments
             "context": DIRECT_MODE_CONTEXT if DIRECT_MODE_CONTEXT else "",
-            "candidate_topics": DIRECT_MODE_CANDIDATE_TOPICS if DIRECT_MODE_CANDIDATE_TOPICS else None,
+            "candidate_topics": (
+                DIRECT_MODE_CANDIDATE_TOPICS if DIRECT_MODE_CANDIDATE_TOPICS else None
+            ),
             "force_zero_shot": DIRECT_MODE_FORCE_ZERO_SHOT,
             "force_single_topic": DIRECT_MODE_FORCE_SINGLE_TOPIC,
             "produce_structured_summary": DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
             "sentiment": DIRECT_MODE_SENTIMENT,
-            "additional_summary_instructions": DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS if DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS else "",
+            "additional_summary_instructions": (
+                DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS
+                if DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS
+                else ""
+            ),
             # Validation Arguments
-            "additional_validation_issues": DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES if DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES else "",
+            "additional_validation_issues": (
+                DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES
+                if DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES
+                else ""
+            ),
             "show_previous_table": DIRECT_MODE_SHOW_PREVIOUS_TABLE,
             "output_debug_files": OUTPUT_DEBUG_FILES,
             "max_time_for_loop": int(DIRECT_MODE_MAX_TIME_FOR_LOOP),

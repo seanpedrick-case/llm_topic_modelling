@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 import time
 from typing import List, Tuple
 
@@ -241,7 +240,9 @@ def deduplicate_topics(
         )
 
         # Get file name without extension and create proper output paths
-        reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+        reference_table_file_name_no_ext = get_file_name_no_ext(
+            reference_table_file_name
+        )
         unique_topics_table_file_name_no_ext = get_file_name_no_ext(
             unique_topics_table_file_name
         )
@@ -267,8 +268,8 @@ def deduplicate_topics(
         topic_summary_df_revised_display = topic_summary_df.apply(
             lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
         )
-        deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(
-            index=False
+        deduplicated_unique_table_markdown = (
+            topic_summary_df_revised_display.to_markdown(index=False)
         )
 
         return (
@@ -672,7 +673,9 @@ def deduplicate_topics_llm(
         )
 
         # Get file name without extension and create proper output paths
-        reference_table_file_name_no_ext = get_file_name_no_ext(reference_table_file_name)
+        reference_table_file_name_no_ext = get_file_name_no_ext(
+            reference_table_file_name
+        )
         unique_topics_table_file_name_no_ext = get_file_name_no_ext(
             unique_topics_table_file_name
         )
@@ -698,8 +701,8 @@ def deduplicate_topics_llm(
         topic_summary_df_revised_display = topic_summary_df.apply(
             lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
         )
-        deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(
-            index=False
+        deduplicated_unique_table_markdown = (
+            topic_summary_df_revised_display.to_markdown(index=False)
         )
 
         # Return with token counts set to 0 for early return
@@ -747,9 +750,15 @@ def deduplicate_topics_llm(
 
             # Read and process candidate topics
             # Handle both string paths (CLI) and gr.FileData objects (Gradio)
-            candidate_topics_path = candidate_topics if isinstance(candidate_topics, str) else getattr(candidate_topics, 'name', None)
+            candidate_topics_path = (
+                candidate_topics
+                if isinstance(candidate_topics, str)
+                else getattr(candidate_topics, "name", None)
+            )
             if candidate_topics_path is None:
-                raise ValueError("candidate_topics must be a file path string or a FileData object with a 'name' attribute")
+                raise ValueError(
+                    "candidate_topics must be a file path string or a FileData object with a 'name' attribute"
+                )
             candidate_topics_df = read_file(candidate_topics_path)
             candidate_topics_df = candidate_topics_df.fillna("")
             candidate_topics_df = candidate_topics_df.astype(str)
@@ -1669,8 +1678,8 @@ def summarise_output_topics(
         out_message = "No file data found, pivot table output will not be created."
         print(out_message)
         # Use sys.stdout.write to avoid issues with progress bars
-        #sys.stdout.write(out_message + "\n")
-        #sys.stdout.flush()
+        # sys.stdout.write(out_message + "\n")
+        # sys.stdout.flush()
         # Note: file_data will remain empty, pivot tables will not be created
 
     reference_table_df = reference_table_df.rename(
@@ -2069,8 +2078,8 @@ def summarise_output_topics(
             out_message = out_message
 
         out_message = (
-            out_message + 
-            f"\nTopic summarisation finished processing. Total time: {round(float(time_taken), 1)}s"
+            out_message
+            + f"\nTopic summarisation finished processing. Total time: {round(float(time_taken), 1)}s"
         )
         print(out_message)
 

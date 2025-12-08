@@ -121,10 +121,10 @@ def get_file_name_no_ext(file_path: str):
 
 def detect_file_type(filename: str):
     """Detect the file type based on its extension."""
-    
+
     # Strip quotes and whitespace that might have been accidentally included
     filename = filename.strip().strip("'\"")
-    
+
     if (
         (filename.endswith(".csv"))
         | (filename.endswith(".csv.gz"))

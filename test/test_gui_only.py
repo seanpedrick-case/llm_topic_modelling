@@ -129,9 +129,7 @@ class TestGUIAppOnly(unittest.TestCase):
             self.assertIsNotNone(
                 default_model_choice, "default_model_choice should be configured"
             )
-            self.assertIsNotNone(
-                model_name_map, "model_name_map should be configured"
-            )
+            self.assertIsNotNone(model_name_map, "model_name_map should be configured")
 
             print("✅ GUI app configuration loading passed")
 
@@ -189,4 +187,3 @@ if __name__ == "__main__":
     # Run the GUI test suite
     success = run_gui_tests()
     exit(0 if success else 1)
-

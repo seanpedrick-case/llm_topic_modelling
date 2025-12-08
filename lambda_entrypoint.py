@@ -8,19 +8,17 @@ from dotenv import load_dotenv
 from cli_topics import main as cli_main
 from tools.config import (
     AWS_REGION,
-    DEFAULT_COST_CODE,
+    BATCH_SIZE_DEFAULT,
     DEDUPLICATION_THRESHOLD,
+    DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
     LLM_MAX_NEW_TOKENS,
     LLM_SEED,
     LLM_TEMPERATURE,
-    BATCH_SIZE_DEFAULT,
     OUTPUT_DEBUG_FILES,
-    OUTPUT_FOLDER,
-    INPUT_FOLDER,
-    SESSION_OUTPUT_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
+    SESSION_OUTPUT_FOLDER,
     USAGE_LOGS_FOLDER,
     convert_string_to_boolean,
 )
@@ -252,84 +250,161 @@ def lambda_handler(event, context):
         "task": arguments.get("task", os.getenv("DIRECT_MODE_TASK", "extract")),
         # General Arguments
         "input_file": [actual_input_file_path] if actual_input_file_path else None,
-        "output_dir": arguments.get("output_dir", os.getenv("DIRECT_MODE_OUTPUT_DIR", OUTPUT_DIR)),
+        "output_dir": arguments.get(
+            "output_dir", os.getenv("DIRECT_MODE_OUTPUT_DIR", OUTPUT_DIR)
+        ),
         "input_dir": arguments.get("input_dir", INPUT_DIR),
-        "text_column": arguments.get("text_column", os.getenv("DIRECT_MODE_TEXT_COLUMN", "")),
+        "text_column": arguments.get(
+            "text_column", os.getenv("DIRECT_MODE_TEXT_COLUMN", "")
+        ),
         "previous_output_files": _get_env_list(
-            arguments.get("previous_output_files", os.getenv("DIRECT_MODE_PREVIOUS_OUTPUT_FILES", list()))
+            arguments.get(
+                "previous_output_files",
+                os.getenv("DIRECT_MODE_PREVIOUS_OUTPUT_FILES", list()),
+            )
         ),
         "username": arguments.get("username", os.getenv("DIRECT_MODE_USERNAME", "")),
         "save_to_user_folders": convert_string_to_boolean(
-            arguments.get("save_to_user_folders", os.getenv("SESSION_OUTPUT_FOLDER", str(SESSION_OUTPUT_FOLDER)))
+            arguments.get(
+                "save_to_user_folders",
+                os.getenv("SESSION_OUTPUT_FOLDER", str(SESSION_OUTPUT_FOLDER)),
+            )
         ),
         "excel_sheets": _get_env_list(
             arguments.get("excel_sheets", os.getenv("DIRECT_MODE_EXCEL_SHEETS", list()))
         ),
         "group_by": arguments.get("group_by", os.getenv("DIRECT_MODE_GROUP_BY", "")),
         # Model Configuration
-        "model_choice": arguments.get("model_choice", os.getenv("DIRECT_MODE_MODEL_CHOICE", "")),
+        "model_choice": arguments.get(
+            "model_choice", os.getenv("DIRECT_MODE_MODEL_CHOICE", "")
+        ),
         "temperature": float(
-            arguments.get("temperature", os.getenv("DIRECT_MODE_TEMPERATURE", str(LLM_TEMPERATURE)))
+            arguments.get(
+                "temperature",
+                os.getenv("DIRECT_MODE_TEMPERATURE", str(LLM_TEMPERATURE)),
+            )
         ),
         "batch_size": int(
-            arguments.get("batch_size", os.getenv("DIRECT_MODE_BATCH_SIZE", str(BATCH_SIZE_DEFAULT)))
+            arguments.get(
+                "batch_size",
+                os.getenv("DIRECT_MODE_BATCH_SIZE", str(BATCH_SIZE_DEFAULT)),
+            )
         ),
         "max_tokens": int(
-            arguments.get("max_tokens", os.getenv("DIRECT_MODE_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS)))
+            arguments.get(
+                "max_tokens",
+                os.getenv("DIRECT_MODE_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS)),
+            )
         ),
-        "google_api_key": arguments.get("google_api_key", os.getenv("GEMINI_API_KEY", "")),
+        "google_api_key": arguments.get(
+            "google_api_key", os.getenv("GEMINI_API_KEY", "")
+        ),
         "aws_access_key": None,  # Use IAM Role instead of keys
         "aws_secret_key": None,  # Use IAM Role instead of keys
         "aws_region": os.getenv("AWS_REGION", AWS_REGION),
         "hf_token": arguments.get("hf_token", os.getenv("HF_TOKEN", "")),
-        "azure_api_key": arguments.get("azure_api_key", os.getenv("AZURE_OPENAI_API_KEY", "")),
-        "azure_endpoint": arguments.get("azure_endpoint", os.getenv("AZURE_OPENAI_INFERENCE_ENDPOINT", "")),
+        "azure_api_key": arguments.get(
+            "azure_api_key", os.getenv("AZURE_OPENAI_API_KEY", "")
+        ),
+        "azure_endpoint": arguments.get(
+            "azure_endpoint", os.getenv("AZURE_OPENAI_INFERENCE_ENDPOINT", "")
+        ),
         "api_url": arguments.get("api_url", os.getenv("API_URL", "")),
-        "inference_server_model": arguments.get("inference_server_model", os.getenv("CHOSEN_INFERENCE_SERVER_MODEL", "")),
+        "inference_server_model": arguments.get(
+            "inference_server_model", os.getenv("CHOSEN_INFERENCE_SERVER_MODEL", "")
+        ),
         # Topic Extraction Arguments
         "context": arguments.get("context", os.getenv("DIRECT_MODE_CONTEXT", "")),
-        "candidate_topics": arguments.get("candidate_topics", os.getenv("DIRECT_MODE_CANDIDATE_TOPICS", "")),
-        "force_zero_shot": arguments.get("force_zero_shot", os.getenv("DIRECT_MODE_FORCE_ZERO_SHOT", "No")),
-        "force_single_topic": arguments.get("force_single_topic", os.getenv("DIRECT_MODE_FORCE_SINGLE_TOPIC", "No")),
-        "produce_structured_summary": arguments.get("produce_structured_summary", os.getenv("DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY", "No")),
-        "sentiment": arguments.get("sentiment", os.getenv("DIRECT_MODE_SENTIMENT", "Negative or Positive")),
-        "additional_summary_instructions": arguments.get("additional_summary_instructions", os.getenv("DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS", "")),
+        "candidate_topics": arguments.get(
+            "candidate_topics", os.getenv("DIRECT_MODE_CANDIDATE_TOPICS", "")
+        ),
+        "force_zero_shot": arguments.get(
+            "force_zero_shot", os.getenv("DIRECT_MODE_FORCE_ZERO_SHOT", "No")
+        ),
+        "force_single_topic": arguments.get(
+            "force_single_topic", os.getenv("DIRECT_MODE_FORCE_SINGLE_TOPIC", "No")
+        ),
+        "produce_structured_summary": arguments.get(
+            "produce_structured_summary",
+            os.getenv("DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY", "No"),
+        ),
+        "sentiment": arguments.get(
+            "sentiment", os.getenv("DIRECT_MODE_SENTIMENT", "Negative or Positive")
+        ),
+        "additional_summary_instructions": arguments.get(
+            "additional_summary_instructions",
+            os.getenv("DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS", ""),
+        ),
         # Validation Arguments
-        "additional_validation_issues": arguments.get("additional_validation_issues", os.getenv("DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES", "")),
-        "show_previous_table": arguments.get("show_previous_table", os.getenv("DIRECT_MODE_SHOW_PREVIOUS_TABLE", "Yes")),
-        "output_debug_files": arguments.get("output_debug_files", str(OUTPUT_DEBUG_FILES)),
+        "additional_validation_issues": arguments.get(
+            "additional_validation_issues",
+            os.getenv("DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES", ""),
+        ),
+        "show_previous_table": arguments.get(
+            "show_previous_table", os.getenv("DIRECT_MODE_SHOW_PREVIOUS_TABLE", "Yes")
+        ),
+        "output_debug_files": arguments.get(
+            "output_debug_files", str(OUTPUT_DEBUG_FILES)
+        ),
         "max_time_for_loop": int(
             arguments.get("max_time_for_loop", os.getenv("MAX_TIME_FOR_LOOP", "99999"))
         ),
         # Deduplication Arguments
-        "method": arguments.get("method", os.getenv("DIRECT_MODE_DEDUPLICATION_METHOD", "fuzzy")),
-        "similarity_threshold": int(
-            arguments.get("similarity_threshold", os.getenv("DEDUPLICATION_THRESHOLD", DEDUPLICATION_THRESHOLD))
+        "method": arguments.get(
+            "method", os.getenv("DIRECT_MODE_DEDUPLICATION_METHOD", "fuzzy")
         ),
-        "merge_sentiment": arguments.get("merge_sentiment", os.getenv("DIRECT_MODE_MERGE_SENTIMENT", "No")),
-        "merge_general_topics": arguments.get("merge_general_topics", os.getenv("DIRECT_MODE_MERGE_GENERAL_TOPICS", "Yes")),
+        "similarity_threshold": int(
+            arguments.get(
+                "similarity_threshold",
+                os.getenv("DEDUPLICATION_THRESHOLD", DEDUPLICATION_THRESHOLD),
+            )
+        ),
+        "merge_sentiment": arguments.get(
+            "merge_sentiment", os.getenv("DIRECT_MODE_MERGE_SENTIMENT", "No")
+        ),
+        "merge_general_topics": arguments.get(
+            "merge_general_topics", os.getenv("DIRECT_MODE_MERGE_GENERAL_TOPICS", "Yes")
+        ),
         # Summarisation Arguments
-        "summary_format": arguments.get("summary_format", os.getenv("DIRECT_MODE_SUMMARY_FORMAT", "two_paragraph")),
-        "sample_reference_table": arguments.get("sample_reference_table", os.getenv("DIRECT_MODE_SAMPLE_REFERENCE_TABLE", "True")),
+        "summary_format": arguments.get(
+            "summary_format", os.getenv("DIRECT_MODE_SUMMARY_FORMAT", "two_paragraph")
+        ),
+        "sample_reference_table": arguments.get(
+            "sample_reference_table",
+            os.getenv("DIRECT_MODE_SAMPLE_REFERENCE_TABLE", "True"),
+        ),
         "no_of_sampled_summaries": int(
-            arguments.get("no_of_sampled_summaries", os.getenv("DEFAULT_SAMPLED_SUMMARIES", DEFAULT_SAMPLED_SUMMARIES))
+            arguments.get(
+                "no_of_sampled_summaries",
+                os.getenv("DEFAULT_SAMPLED_SUMMARIES", DEFAULT_SAMPLED_SUMMARIES),
+            )
         ),
         "random_seed": int(
             arguments.get("random_seed", os.getenv("LLM_SEED", LLM_SEED))
         ),
         # Output Format Arguments
         "create_xlsx_output": convert_string_to_boolean(
-            arguments.get("create_xlsx_output", os.getenv("DIRECT_MODE_CREATE_XLSX_OUTPUT", "True"))
+            arguments.get(
+                "create_xlsx_output",
+                os.getenv("DIRECT_MODE_CREATE_XLSX_OUTPUT", "True"),
+            )
         ),
         # Logging Arguments
         "save_logs_to_csv": convert_string_to_boolean(
-            arguments.get("save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", str(SAVE_LOGS_TO_CSV)))
+            arguments.get(
+                "save_logs_to_csv", os.getenv("SAVE_LOGS_TO_CSV", str(SAVE_LOGS_TO_CSV))
+            )
         ),
         "save_logs_to_dynamodb": convert_string_to_boolean(
-            arguments.get("save_logs_to_dynamodb", os.getenv("SAVE_LOGS_TO_DYNAMODB", str(SAVE_LOGS_TO_DYNAMODB)))
+            arguments.get(
+                "save_logs_to_dynamodb",
+                os.getenv("SAVE_LOGS_TO_DYNAMODB", str(SAVE_LOGS_TO_DYNAMODB)),
+            )
         ),
         "usage_logs_folder": arguments.get("usage_logs_folder", USAGE_LOGS_FOLDER),
-        "cost_code": arguments.get("cost_code", os.getenv("DEFAULT_COST_CODE", DEFAULT_COST_CODE)),
+        "cost_code": arguments.get(
+            "cost_code", os.getenv("DEFAULT_COST_CODE", DEFAULT_COST_CODE)
+        ),
     }
 
     # Download optional files if they are specified
@@ -349,7 +424,9 @@ def lambda_handler(event, context):
                 if len(s3_path_parts) == 2:
                     prev_bucket = s3_path_parts[0]
                     prev_key = s3_path_parts[1]
-                    local_prev_path = os.path.join(INPUT_DIR, os.path.basename(prev_key))
+                    local_prev_path = os.path.join(
+                        INPUT_DIR, os.path.basename(prev_key)
+                    )
                     download_file_from_s3(prev_bucket, prev_key, local_prev_path)
                     downloaded_previous_files.append(local_prev_path)
                 else:
@@ -361,12 +438,15 @@ def lambda_handler(event, context):
     # 5. Execute the main application logic
     try:
         print("--- Starting CLI Topics Main Function ---")
-        print(f"Arguments passed to cli_main: {json.dumps({k: v for k, v in cli_args.items() if k not in ['aws_access_key', 'aws_secret_key']}, default=str)}")
+        print(
+            f"Arguments passed to cli_main: {json.dumps({k: v for k, v in cli_args.items() if k not in ['aws_access_key', 'aws_secret_key']}, default=str)}"
+        )
         cli_main(direct_mode_args=cli_args)
         print("--- CLI Topics Main Function Finished ---")
     except Exception as e:
         print(f"An error occurred during CLI execution: {e}")
         import traceback
+
         traceback.print_exc()
         # Optionally, re-raise the exception to make the Lambda fail
         raise
@@ -384,4 +464,3 @@ def lambda_handler(event, context):
             f"Processing complete for {input_key}. Output saved to s3://{bucket_name}/{output_s3_prefix}/"
         ),
     }
-

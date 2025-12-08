@@ -158,7 +158,9 @@ def run_cli_topics(
     if sentiment:
         command.extend(["--sentiment", sentiment])
     if additional_summary_instructions:
-        command.extend(["--additional_summary_instructions", additional_summary_instructions])
+        command.extend(
+            ["--additional_summary_instructions", additional_summary_instructions]
+        )
 
     # Add validation arguments
     if additional_validation_issues:
@@ -210,13 +212,13 @@ def run_cli_topics(
     try:
         # Use unbuffered output to avoid hanging
         env = os.environ.copy()
-        env['PYTHONUNBUFFERED'] = '1'
+        env["PYTHONUNBUFFERED"] = "1"
         # Ensure inference server is enabled for testing
-        env['RUN_INFERENCE_SERVER'] = '1'
+        env["RUN_INFERENCE_SERVER"] = "1"
         # Enable mock mode
-        env['USE_MOCK_LLM'] = '1'
-        env['TEST_MODE'] = '1'
-        
+        env["USE_MOCK_LLM"] = "1"
+        env["TEST_MODE"] = "1"
+
         result = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -229,9 +231,9 @@ def run_cli_topics(
 
         # Read output in real-time to avoid deadlocks
         start_time = time.time()
-        
+
         # For Windows, we need a different approach
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             # On Windows, use communicate with timeout
             try:
                 stdout, stderr = result.communicate(timeout=timeout)
@@ -242,6 +244,7 @@ def run_cli_topics(
         else:
             # On Unix, we can use select for real-time reading
             import select
+
             stdout_lines = []
             while result.poll() is None:
                 ready, _, _ = select.select([result.stdout], [], [], 0.1)
@@ -254,15 +257,15 @@ def run_cli_topics(
                 if time.time() - start_time > timeout:
                     result.kill()
                     raise subprocess.TimeoutExpired(result.args, timeout)
-            
+
             # Read remaining output
             remaining = result.stdout.read()
             if remaining:
-                print(remaining, end='', flush=True)
+                print(remaining, end="", flush=True)
                 stdout_lines.append(remaining)
-            
-            stdout = ''.join(stdout_lines)
-            stderr = ''  # Combined with stdout
+
+            stdout = "".join(stdout_lines)
+            stderr = ""  # Combined with stdout
 
         print("--- SCRIPT STDOUT ---")
         if stdout:
@@ -281,7 +284,9 @@ def run_cli_topics(
                 print(f"   {i+1}. {error_type}")
             if analysis["error_messages"]:
                 print("   Error messages:")
-                for msg in analysis["error_messages"][:3]:  # Show first 3 error messages
+                for msg in analysis["error_messages"][
+                    :3
+                ]:  # Show first 3 error messages
                     print(f"     - {msg}")
             return False
         elif result.returncode == 0:
@@ -472,107 +477,109 @@ def run_app_direct_mode(
 
     # 2. Build environment variables for direct mode
     env = os.environ.copy()
-    env['PYTHONUNBUFFERED'] = '1'
-    env['RUN_INFERENCE_SERVER'] = '1'
-    env['USE_MOCK_LLM'] = '1'
-    env['TEST_MODE'] = '1'
-    
+    env["PYTHONUNBUFFERED"] = "1"
+    env["RUN_INFERENCE_SERVER"] = "1"
+    env["USE_MOCK_LLM"] = "1"
+    env["TEST_MODE"] = "1"
+
     # Enable direct mode
-    env['RUN_DIRECT_MODE'] = '1'
-    
+    env["RUN_DIRECT_MODE"] = "1"
+
     # Task selection
-    env['DIRECT_MODE_TASK'] = task
-    
+    env["DIRECT_MODE_TASK"] = task
+
     # General arguments
     if input_file:
         # Use pipe separator to handle file paths with spaces
-        env['DIRECT_MODE_INPUT_FILE'] = input_abs_path
-    env['DIRECT_MODE_OUTPUT_DIR'] = output_abs_dir
+        env["DIRECT_MODE_INPUT_FILE"] = input_abs_path
+    env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
     if text_column:
-        env['DIRECT_MODE_TEXT_COLUMN'] = text_column
+        env["DIRECT_MODE_TEXT_COLUMN"] = text_column
     if previous_output_files:
         # Use pipe separator to handle file paths with spaces
-        env['DIRECT_MODE_PREVIOUS_OUTPUT_FILES'] = '|'.join(previous_output_files)
+        env["DIRECT_MODE_PREVIOUS_OUTPUT_FILES"] = "|".join(previous_output_files)
     if username:
-        env['DIRECT_MODE_USERNAME'] = username
+        env["DIRECT_MODE_USERNAME"] = username
     if save_to_user_folders is not None:
-        env['SESSION_OUTPUT_FOLDER'] = str(save_to_user_folders)
+        env["SESSION_OUTPUT_FOLDER"] = str(save_to_user_folders)
     if excel_sheets:
-        env['DIRECT_MODE_EXCEL_SHEETS'] = ','.join(excel_sheets)
+        env["DIRECT_MODE_EXCEL_SHEETS"] = ",".join(excel_sheets)
     if group_by:
-        env['DIRECT_MODE_GROUP_BY'] = group_by
-    
+        env["DIRECT_MODE_GROUP_BY"] = group_by
+
     # Model configuration
     if model_choice:
-        env['DIRECT_MODE_MODEL_CHOICE'] = model_choice
+        env["DIRECT_MODE_MODEL_CHOICE"] = model_choice
     if temperature is not None:
-        env['DIRECT_MODE_TEMPERATURE'] = str(temperature)
+        env["DIRECT_MODE_TEMPERATURE"] = str(temperature)
     if batch_size is not None:
-        env['DIRECT_MODE_BATCH_SIZE'] = str(batch_size)
+        env["DIRECT_MODE_BATCH_SIZE"] = str(batch_size)
     if max_tokens is not None:
-        env['DIRECT_MODE_MAX_TOKENS'] = str(max_tokens)
+        env["DIRECT_MODE_MAX_TOKENS"] = str(max_tokens)
     if api_url:
-        env['API_URL'] = api_url
+        env["API_URL"] = api_url
     if inference_server_model:
-        env['DIRECT_MODE_INFERENCE_SERVER_MODEL'] = inference_server_model
-    
+        env["DIRECT_MODE_INFERENCE_SERVER_MODEL"] = inference_server_model
+
     # Topic extraction arguments
     if context:
-        env['DIRECT_MODE_CONTEXT'] = context
+        env["DIRECT_MODE_CONTEXT"] = context
     if candidate_topics:
-        env['DIRECT_MODE_CANDIDATE_TOPICS'] = candidate_topics
+        env["DIRECT_MODE_CANDIDATE_TOPICS"] = candidate_topics
     if force_zero_shot:
-        env['DIRECT_MODE_FORCE_ZERO_SHOT'] = force_zero_shot
+        env["DIRECT_MODE_FORCE_ZERO_SHOT"] = force_zero_shot
     if force_single_topic:
-        env['DIRECT_MODE_FORCE_SINGLE_TOPIC'] = force_single_topic
+        env["DIRECT_MODE_FORCE_SINGLE_TOPIC"] = force_single_topic
     if produce_structured_summary:
-        env['DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY'] = produce_structured_summary
+        env["DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY"] = produce_structured_summary
     if sentiment:
-        env['DIRECT_MODE_SENTIMENT'] = sentiment
+        env["DIRECT_MODE_SENTIMENT"] = sentiment
     if additional_summary_instructions:
-        env['DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS'] = additional_summary_instructions
-    
+        env["DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS"] = (
+            additional_summary_instructions
+        )
+
     # Validation arguments
     if additional_validation_issues:
-        env['DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES'] = additional_validation_issues
+        env["DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES"] = additional_validation_issues
     if show_previous_table:
-        env['DIRECT_MODE_SHOW_PREVIOUS_TABLE'] = show_previous_table
+        env["DIRECT_MODE_SHOW_PREVIOUS_TABLE"] = show_previous_table
     if output_debug_files:
-        env['OUTPUT_DEBUG_FILES'] = output_debug_files
+        env["OUTPUT_DEBUG_FILES"] = output_debug_files
     if max_time_for_loop is not None:
-        env['DIRECT_MODE_MAX_TIME_FOR_LOOP'] = str(max_time_for_loop)
-    
+        env["DIRECT_MODE_MAX_TIME_FOR_LOOP"] = str(max_time_for_loop)
+
     # Deduplication arguments
     if method:
-        env['DIRECT_MODE_DEDUP_METHOD'] = method
+        env["DIRECT_MODE_DEDUP_METHOD"] = method
     if similarity_threshold is not None:
-        env['DIRECT_MODE_SIMILARITY_THRESHOLD'] = str(similarity_threshold)
+        env["DIRECT_MODE_SIMILARITY_THRESHOLD"] = str(similarity_threshold)
     if merge_sentiment:
-        env['DIRECT_MODE_MERGE_SENTIMENT'] = merge_sentiment
+        env["DIRECT_MODE_MERGE_SENTIMENT"] = merge_sentiment
     if merge_general_topics:
-        env['DIRECT_MODE_MERGE_GENERAL_TOPICS'] = merge_general_topics
-    
+        env["DIRECT_MODE_MERGE_GENERAL_TOPICS"] = merge_general_topics
+
     # Summarisation arguments
     if summary_format:
-        env['DIRECT_MODE_SUMMARY_FORMAT'] = summary_format
+        env["DIRECT_MODE_SUMMARY_FORMAT"] = summary_format
     if sample_reference_table:
-        env['DIRECT_MODE_SAMPLE_REFERENCE_TABLE'] = sample_reference_table
+        env["DIRECT_MODE_SAMPLE_REFERENCE_TABLE"] = sample_reference_table
     if no_of_sampled_summaries is not None:
-        env['DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES'] = str(no_of_sampled_summaries)
+        env["DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES"] = str(no_of_sampled_summaries)
     if random_seed is not None:
-        env['DIRECT_MODE_RANDOM_SEED'] = str(random_seed)
-    
+        env["DIRECT_MODE_RANDOM_SEED"] = str(random_seed)
+
     # Output format arguments
     if create_xlsx_output is not None:
-        env['DIRECT_MODE_CREATE_XLSX_OUTPUT'] = str(create_xlsx_output)
-    
+        env["DIRECT_MODE_CREATE_XLSX_OUTPUT"] = str(create_xlsx_output)
+
     # Logging arguments
     if save_logs_to_csv is not None:
-        env['SAVE_LOGS_TO_CSV'] = str(save_logs_to_csv)
+        env["SAVE_LOGS_TO_CSV"] = str(save_logs_to_csv)
     if save_logs_to_dynamodb is not None:
-        env['SAVE_LOGS_TO_DYNAMODB'] = str(save_logs_to_dynamodb)
+        env["SAVE_LOGS_TO_DYNAMODB"] = str(save_logs_to_dynamodb)
     if cost_code:
-        env['DEFAULT_COST_CODE'] = cost_code
+        env["DEFAULT_COST_CODE"] = cost_code
 
     # 3. Build command (just run app.py, no arguments needed in direct mode)
     command = ["python", app_abs_path]
@@ -598,9 +605,9 @@ def run_app_direct_mode(
 
         # Read output in real-time to avoid deadlocks
         start_time = time.time()
-        
+
         # For Windows, we need a different approach
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             # On Windows, use communicate with timeout
             try:
                 stdout, stderr = result.communicate(timeout=timeout)
@@ -611,6 +618,7 @@ def run_app_direct_mode(
         else:
             # On Unix, we can use select for real-time reading
             import select
+
             stdout_lines = []
             while result.poll() is None:
                 ready, _, _ = select.select([result.stdout], [], [], 0.1)
@@ -623,15 +631,15 @@ def run_app_direct_mode(
                 if time.time() - start_time > timeout:
                     result.kill()
                     raise subprocess.TimeoutExpired(result.args, timeout)
-            
+
             # Read remaining output
             remaining = result.stdout.read()
             if remaining:
-                print(remaining, end='', flush=True)
+                print(remaining, end="", flush=True)
                 stdout_lines.append(remaining)
-            
-            stdout = ''.join(stdout_lines)
-            stderr = ''  # Combined with stdout
+
+            stdout = "".join(stdout_lines)
+            stderr = ""  # Combined with stdout
 
         print("--- SCRIPT STDOUT ---")
         if stdout:
@@ -650,7 +658,9 @@ def run_app_direct_mode(
                 print(f"   {i+1}. {error_type}")
             if analysis["error_messages"]:
                 print("   Error messages:")
-                for msg in analysis["error_messages"][:3]:  # Show first 3 error messages
+                for msg in analysis["error_messages"][
+                    :3
+                ]:  # Show first 3 error messages
                     print(f"     - {msg}")
             return False
         elif result.returncode == 0:
@@ -717,9 +727,7 @@ class TestCLITopicsExamples(unittest.TestCase):
     def test_extract_topics_default_settings(self):
         """Test: Extract topics from a CSV file with default settings"""
         print("\n=== Testing topic extraction with default settings ===")
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
@@ -743,9 +751,7 @@ class TestCLITopicsExamples(unittest.TestCase):
     def test_extract_topics_custom_model_and_context(self):
         """Test: Extract topics with custom model and context"""
         print("\n=== Testing topic extraction with custom model and context ===")
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
@@ -764,15 +770,15 @@ class TestCLITopicsExamples(unittest.TestCase):
             save_logs_to_csv=False,
         )
 
-        self.assertTrue(result, "Topic extraction with custom model and context should succeed")
+        self.assertTrue(
+            result, "Topic extraction with custom model and context should succeed"
+        )
         print("✅ Topic extraction with custom model and context passed")
 
     def test_extract_topics_with_grouping(self):
         """Test: Extract topics with grouping"""
         print("\n=== Testing topic extraction with grouping ===")
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
@@ -829,11 +835,9 @@ class TestCLITopicsExamples(unittest.TestCase):
     def test_deduplicate_topics_fuzzy(self):
         """Test: Deduplicate topics using fuzzy matching"""
         print("\n=== Testing topic deduplication with fuzzy matching ===")
-        
+
         # First, we need to create some output files by running extraction
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
@@ -858,6 +862,7 @@ class TestCLITopicsExamples(unittest.TestCase):
         # Find the output files (they should be in temp_output_dir)
         # The file names follow a pattern like: {input_file_name}_col_{text_column}_reference_table.csv
         import glob
+
         reference_files = glob.glob(
             os.path.join(self.temp_output_dir, "*reference_table.csv")
         )
@@ -879,17 +884,17 @@ class TestCLITopicsExamples(unittest.TestCase):
             save_logs_to_csv=False,
         )
 
-        self.assertTrue(result, "Topic deduplication with fuzzy matching should succeed")
+        self.assertTrue(
+            result, "Topic deduplication with fuzzy matching should succeed"
+        )
         print("✅ Topic deduplication with fuzzy matching passed")
 
     def test_deduplicate_topics_llm(self):
         """Test: Deduplicate topics using LLM"""
         print("\n=== Testing topic deduplication with LLM ===")
-        
+
         # First, we need to create some output files by running extraction
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
@@ -913,6 +918,7 @@ class TestCLITopicsExamples(unittest.TestCase):
 
         # Find the output files
         import glob
+
         reference_files = glob.glob(
             os.path.join(self.temp_output_dir, "*reference_table.csv")
         )
@@ -942,9 +948,7 @@ class TestCLITopicsExamples(unittest.TestCase):
     def test_all_in_one_pipeline(self):
         """Test: Run complete pipeline (extract, deduplicate, summarise)"""
         print("\n=== Testing all-in-one pipeline ===")
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
@@ -969,16 +973,12 @@ class TestCLITopicsExamples(unittest.TestCase):
     def test_direct_mode_extract(self):
         """Test: Run app in direct mode for topic extraction"""
         print("\n=== Testing direct mode - topic extraction ===")
-        input_file = os.path.join(
-            self.example_data_dir, "combined_case_notes.csv"
-        )
+        input_file = os.path.join(self.example_data_dir, "combined_case_notes.csv")
 
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
 
-        app_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "app.py"
-        )
+        app_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py")
 
         if not os.path.isfile(app_path):
             self.skipTest(f"App script not found: {app_path}")
@@ -1023,6 +1023,7 @@ def run_all_tests():
     # Add GUI tests
     try:
         from test.test_gui_only import TestGUIAppOnly
+
         gui_suite = loader.loadTestsFromTestCase(TestGUIAppOnly)
         suite.addTests(gui_suite)
         print("GUI tests included in test suite.")
@@ -1064,4 +1065,3 @@ if __name__ == "__main__":
     # Run the test suite
     success = run_all_tests()
     exit(0 if success else 1)
-

@@ -517,7 +517,11 @@ def collect_output_csvs_and_create_excel_output(
                     usage_logs[
                         "Select the open text column of interest. In an Excel file, this shows columns across all sheets."
                     ]
-                    == (chosen_cols[0] if isinstance(chosen_cols, list) and chosen_cols else chosen_cols)
+                    == (
+                        chosen_cols[0]
+                        if isinstance(chosen_cols, list) and chosen_cols
+                        else chosen_cols
+                    )
                 ),
                 :,
             ]
@@ -550,7 +554,11 @@ def collect_output_csvs_and_create_excel_output(
         front_characters=False,
     )
     # Extract first column name as string for cleaning and Excel output
-    chosen_col_str = chosen_cols[0] if isinstance(chosen_cols, list) and chosen_cols else str(chosen_cols) if chosen_cols else ""
+    chosen_col_str = (
+        chosen_cols[0]
+        if isinstance(chosen_cols, list) and chosen_cols
+        else str(chosen_cols) if chosen_cols else ""
+    )
     in_column_cleaned = clean_column_name(chosen_col_str, max_length=20)
     file_name_cleaned = clean_column_name(
         file_name, max_length=20, front_characters=True

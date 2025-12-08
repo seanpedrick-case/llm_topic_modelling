@@ -4,12 +4,11 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import List
 
 import pandas as pd
 
+from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.config import (
-    ACCESS_LOGS_FOLDER,
     API_URL,
     AWS_ACCESS_KEY,
     AWS_REGION,
@@ -19,11 +18,9 @@ from tools.config import (
     BATCH_SIZE_DEFAULT,
     CHOSEN_INFERENCE_SERVER_MODEL,
     CSV_USAGE_LOG_HEADERS,
-    DEFAULT_COST_CODE,
     DEDUPLICATION_THRESHOLD,
+    DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
-    DYNAMODB_USAGE_LOG_HEADERS,
-    FEEDBACK_LOGS_FOLDER,
     GEMINI_API_KEY,
     HF_TOKEN,
     INPUT_FOLDER,
@@ -33,12 +30,9 @@ from tools.config import (
     MAX_TIME_FOR_LOOP,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
-    S3_LOG_BUCKET,
-    S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SESSION_OUTPUT_FOLDER,
-    USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     convert_string_to_boolean,
@@ -46,7 +40,6 @@ from tools.config import (
     default_model_source,
     model_name_map,
 )
-from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.dedup_summaries import (
     deduplicate_topics,
     deduplicate_topics_llm,
@@ -127,7 +120,7 @@ def write_usage_log(
 ):
     """
     Write usage log entry to CSV file.
-    
+
     Args:
         session_hash: Session identifier
         file_name: Name of the input file
@@ -148,14 +141,13 @@ def write_usage_log(
 
     if not conversation_metadata:
         conversation_metadata = ""
-        include_conversation_metadata = False
-    
+
     # Ensure usage logs folder exists
     os.makedirs(USAGE_LOGS_FOLDER, exist_ok=True)
-    
+
     # Construct full file path
     usage_log_file_path = os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
-    
+
     # Prepare data row - order matches app.py component order
     # session_hash_textbox, original_data_file_name_textbox, in_colnames, model_choice,
     # conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num,
@@ -163,7 +155,11 @@ def write_usage_log(
     data = [
         session_hash,
         file_name,
-        text_column if isinstance(text_column, str) else (text_column[0] if text_column else ""),
+        (
+            text_column
+            if isinstance(text_column, str)
+            else (text_column[0] if text_column else "")
+        ),
         model_choice,
         conversation_metadata if conversation_metadata else "",
         input_tokens,
@@ -172,19 +168,19 @@ def write_usage_log(
         estimated_time_taken,
         cost_code,
     ]
-    
+
     # Add id and timestamp
     generated_id = str(uuid.uuid4())
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     data.extend([generated_id, timestamp])
-    
+
     # Use custom headers if available, otherwise use default
     # Note: CSVLogger_custom uses component labels, but we need to match what collect_output_csvs_and_create_excel_output expects
     if CSV_USAGE_LOG_HEADERS and len(CSV_USAGE_LOG_HEADERS) == len(data):
         headers = CSV_USAGE_LOG_HEADERS
     else:
         # Default headers - these should match what CSVLogger_custom creates from Gradio component labels
-        # The components are: session_hash_textbox, original_data_file_name_textbox, in_colnames, 
+        # The components are: session_hash_textbox, original_data_file_name_textbox, in_colnames,
         # model_choice, conversation_metadata_textbox_placeholder, input_tokens_num, output_tokens_num,
         # number_of_calls_num, estimated_time_taken_number, cost_code_choice_drop
         # Since these are hidden components without labels, CSVLogger_custom uses component variable names
@@ -206,7 +202,7 @@ def write_usage_log(
             "id",
             "timestamp",
         ]
-    
+
     # Write to CSV
     file_exists = os.path.exists(usage_log_file_path)
     with open(usage_log_file_path, "a", newline="", encoding="utf-8-sig") as csvfile:
@@ -215,7 +211,7 @@ def write_usage_log(
             # Write headers if file doesn't exist
             writer.writerow(headers)
         writer.writerow(data)
-    
+
     if save_to_dynamodb:
         # DynamoDB logging not implemented in CLI - would require boto3 setup
         print("Note: DynamoDB logging is not implemented in CLI mode.")
@@ -309,7 +305,14 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     task_group = parser.add_argument_group("Task Selection")
     task_group.add_argument(
         "--task",
-        choices=["extract", "validate", "deduplicate", "summarise", "overall_summary", "all_in_one"],
+        choices=[
+            "extract",
+            "validate",
+            "deduplicate",
+            "summarise",
+            "overall_summary",
+            "all_in_one",
+        ],
         default="extract",
         help="Task to perform: extract (topic extraction), validate (validate topics), deduplicate (deduplicate topics), summarise (summarise topics), overall_summary (create overall summary), or all_in_one (complete pipeline).",
     )
@@ -462,7 +465,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     )
     extract_group.add_argument(
         "--sentiment",
-        choices=["Negative or Positive", "Negative, Neutral, or Positive", "Do not assess sentiment"],
+        choices=[
+            "Negative or Positive",
+            "Negative, Neutral, or Positive",
+            "Do not assess sentiment",
+        ],
         default="Negative or Positive",
         help="Response sentiment analysis option. Default: Negative or Positive",
     )
@@ -598,16 +605,21 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     # This allows users to specify which inference-server model to use
     if args.inference_server_model:
         # Check if the current model_choice is an inference-server model
-        model_source = model_name_map.get(args.model_choice, {}).get("source", default_model_source)
+        model_source = model_name_map.get(args.model_choice, {}).get(
+            "source", default_model_source
+        )
         # If model_source is "inference-server" OR if inference_server_model is explicitly provided
         # (different from default), use it
-        if model_source == "inference-server" or args.inference_server_model != CHOSEN_INFERENCE_SERVER_MODEL:
+        if (
+            model_source == "inference-server"
+            or args.inference_server_model != CHOSEN_INFERENCE_SERVER_MODEL
+        ):
             args.model_choice = args.inference_server_model
             # Ensure the model is registered in model_name_map with inference-server source
             if args.model_choice not in model_name_map:
                 model_name_map[args.model_choice] = {
                     "short_name": args.model_choice,
-                    "source": "inference-server"
+                    "source": "inference-server",
                 }
             # Also update the model_source to ensure it's set correctly
             model_name_map[args.model_choice]["source"] = "inference-server"
@@ -616,7 +628,9 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     # Convert string boolean variables to boolean
     args.save_to_user_folders = convert_string_to_boolean(args.save_to_user_folders)
     args.save_logs_to_csv = convert_string_to_boolean(str(args.save_logs_to_csv))
-    args.save_logs_to_dynamodb = convert_string_to_boolean(str(args.save_logs_to_dynamodb))
+    args.save_logs_to_dynamodb = convert_string_to_boolean(
+        str(args.save_logs_to_dynamodb)
+    )
     args.sample_reference_table = args.sample_reference_table == "True"
     args.output_debug_files = args.output_debug_files == "True"
 
@@ -644,7 +658,10 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         print(f"Error: --input_file is required for '{args.task}' task.")
         return
 
-    if args.task in ["validate", "deduplicate", "summarise", "overall_summary"] and not args.previous_output_files:
+    if (
+        args.task in ["validate", "deduplicate", "summarise", "overall_summary"]
+        and not args.previous_output_files
+    ):
         print(f"Error: --previous_output_files is required for '{args.task}' task.")
         return
 
@@ -658,11 +675,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         # Task 1: Extract Topics
         if args.task == "extract":
             print("--- Starting Topic Extraction Workflow... ---")
-            
+
             # Load data file
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
-            
+
             file_data, file_name, total_number_of_batches = load_in_data_file(
                 file_paths=args.input_file,
                 in_colnames=[args.text_column],
@@ -795,7 +812,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         summarised_output_df=pd.DataFrame(),  # No summaries yet
                         missing_df_state=missing_df_state,
                         excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
-                        usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                        usage_logs_location=(
+                            os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                            if args.save_logs_to_csv
+                            else ""
+                        ),
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
@@ -808,11 +829,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         # Task 2: Validate Topics
         elif args.task == "validate":
             print("--- Starting Topic Validation Workflow... ---")
-            
+
             # Load data file
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
-            
+
             file_data, file_name, total_number_of_batches = load_in_data_file(
                 file_paths=args.input_file,
                 in_colnames=[args.text_column],
@@ -928,7 +949,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         summarised_output_df=pd.DataFrame(),  # No summaries yet
                         missing_df_state=missing_df_state,
                         excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
-                        usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                        usage_logs_location=(
+                            os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                            if args.save_logs_to_csv
+                            else ""
+                        ),
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
@@ -941,7 +966,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         # Task 3: Deduplicate Topics
         elif args.task == "deduplicate":
             print("--- Starting Topic Deduplication Workflow... ---")
-            
+
             # Load previous output files
             (
                 reference_df,
@@ -975,7 +1000,9 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 )
             else:
                 # LLM deduplication
-                model_source = model_name_map.get(args.model_choice, {}).get("source", default_model_source)
+                model_source = model_name_map.get(args.model_choice, {}).get(
+                    "source", default_model_source
+                )
                 (
                     ref_df_after_dedup,
                     unique_df_after_dedup,
@@ -1005,7 +1032,9 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                     in_data_files=args.input_file if args.input_file else list(),
                     chosen_cols=[args.text_column] if args.text_column else list(),
                     output_folder=args.output_dir,
-                    candidate_topics=args.candidate_topics if args.candidate_topics else None,
+                    candidate_topics=(
+                        args.candidate_topics if args.candidate_topics else None
+                    ),
                     azure_endpoint=args.azure_endpoint,
                     output_debug_files=str(args.output_debug_files),
                     api_url=args.api_url if args.api_url else API_URL,
@@ -1023,11 +1052,21 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             # Write usage log (only for LLM deduplication which has token counts)
             if args.method == "llm":
                 # Extract token counts from LLM deduplication result
-                llm_input_tokens = input_tokens_num if 'input_tokens_num' in locals() else 0
-                llm_output_tokens = output_tokens_num if 'output_tokens_num' in locals() else 0
-                llm_calls = number_of_calls_num if 'number_of_calls_num' in locals() else 0
-                llm_time = estimated_time_taken_number if 'estimated_time_taken_number' in locals() else processing_time
-                
+                llm_input_tokens = (
+                    input_tokens_num if "input_tokens_num" in locals() else 0
+                )
+                llm_output_tokens = (
+                    output_tokens_num if "output_tokens_num" in locals() else 0
+                )
+                llm_calls = (
+                    number_of_calls_num if "number_of_calls_num" in locals() else 0
+                )
+                llm_time = (
+                    estimated_time_taken_number
+                    if "estimated_time_taken_number" in locals()
+                    else processing_time
+                )
+
                 write_usage_log(
                     session_hash=session_hash,
                     file_name=working_data_file_name_textbox,
@@ -1059,7 +1098,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         summarised_output_df=pd.DataFrame(),  # No summaries yet
                         missing_df_state=pd.DataFrame(),
                         excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
-                        usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                        usage_logs_location=(
+                            os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                            if args.save_logs_to_csv
+                            else ""
+                        ),
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
@@ -1072,7 +1115,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         # Task 4: Summarise Topics
         elif args.task == "summarise":
             print("--- Starting Topic Summarisation Workflow... ---")
-            
+
             # Load previous output files
             (
                 reference_df,
@@ -1186,7 +1229,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         summarised_output_df=pd.DataFrame(),  # Summaries are in the revised dataframes
                         missing_df_state=pd.DataFrame(),
                         excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
-                        usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                        usage_logs_location=(
+                            os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                            if args.save_logs_to_csv
+                            else ""
+                        ),
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
@@ -1199,7 +1246,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         # Task 5: Overall Summary
         elif args.task == "overall_summary":
             print("--- Starting Overall Summary Workflow... ---")
-            
+
             # Load previous output files
             (
                 reference_df,
@@ -1287,7 +1334,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         summarised_output_df=summarised_output_df,
                         missing_df_state=pd.DataFrame(),
                         excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
-                        usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                        usage_logs_location=(
+                            os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                            if args.save_logs_to_csv
+                            else ""
+                        ),
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
@@ -1300,11 +1351,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         # Task 6: All-in-One Pipeline
         elif args.task == "all_in_one":
             print("--- Starting All-in-One Pipeline Workflow... ---")
-            
+
             # Load data file
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
-            
+
             file_data, file_name, total_number_of_batches = load_in_data_file(
                 file_paths=args.input_file,
                 in_colnames=[args.text_column],
@@ -1403,7 +1454,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 random_seed=args.random_seed,
                 log_files_output_list_state=list(),
                 model_name_map_state=model_name_map,
-                usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                usage_logs_location=(
+                    os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                    if args.save_logs_to_csv
+                    else ""
+                ),
                 existing_logged_content=list(),
                 additional_instructions_summary_format=args.additional_summary_instructions,
                 additional_validation_issues_provided="",
@@ -1457,7 +1512,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         summarised_output_df=summarised_output_df,
                         missing_df_state=missing_df_state,
                         excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
-                        usage_logs_location=os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME) if args.save_logs_to_csv else "",
+                        usage_logs_location=(
+                            os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+                            if args.save_logs_to_csv
+                            else ""
+                        ),
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
@@ -1469,14 +1528,16 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
 
         else:
             print(f"Error: Invalid task '{args.task}'.")
-            print("Valid options: 'extract', 'validate', 'deduplicate', 'summarise', 'overall_summary', or 'all_in_one'")
+            print(
+                "Valid options: 'extract', 'validate', 'deduplicate', 'summarise', 'overall_summary', or 'all_in_one'"
+            )
 
     except Exception as e:
         print(f"\nAn error occurred during the workflow: {e}")
         import traceback
+
         traceback.print_exc()
 
 
 if __name__ == "__main__":
     main()
-
