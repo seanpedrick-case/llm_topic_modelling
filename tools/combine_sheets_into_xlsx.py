@@ -70,7 +70,7 @@ def add_cover_sheet(
         "Number of LLM calls": llm_call_number,
         "Total number of input tokens from LLM calls": input_tokens,
         "Total number of output tokens from LLM calls": output_tokens,
-        "Total time taken for all LLM calls (seconds)": time_taken,
+        "Total time taken for all LLM calls (seconds)": round(float(time_taken), 1),
     }
 
     for i, (label, value) in enumerate(metadata.items()):
@@ -472,6 +472,10 @@ def collect_output_csvs_and_create_excel_output(
     sheet_names.append("Original data")
     column_widths["Original data"] = {"A": 20, "B": 20, "C": 20}
     wrap_text_columns["Original data"] = ["C"]
+    if isinstance(chosen_cols, list) and chosen_cols:
+        chosen_cols = chosen_cols[0]
+    else:
+        chosen_cols = str(chosen_cols) if chosen_cols else ""
 
     # Intro page text
     intro_text = [
@@ -513,7 +517,7 @@ def collect_output_csvs_and_create_excel_output(
                     usage_logs[
                         "Select the open text column of interest. In an Excel file, this shows columns across all sheets."
                     ]
-                    == chosen_cols
+                    == (chosen_cols[0] if isinstance(chosen_cols, list) and chosen_cols else chosen_cols)
                 ),
                 :,
             ]
@@ -545,7 +549,9 @@ def collect_output_csvs_and_create_excel_output(
         max_length=20,
         front_characters=False,
     )
-    in_column_cleaned = clean_column_name(chosen_cols, max_length=20)
+    # Extract first column name as string for cleaning and Excel output
+    chosen_col_str = chosen_cols[0] if isinstance(chosen_cols, list) and chosen_cols else str(chosen_cols) if chosen_cols else ""
+    in_column_cleaned = clean_column_name(chosen_col_str, max_length=20)
     file_name_cleaned = clean_column_name(
         file_name, max_length=20, front_characters=True
     )
@@ -578,7 +584,7 @@ def collect_output_csvs_and_create_excel_output(
         number_of_responses=number_of_responses,
         number_of_responses_with_text=number_of_responses_with_text,
         number_of_responses_with_text_five_plus_words=number_of_responses_with_text_five_plus_words,
-        column_name=chosen_cols,
+        column_name=chosen_col_str,
         number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment,
         file_name=short_file_name,
         unique_reference_numbers=unique_reference_numbers,

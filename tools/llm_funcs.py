@@ -7,6 +7,24 @@ from typing import List, Tuple
 import boto3
 import pandas as pd
 import requests
+
+# Import mock patches if in test mode
+if os.environ.get('USE_MOCK_LLM') == '1' or os.environ.get('TEST_MODE') == '1':
+    try:
+        # Try to import and apply mock patches
+        import sys
+        test_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'test')
+        if test_dir not in sys.path:
+            sys.path.insert(0, test_dir)
+        try:
+            from mock_llm_calls import apply_mock_patches
+            apply_mock_patches()
+        except ImportError:
+            # If mock module not found, continue without mocking
+            pass
+    except Exception:
+        # If anything fails, continue without mocking
+        pass
 from google import genai as ai
 from google.genai import types
 from gradio import Progress

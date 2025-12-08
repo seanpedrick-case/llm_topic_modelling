@@ -12,6 +12,7 @@ from tools.config import (
     ACCESS_LOGS_FOLDER,
     API_URL,
     AWS_ACCESS_KEY,
+    AWS_REGION,
     AWS_SECRET_KEY,
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_INFERENCE_ENDPOINT,
@@ -51,6 +52,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     RUN_INFERENCE_SERVER,
     RUN_MCP_SERVER,
+    RUN_DIRECT_MODE,
     S3_ACCESS_LOGS_FOLDER,
     S3_COST_CODES_PATH,
     S3_FEEDBACK_LOGS_FOLDER,
@@ -70,6 +72,46 @@ from tools.config import (
     ensure_folder_exists,
     model_name_map,
     model_sources,
+    # Direct mode variables
+    DIRECT_MODE_TASK,
+    DIRECT_MODE_INPUT_FILE,
+    DIRECT_MODE_OUTPUT_DIR,
+    DIRECT_MODE_TEXT_COLUMN,
+    DIRECT_MODE_PREVIOUS_OUTPUT_FILES,
+    DIRECT_MODE_USERNAME,
+    DIRECT_MODE_GROUP_BY,
+    DIRECT_MODE_EXCEL_SHEETS,
+    DIRECT_MODE_MODEL_CHOICE,
+    DIRECT_MODE_TEMPERATURE,
+    DIRECT_MODE_BATCH_SIZE,
+    DIRECT_MODE_MAX_TOKENS,
+    DIRECT_MODE_CONTEXT,
+    DIRECT_MODE_CANDIDATE_TOPICS,
+    DIRECT_MODE_FORCE_ZERO_SHOT,
+    DIRECT_MODE_FORCE_SINGLE_TOPIC,
+    DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
+    DIRECT_MODE_SENTIMENT,
+    DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS,
+    DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES,
+    DIRECT_MODE_SHOW_PREVIOUS_TABLE,
+    DIRECT_MODE_MAX_TIME_FOR_LOOP,
+    DIRECT_MODE_DEDUP_METHOD,
+    DIRECT_MODE_SIMILARITY_THRESHOLD,
+    DIRECT_MODE_MERGE_SENTIMENT,
+    DIRECT_MODE_MERGE_GENERAL_TOPICS,
+    DIRECT_MODE_SUMMARY_FORMAT,
+    DIRECT_MODE_SAMPLE_REFERENCE_TABLE,
+    DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES,
+    DIRECT_MODE_RANDOM_SEED,
+    DIRECT_MODE_CREATE_XLSX_OUTPUT,
+    DIRECT_MODE_INFERENCE_SERVER_MODEL,
+    SESSION_OUTPUT_FOLDER,
+    OUTPUT_DEBUG_FILES,
+    DEDUPLICATION_THRESHOLD,
+    DEFAULT_SAMPLED_SUMMARIES,
+    MAX_TIME_FOR_LOOP,
+    CHOSEN_INFERENCE_SERVER_MODEL,
+    LLM_MAX_NEW_TOKENS,
 )
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.dedup_summaries import (
@@ -653,108 +695,160 @@ with app:
                 "Example data loaded. Now click on the 'Extract topics...' button below to run the full suite of topic extraction, deduplication, and summarisation."
             )
 
-        examples = gr.Examples(
-            examples=[
-                [
-                    ["example_data/dummy_consultation_response.csv"],
-                    "Response text",
-                    "Consultation for the construction of flats on Main Street",
-                    "dummy_consultation_response.csv",
-                    [
-                        "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"
+        # Check if required example files exist before creating Examples
+        # This prevents errors in CI environments where example files may not be present
+        required_example_files = [
+            "example_data/dummy_consultation_response.csv",
+            "example_data/combined_case_notes.csv",
+        ]
+        example_files_exist = all(os.path.exists(f) for f in required_example_files)
+
+        # Only create Examples if files exist, otherwise create empty Examples to avoid errors
+        if example_files_exist:
+            try:
+                examples = gr.Examples(
+                    examples=[
+                        [
+                            ["example_data/dummy_consultation_response.csv"],
+                            "Response text",
+                            "Consultation for the construction of flats on Main Street",
+                            "dummy_consultation_response.csv",
+                            [
+                                "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"
+                            ],
+                            dummy_consultation_table,
+                            "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            None,
+                            "No",
+                            None,
+                            5,
+                        ],
+                        [
+                            ["example_data/combined_case_notes.csv"],
+                            "Case Note",
+                            "Social Care case notes for young people",
+                            "combined_case_notes.csv",
+                            [
+                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"
+                            ],
+                            case_notes_table,
+                            "Example output from the case notes dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            None,
+                            "No",
+                            None,
+                            5,
+                        ],
+                        [
+                            ["example_data/dummy_consultation_response.csv"],
+                            "Response text",
+                            "Consultation for the construction of flats on Main Street",
+                            "dummy_consultation_response.csv",
+                            [
+                                "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis_zero_shot.xlsx"
+                            ],
+                            dummy_consultation_table_zero_shot,
+                            "Example output from the dummy consultation dataset with suggested topics successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            "example_data/dummy_consultation_response_themes.csv",
+                            "No",
+                            None,
+                            5,
+                        ],
+                        [
+                            ["example_data/combined_case_notes.csv"],
+                            "Case Note",
+                            "Social Care case notes for young people",
+                            "combined_case_notes.csv",
+                            [
+                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis_grouped.xlsx"
+                            ],
+                            case_notes_table_grouped,
+                            "Example data from the case notes dataset with groups successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            "example_data/case_note_headers_specific.csv",
+                            "No",
+                            "Client",
+                            5,
+                        ],
+                        [
+                            ["example_data/combined_case_notes.csv"],
+                            "Case Note",
+                            "Social Care case notes for young people",
+                            "combined_case_notes.csv",
+                            [
+                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_structured_summaries.xlsx"
+                            ],
+                            case_notes_table_structured_summary,
+                            "Example data from the case notes dataset for structured summaries successfully loaded. Download the xlsx outputs to the right to see full outputs.",
+                            "example_data/case_note_headers_specific.csv",
+                            "Yes",
+                            "Client",
+                            50,
+                        ],
                     ],
-                    dummy_consultation_table,
-                    "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    None,
-                    "No",
-                    None,
-                    5,
-                ],
-                [
-                    ["example_data/combined_case_notes.csv"],
-                    "Case Note",
-                    "Social Care case notes for young people",
-                    "combined_case_notes.csv",
-                    [
-                        "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"
+                    inputs=[
+                        in_data_files,
+                        in_colnames,
+                        context_textbox,
+                        original_data_file_name_textbox,
+                        topic_extraction_output_files_xlsx,
+                        display_topic_table_markdown,
+                        output_messages_textbox,
+                        candidate_topics,
+                        produce_structured_summary_radio,
+                        in_group_col,
+                        batch_size_number,
                     ],
-                    case_notes_table,
-                    "Example output from the case notes dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    None,
-                    "No",
-                    None,
-                    5,
-                ],
-                [
-                    ["example_data/dummy_consultation_response.csv"],
-                    "Response text",
-                    "Consultation for the construction of flats on Main Street",
-                    "dummy_consultation_response.csv",
-                    [
-                        "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis_zero_shot.xlsx"
+                    example_labels=[
+                        "Main Street construction consultation",
+                        "Case notes for young people",
+                        "Main Street construction consultation with suggested topics",
+                        "Case notes grouped by person with suggested topics",
+                        "Case notes structured summary with suggested topics",
                     ],
-                    dummy_consultation_table_zero_shot,
-                    "Example output from the dummy consultation dataset with suggested topics successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    "example_data/dummy_consultation_response_themes.csv",
-                    "No",
-                    None,
-                    5,
-                ],
-                [
-                    ["example_data/combined_case_notes.csv"],
-                    "Case Note",
-                    "Social Care case notes for young people",
-                    "combined_case_notes.csv",
-                    [
-                        "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis_grouped.xlsx"
+                    label="Try topic extraction and summarisation with an example dataset. Example outputs are displayed. Click the 'Extract topics...' button below to rerun the analysis.",
+                    fn=show_info_box_on_click,
+                    run_on_click=True,
+                )
+            except (FileNotFoundError, OSError) as e:
+                # If example files don't exist (e.g., in CI environment), create empty Examples
+                # This allows the app to load without errors
+                print(f"Warning: Example files not found, skipping Examples creation: {e}")
+                examples = gr.Examples(
+                    examples=[],
+                    inputs=[
+                        in_data_files,
+                        in_colnames,
+                        context_textbox,
+                        original_data_file_name_textbox,
+                        topic_extraction_output_files_xlsx,
+                        display_topic_table_markdown,
+                        output_messages_textbox,
+                        candidate_topics,
+                        produce_structured_summary_radio,
+                        in_group_col,
+                        batch_size_number,
                     ],
-                    case_notes_table_grouped,
-                    "Example data from the case notes dataset with groups successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    "example_data/case_note_headers_specific.csv",
-                    "No",
-                    "Client",
-                    5,
+                    label="Examples not available (example files not found).",
+                )
+        else:
+            # Example files don't exist, create empty Examples
+            print("Warning: Required example files not found, skipping Examples creation.")
+            examples = gr.Examples(
+                examples=[],
+                inputs=[
+                    in_data_files,
+                    in_colnames,
+                    context_textbox,
+                    original_data_file_name_textbox,
+                    topic_extraction_output_files_xlsx,
+                    display_topic_table_markdown,
+                    output_messages_textbox,
+                    candidate_topics,
+                    produce_structured_summary_radio,
+                    in_group_col,
+                    batch_size_number,
                 ],
-                [
-                    ["example_data/combined_case_notes.csv"],
-                    "Case Note",
-                    "Social Care case notes for young people",
-                    "combined_case_notes.csv",
-                    [
-                        "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_structured_summaries.xlsx"
-                    ],
-                    case_notes_table_structured_summary,
-                    "Example data from the case notes dataset for structured summaries successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                    "example_data/case_note_headers_specific.csv",
-                    "Yes",
-                    "Client",
-                    50,
-                ],
-            ],
-            inputs=[
-                in_data_files,
-                in_colnames,
-                context_textbox,
-                original_data_file_name_textbox,
-                topic_extraction_output_files_xlsx,
-                display_topic_table_markdown,
-                output_messages_textbox,
-                candidate_topics,
-                produce_structured_summary_radio,
-                in_group_col,
-                batch_size_number,
-            ],
-            example_labels=[
-                "Main Street construction consultation",
-                "Case notes for young people",
-                "Main Street construction consultation with suggested topics",
-                "Case notes grouped by person with suggested topics",
-                "Case notes structured summary with suggested topics",
-            ],
-            label="Try topic extraction and summarisation with an example dataset. Example outputs are displayed. Click the 'Extract topics...' button below to rerun the analysis.",
-            fn=show_info_box_on_click,
-            run_on_click=True,
-        )
+                label="Examples not available (example files not found).",
+            )
 
     with gr.Tab(label="All in one topic extraction and summarisation"):
         with gr.Row():
@@ -2481,26 +2575,154 @@ with app:
 ###
 
 if __name__ == "__main__":
-    if COGNITO_AUTH == "1":
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(
-            show_error=True,
-            inbrowser=True,
-            auth=authenticate_user,
-            max_file_size=MAX_FILE_SIZE,
-            server_port=GRADIO_SERVER_PORT,
-            root_path=ROOT_PATH,
-            mcp_server=RUN_MCP_SERVER,
-            theme=gr.themes.Default(primary_hue="blue"),
-            css=css,
-        )
+    if RUN_DIRECT_MODE == "1":
+        from cli_topics import main
+
+        # Validate required direct mode configuration
+        if not DIRECT_MODE_INPUT_FILE and DIRECT_MODE_TASK in ["extract", "validate", "all_in_one"]:
+            print(
+                "Error: DIRECT_MODE_INPUT_FILE environment variable must be set for direct mode."
+            )
+            print(
+                "Please set DIRECT_MODE_INPUT_FILE to the path of your input file."
+            )
+            exit(1)
+
+        if DIRECT_MODE_TASK in ["extract", "validate", "all_in_one"] and not DIRECT_MODE_TEXT_COLUMN:
+            print(
+                "Error: DIRECT_MODE_TEXT_COLUMN environment variable must be set for direct mode tasks: extract, validate, all_in_one."
+            )
+            print(
+                "Please set DIRECT_MODE_TEXT_COLUMN to the name of the text column to process."
+            )
+            exit(1)
+
+        if DIRECT_MODE_TASK in ["validate", "deduplicate", "summarise", "overall_summary"] and not DIRECT_MODE_PREVIOUS_OUTPUT_FILES:
+            print(
+                "Error: DIRECT_MODE_PREVIOUS_OUTPUT_FILES environment variable must be set for direct mode tasks: validate, deduplicate, summarise, overall_summary."
+            )
+            print(
+                "Please set DIRECT_MODE_PREVIOUS_OUTPUT_FILES to a pipe-separated (|) list of previous output file paths."
+            )
+            exit(1)
+
+        # Parse previous_output_files if provided (pipe-separated string to handle paths with spaces)
+        previous_output_files_list = []
+        if DIRECT_MODE_PREVIOUS_OUTPUT_FILES:
+            # Use pipe separator to handle file paths with spaces
+            previous_output_files_list = [f.strip() for f in DIRECT_MODE_PREVIOUS_OUTPUT_FILES.split("|") if f.strip()]
+
+        # Parse excel_sheets if provided (comma-separated string)
+        excel_sheets_list = []
+        if DIRECT_MODE_EXCEL_SHEETS:
+            excel_sheets_list = [s.strip() for s in DIRECT_MODE_EXCEL_SHEETS.split(",") if s.strip()]
+
+        # Parse input_file if provided (pipe-separated string for multiple files to handle paths with spaces)
+        input_file_list = []
+        if DIRECT_MODE_INPUT_FILE:
+            # Use pipe separator to handle file paths with spaces
+            # First check if it's a single file (no pipe), then split if multiple files
+            if "|" in DIRECT_MODE_INPUT_FILE:
+                input_file_list = [f.strip() for f in DIRECT_MODE_INPUT_FILE.split("|") if f.strip()]
+            else:
+                # Single file - use as-is to preserve paths with spaces
+                input_file_list = [DIRECT_MODE_INPUT_FILE.strip()]
+
+        # Prepare direct mode arguments based on environment variables
+        direct_mode_args = {
+            # Task Selection
+            "task": DIRECT_MODE_TASK,
+            # General Arguments
+            "input_file": input_file_list if input_file_list else None,
+            "output_dir": DIRECT_MODE_OUTPUT_DIR,
+            "input_dir": INPUT_FOLDER,
+            "text_column": DIRECT_MODE_TEXT_COLUMN if DIRECT_MODE_TEXT_COLUMN else None,
+            "previous_output_files": previous_output_files_list if previous_output_files_list else None,
+            "username": DIRECT_MODE_USERNAME,
+            "save_to_user_folders": SESSION_OUTPUT_FOLDER,
+            "excel_sheets": excel_sheets_list,
+            "group_by": DIRECT_MODE_GROUP_BY if DIRECT_MODE_GROUP_BY else None,
+            # Model Configuration
+            "model_choice": DIRECT_MODE_MODEL_CHOICE,
+            "model_source": default_model_source,
+            "temperature": float(DIRECT_MODE_TEMPERATURE),
+            "batch_size": int(DIRECT_MODE_BATCH_SIZE),
+            "max_tokens": int(DIRECT_MODE_MAX_TOKENS),
+            "google_api_key": GEMINI_API_KEY,
+            "aws_access_key": AWS_ACCESS_KEY,
+            "aws_secret_key": AWS_SECRET_KEY,
+            "aws_region": AWS_REGION,
+            "hf_token": HF_TOKEN,
+            "azure_api_key": AZURE_OPENAI_API_KEY,
+            "azure_endpoint": AZURE_OPENAI_INFERENCE_ENDPOINT,
+            "api_url": API_URL,
+            "inference_server_model": DIRECT_MODE_INFERENCE_SERVER_MODEL if DIRECT_MODE_INFERENCE_SERVER_MODEL else None,
+            # Topic Extraction Arguments
+            "context": DIRECT_MODE_CONTEXT if DIRECT_MODE_CONTEXT else "",
+            "candidate_topics": DIRECT_MODE_CANDIDATE_TOPICS if DIRECT_MODE_CANDIDATE_TOPICS else None,
+            "force_zero_shot": DIRECT_MODE_FORCE_ZERO_SHOT,
+            "force_single_topic": DIRECT_MODE_FORCE_SINGLE_TOPIC,
+            "produce_structured_summary": DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
+            "sentiment": DIRECT_MODE_SENTIMENT,
+            "additional_summary_instructions": DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS if DIRECT_MODE_ADDITIONAL_SUMMARY_INSTRUCTIONS else "",
+            # Validation Arguments
+            "additional_validation_issues": DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES if DIRECT_MODE_ADDITIONAL_VALIDATION_ISSUES else "",
+            "show_previous_table": DIRECT_MODE_SHOW_PREVIOUS_TABLE,
+            "output_debug_files": OUTPUT_DEBUG_FILES,
+            "max_time_for_loop": int(DIRECT_MODE_MAX_TIME_FOR_LOOP),
+            # Deduplication Arguments
+            "method": DIRECT_MODE_DEDUP_METHOD,
+            "similarity_threshold": int(DIRECT_MODE_SIMILARITY_THRESHOLD),
+            "merge_sentiment": DIRECT_MODE_MERGE_SENTIMENT,
+            "merge_general_topics": DIRECT_MODE_MERGE_GENERAL_TOPICS,
+            # Summarisation Arguments
+            "summary_format": DIRECT_MODE_SUMMARY_FORMAT,
+            "sample_reference_table": DIRECT_MODE_SAMPLE_REFERENCE_TABLE,
+            "no_of_sampled_summaries": int(DIRECT_MODE_NO_OF_SAMPLED_SUMMARIES),
+            "random_seed": int(DIRECT_MODE_RANDOM_SEED),
+            # Output Format Arguments
+            "create_xlsx_output": DIRECT_MODE_CREATE_XLSX_OUTPUT == "True",
+            # Logging Arguments
+            "save_logs_to_csv": SAVE_LOGS_TO_CSV,
+            "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
+            "usage_logs_folder": USAGE_LOGS_FOLDER,
+            "cost_code": DEFAULT_COST_CODE,
+        }
+
+        print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")
+        if input_file_list:
+            print(f"Input file(s): {', '.join(input_file_list)}")
+        print(f"Output directory: {DIRECT_MODE_OUTPUT_DIR}")
+        if DIRECT_MODE_TEXT_COLUMN:
+            print(f"Text column: {DIRECT_MODE_TEXT_COLUMN}")
+        if previous_output_files_list:
+            print(f"Previous output files: {', '.join(previous_output_files_list)}")
+        if DIRECT_MODE_GROUP_BY:
+            print(f"Group by: {DIRECT_MODE_GROUP_BY}")
+
+        # Run the CLI main function with direct mode arguments
+        main(direct_mode_args=direct_mode_args)
     else:
-        app.queue(max_size=MAX_QUEUE_SIZE).launch(
-            show_error=True,
-            inbrowser=True,
-            max_file_size=MAX_FILE_SIZE,
-            server_port=GRADIO_SERVER_PORT,
-            root_path=ROOT_PATH,
-            mcp_server=RUN_MCP_SERVER,
-            theme=gr.themes.Default(primary_hue="blue"),
-            css=css,
-        )
+        if COGNITO_AUTH == "1":
+            app.queue(max_size=MAX_QUEUE_SIZE).launch(
+                show_error=True,
+                inbrowser=True,
+                auth=authenticate_user,
+                max_file_size=MAX_FILE_SIZE,
+                server_port=GRADIO_SERVER_PORT,
+                root_path=ROOT_PATH,
+                mcp_server=RUN_MCP_SERVER,
+                theme=gr.themes.Default(primary_hue="blue"),
+                css=css,
+            )
+        else:
+            app.queue(max_size=MAX_QUEUE_SIZE).launch(
+                show_error=True,
+                inbrowser=True,
+                max_file_size=MAX_FILE_SIZE,
+                server_port=GRADIO_SERVER_PORT,
+                root_path=ROOT_PATH,
+                mcp_server=RUN_MCP_SERVER,
+                theme=gr.themes.Default(primary_hue="blue"),
+                css=css,
+            )
