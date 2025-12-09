@@ -1,0 +1,7 @@
+# Create thematic summaries from your data
+
+Extract topics and summarise open text using Large Language Models (LLMs). The model will loop through all text rows to find the most relevant general topics and subtopics, and provide a short summary of each. If you have specific topics in mind, you can enter them in 'Provide a list of specific topics' below.
+
+NOTE: LLMs are not 100% accurate and may produce biased or incorrect responses. All files downloaded from this app **need to be checked by a human** before they are used in further outputs.
+
+Unsure of how to use this app? Try an example by clicking on one of the example datasets below to see typical outputs the app can produce. There is also a user guide provided alongside this app - please ask your system administrator if you do not have access.
