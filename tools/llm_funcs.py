@@ -14,9 +14,10 @@ if os.environ.get("USE_MOCK_LLM") == "1" or os.environ.get("TEST_MODE") == "1":
         # Try to import and apply mock patches
         import sys
 
-        test_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test")
-        if test_dir not in sys.path:
-            sys.path.insert(0, test_dir)
+        # Add project root to sys.path so we can import test.mock_llm_calls
+        project_root = os.path.dirname(os.path.dirname(__file__))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
         try:
             from test.mock_llm_calls import apply_mock_patches
 
