@@ -4517,6 +4517,8 @@ def all_in_one_pipeline(
     out_message = list()
     out_logged_content = list()
 
+    print("Analysing file: ", in_data_files, "column(s): ", chosen_cols, "with model: ", model_choice)
+
     # 1) Extract topics (group-aware)
     (
         display_markdown,
