@@ -2481,8 +2481,10 @@ with app:
             and RUN_AWS_FUNCTIONS == "1"
         ):
             print("Downloading cost codes from S3")
-            print(f"Attempting to download from bucket: {S3_LOG_BUCKET}, key: {S3_COST_CODES_PATH}")
-            
+            print(
+                f"Attempting to download from bucket: {S3_LOG_BUCKET}, key: {S3_COST_CODES_PATH}"
+            )
+
             # Create a wrapper function with error handling
             def download_cost_codes_with_error_handling(bucket, key, local_path):
                 try:
@@ -2492,7 +2494,7 @@ with app:
                     print(f"Error downloading cost codes from S3: {e}")
                     print(f"Failed to download s3://{bucket}/{key}")
                     return False
-            
+
             app.load(
                 download_cost_codes_with_error_handling,
                 inputs=[
