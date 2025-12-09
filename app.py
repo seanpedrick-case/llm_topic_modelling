@@ -1290,6 +1290,11 @@ with app:
                     lines=1,
                     type="password",
                 )
+                aws_region_textbox = gr.Textbox(
+                    value=AWS_REGION,
+                    label="AWS region",
+                    lines=1,
+                )
 
         with gr.Accordion("Gemini API keys", open=False):
             google_api_key_textbox = gr.Textbox(
@@ -1518,6 +1523,7 @@ with app:
             produce_structured_summary_radio,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
             hf_api_key_textbox,
             azure_api_key_textbox,
             azure_endpoint_textbox,
@@ -1668,6 +1674,7 @@ with app:
             show_previous_table_radio,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
             api_url_textbox,
         ],
         outputs=[
@@ -1998,6 +2005,7 @@ with app:
             context_textbox,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
             model_name_map_state,
             hf_api_key_textbox,
             azure_endpoint_textbox,
@@ -2113,6 +2121,7 @@ with app:
             context_textbox,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
             model_name_map_state,
             hf_api_key_textbox,
             azure_endpoint_textbox,
@@ -2262,6 +2271,7 @@ with app:
             produce_structured_summary_radio,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
             hf_api_key_textbox,
             azure_api_key_textbox,
             azure_endpoint_textbox,
@@ -2575,6 +2585,7 @@ with app:
             s3_log_bucket_name,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
         ],
         outputs=[s3_logs_output_textbox],
     )
@@ -2610,6 +2621,7 @@ with app:
             s3_log_bucket_name,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
         ],
         outputs=[s3_logs_output_textbox],
     )
@@ -2657,6 +2669,7 @@ with app:
             s3_log_bucket_name,
             aws_access_key_textbox,
             aws_secret_key_textbox,
+            aws_region_textbox,
         ],
         outputs=[data_further_details_text],
     )

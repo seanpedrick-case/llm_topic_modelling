@@ -1558,6 +1558,7 @@ def summarise_output_topics(
     context_textbox: str = "",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     model_name_map: dict = model_name_map,
     hf_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -1736,7 +1737,11 @@ def summarise_output_topics(
     if do_summaries == "Yes":
 
         bedrock_runtime = connect_to_bedrock_runtime(
-            model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
         )
 
         create_batch_file_path_details(reference_data_file_name)
@@ -2129,6 +2134,7 @@ def wrapper_summarise_output_topics_per_group(
     context_textbox: str = "",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     model_name_map: dict = model_name_map,
     hf_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -2345,6 +2351,7 @@ def wrapper_summarise_output_topics_per_group(
                 context_textbox=context_textbox,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                aws_region_textbox=aws_region_textbox,
                 model_name_map=model_name_map,
                 hf_api_key_textbox=hf_api_key_textbox,
                 azure_endpoint_textbox=azure_endpoint_textbox,
@@ -2532,6 +2539,7 @@ def overall_summary(
     context_textbox: str = "",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     model_name_map: dict = model_name_map,
     hf_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -2576,6 +2584,7 @@ def overall_summary(
         context_textbox (str, optional): Additional context. Defaults to empty string.
         aws_access_key_textbox (str, optional): AWS access key. Defaults to empty string.
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
+        aws_region_textbox (str, optional): AWS region. Defaults to empty string.
         model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
@@ -2683,7 +2692,11 @@ def overall_summary(
     if do_summaries == "Yes":
         model_source = model_name_map[model_choice]["source"]
         bedrock_runtime = connect_to_bedrock_runtime(
-            model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
         )
 
         for summary_group in summary_loop:

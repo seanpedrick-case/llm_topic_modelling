@@ -267,6 +267,7 @@ def validate_topics(
     show_previous_table: str = "Yes",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     api_url: str = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
@@ -336,7 +337,11 @@ def validate_topics(
     # Set up bedrock runtime if needed
     if model_source == "AWS":
         bedrock_runtime = connect_to_bedrock_runtime(
-            model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
         )
 
     # Clean file name for output
@@ -871,6 +876,7 @@ def validate_topics_wrapper(
     show_previous_table: str = "Yes",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     api_url: str = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
@@ -1070,6 +1076,7 @@ def validate_topics_wrapper(
                 show_previous_table=show_previous_table,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                aws_region_textbox=aws_region_textbox,
                 api_url=api_url,
             )
 
@@ -2459,6 +2466,7 @@ def extract_topics(
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     hf_api_key_textbox: str = "",
     azure_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -2684,7 +2692,11 @@ def extract_topics(
     model_source = model_name_map[model_choice]["source"]
 
     bedrock_runtime = connect_to_bedrock_runtime(
-        model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+        model_name_map,
+        model_choice,
+        aws_access_key_textbox,
+        aws_secret_key_textbox,
+        aws_region_textbox,
     )
 
     # If this is the first time around, set variables to 0/blank
@@ -3590,6 +3602,7 @@ def wrapper_extract_topics_per_column_value(
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     hf_api_key_textbox: str = "",
     azure_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -3856,6 +3869,7 @@ def wrapper_extract_topics_per_column_value(
                 produce_structured_summary_radio=produce_structured_summary_radio,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                aws_region_textbox=aws_region_textbox,
                 hf_api_key_textbox=hf_api_key_textbox,
                 azure_api_key_textbox=azure_api_key_textbox,
                 azure_endpoint_textbox=azure_endpoint_textbox,
@@ -4408,6 +4422,7 @@ def all_in_one_pipeline(
     produce_structures_summary_choice: str,
     aws_access_key_text: str,
     aws_secret_key_text: str,
+    aws_region_text: str,
     hf_api_key_text: str,
     azure_api_key_text: str,
     azure_endpoint_text: str,
@@ -4517,7 +4532,14 @@ def all_in_one_pipeline(
     out_message = list()
     out_logged_content = list()
 
-    print("Analysing file: ", in_data_files, "column(s): ", chosen_cols, "with model: ", model_choice)
+    print(
+        "Analysing file: ",
+        in_data_files,
+        "column(s): ",
+        chosen_cols,
+        "with model: ",
+        model_choice,
+    )
 
     # 1) Extract topics (group-aware)
     (
@@ -4576,6 +4598,7 @@ def all_in_one_pipeline(
         produce_structured_summary_radio=produce_structures_summary_choice,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
+        aws_region_textbox=aws_region_text,
         hf_api_key_textbox=hf_api_key_text,
         azure_api_key_textbox=azure_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,
@@ -4749,6 +4772,7 @@ def all_in_one_pipeline(
         context_textbox=context_text,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
+        aws_region_textbox=aws_region_text,
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,
@@ -4807,6 +4831,7 @@ def all_in_one_pipeline(
         context_textbox=context_text,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
+        aws_region_textbox=aws_region_text,
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,

@@ -22,14 +22,18 @@ def connect_to_bedrock_runtime(
     model_choice: str,
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
 ):
     # If running an anthropic model, assume that running an AWS Bedrock model, load in Bedrock
     model_source = model_name_map[model_choice]["source"]
 
+    # Use aws_region_textbox if provided, otherwise fall back to AWS_REGION from config
+    region = aws_region_textbox if aws_region_textbox else AWS_REGION
+
     if "AWS" in model_source:
         if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
             print("Connecting to Bedrock via existing SSO connection")
-            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=region)
         elif aws_access_key_textbox and aws_secret_key_textbox:
             print(
                 "Connecting to Bedrock using AWS access key and secret keys from user input."
@@ -38,7 +42,7 @@ def connect_to_bedrock_runtime(
                 "bedrock-runtime",
                 aws_access_key_id=aws_access_key_textbox,
                 aws_secret_access_key=aws_secret_key_textbox,
-                region_name=AWS_REGION,
+                region_name=region,
             )
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
             print("Getting Bedrock credentials from environment variables")
@@ -46,11 +50,11 @@ def connect_to_bedrock_runtime(
                 "bedrock-runtime",
                 aws_access_key_id=AWS_ACCESS_KEY,
                 aws_secret_access_key=AWS_SECRET_KEY,
-                region_name=AWS_REGION,
+                region_name=region,
             )
         elif RUN_AWS_FUNCTIONS == "1":
             print("Connecting to Bedrock via existing SSO connection")
-            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=region)
         else:
             bedrock_runtime = ""
             out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under LLM settings, or choose another model type."
@@ -63,10 +67,15 @@ def connect_to_bedrock_runtime(
 
 
 def connect_to_s3_client(
-    aws_access_key_textbox: str = "", aws_secret_key_textbox: str = ""
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
 ):
     # If running an anthropic model, assume that running an AWS s3 model, load in s3
     s3_client = None
+
+    # Use aws_region_textbox if provided, otherwise fall back to AWS_REGION from config
+    region = aws_region_textbox if aws_region_textbox else AWS_REGION
 
     if aws_access_key_textbox and aws_secret_key_textbox:
         print("Connecting to s3 using AWS access key and secret keys from user input.")
@@ -74,18 +83,18 @@ def connect_to_s3_client(
             "s3",
             aws_access_key_id=aws_access_key_textbox,
             aws_secret_access_key=aws_secret_key_textbox,
-            region_name=AWS_REGION,
+            region_name=region,
         )
     elif RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
         print("Connecting to s3 via existing SSO connection")
-        s3_client = boto3.client("s3", region_name=AWS_REGION)
+        s3_client = boto3.client("s3", region_name=region)
     elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
         print("Getting s3 credentials from environment variables")
         s3_client = boto3.client(
             "s3",
             aws_access_key_id=AWS_ACCESS_KEY,
             aws_secret_access_key=AWS_SECRET_KEY,
-            region_name=AWS_REGION,
+            region_name=region,
         )
     else:
         s3_client = ""
@@ -103,12 +112,15 @@ def download_file_from_s3(
     local_file_path: str,
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
 ):
 
     if RUN_AWS_FUNCTIONS == "1":
 
-        s3 = connect_to_s3_client(aws_access_key_textbox, aws_secret_key_textbox)
+        s3 = connect_to_s3_client(
+            aws_access_key_textbox, aws_secret_key_textbox, aws_region_textbox
+        )
         # boto3.client('s3')
         s3.download_file(bucket_name, key, local_file_path)
         print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path}")
@@ -120,13 +132,16 @@ def download_folder_from_s3(
     local_folder: str,
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
 ):
     """
     Download all files from an S3 folder to a local folder.
     """
     if RUN_AWS_FUNCTIONS == "1":
-        s3 = connect_to_s3_client(aws_access_key_textbox, aws_secret_key_textbox)
+        s3 = connect_to_s3_client(
+            aws_access_key_textbox, aws_secret_key_textbox, aws_region_textbox
+        )
         # boto3.client('s3')
 
         # List objects in the specified S3 folder
@@ -160,13 +175,16 @@ def download_files_from_s3(
     filenames: list[str],
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
 ):
     """
     Download specific files from an S3 folder to a local folder.
     """
     if RUN_AWS_FUNCTIONS == "1":
-        s3 = connect_to_s3_client(aws_access_key_textbox, aws_secret_key_textbox)
+        s3 = connect_to_s3_client(
+            aws_access_key_textbox, aws_secret_key_textbox, aws_region_textbox
+        )
         # boto3.client('s3')
 
         print("Trying to download file: ", filenames)
@@ -207,6 +225,7 @@ def upload_file_to_s3(
     s3_bucket: str = bucket_name,
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
 ):
     """
@@ -224,7 +243,9 @@ def upload_file_to_s3(
 
         final_out_message = list()
 
-        s3_client = connect_to_s3_client(aws_access_key_textbox, aws_secret_key_textbox)
+        s3_client = connect_to_s3_client(
+            aws_access_key_textbox, aws_secret_key_textbox, aws_region_textbox
+        )
         # boto3.client('s3')
 
         if isinstance(local_file_paths, str):
