@@ -160,6 +160,10 @@ MPLCONFIGDIR = get_or_create_env_var(
     "MPLCONFIGDIR", "tmp/matplotlib_cache/"
 )  # Matplotlib cache folder
 
+S3_OUTPUTS_BUCKET = get_or_create_env_var("S3_OUTPUTS_BUCKET", "")
+S3_OUTPUTS_FOLDER = get_or_create_env_var("S3_OUTPUTS_FOLDER", "")
+SAVE_OUTPUTS_TO_S3 = get_or_create_env_var("SAVE_OUTPUTS_TO_S3", "False")
+
 ###
 # LOGGING OPTIONS
 ###
@@ -748,6 +752,9 @@ RUN_DIRECT_MODE = get_or_create_env_var("RUN_DIRECT_MODE", "0")
 DIRECT_MODE_TASK = get_or_create_env_var("DIRECT_MODE_TASK", "extract")
 DIRECT_MODE_INPUT_FILE = get_or_create_env_var("DIRECT_MODE_INPUT_FILE", "")
 DIRECT_MODE_OUTPUT_DIR = get_or_create_env_var("DIRECT_MODE_OUTPUT_DIR", OUTPUT_FOLDER)
+DIRECT_MODE_S3_OUTPUT_BUCKET = get_or_create_env_var(
+    "DIRECT_MODE_S3_OUTPUT_BUCKET", S3_OUTPUTS_BUCKET
+)
 DIRECT_MODE_TEXT_COLUMN = get_or_create_env_var("DIRECT_MODE_TEXT_COLUMN", "")
 DIRECT_MODE_PREVIOUS_OUTPUT_FILES = get_or_create_env_var(
     "DIRECT_MODE_PREVIOUS_OUTPUT_FILES", ""

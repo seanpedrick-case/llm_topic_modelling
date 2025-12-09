@@ -5,7 +5,11 @@ import gradio as gr
 import pandas as pd
 
 from tools.auth import authenticate_user
-from tools.aws_functions import download_file_from_s3, upload_file_to_s3
+from tools.aws_functions import (
+    download_file_from_s3,
+    export_outputs_to_s3,
+    upload_file_to_s3,
+)
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
@@ -91,9 +95,11 @@ from tools.config import (
     S3_COST_CODES_PATH,
     S3_FEEDBACK_LOGS_FOLDER,
     S3_LOG_BUCKET,
+    S3_OUTPUTS_FOLDER,
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
+    SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
     SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES,
     SHOW_COSTS,
@@ -101,6 +107,7 @@ from tools.config import (
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
+    convert_string_to_boolean,
     default_model_choice,
     default_model_source,
     default_source_models,
@@ -127,6 +134,7 @@ from tools.helper_functions import (
     empty_output_vars_extract_topics,
     empty_output_vars_summarise,
     enforce_cost_codes,
+    ensure_model_in_map,
     get_connection_params,
     join_cols_onto_reference_df,
     load_in_data_file,
@@ -371,6 +379,20 @@ with app:
         )
         s3_log_bucket_name = gr.Textbox(
             visible="hidden", value=S3_LOG_BUCKET, elem_classes="hidden_component"
+        )
+
+        # S3 output settings
+        s3_output_folder_state = gr.Textbox(
+            label="s3_output_folder_state",
+            value=S3_OUTPUTS_FOLDER,
+            visible="hidden",
+            elem_classes="hidden_component",
+        )
+        save_outputs_to_s3_checkbox = gr.Checkbox(
+            label="save_outputs_to_s3_checkbox",
+            value=convert_string_to_boolean(SAVE_OUTPUTS_TO_S3),
+            visible="hidden",
+            elem_classes="hidden_component",
         )
 
         # Logging variables
@@ -1575,6 +1597,15 @@ with app:
             produce_structured_summary_radio,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            summary_xlsx_output_files_list,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
     )
 
     # Validate topics
@@ -1708,6 +1739,15 @@ with app:
             produce_structured_summary_radio,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            summary_xlsx_output_files_list,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
     )
 
     ###
@@ -1807,6 +1847,8 @@ with app:
         azure_endpoint="",
         api_url=None,
     ):
+        # Ensure custom model_choice is registered in model_name_map
+        ensure_model_in_map(model_choice)
         model_source = model_name_map[model_choice]["source"]
         return deduplicate_topics_llm(
             reference_df,
@@ -2027,6 +2069,15 @@ with app:
             produce_structured_summary_radio,
         ],
         outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            summary_xlsx_output_files_list,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
     )
     # success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed, sample_reference_table_checkbox], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
 
@@ -2125,6 +2176,15 @@ with app:
             produce_structured_summary_radio,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            summary_xlsx_output_files_list,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
     )
 
     # All in one button
@@ -2301,6 +2361,15 @@ with app:
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            summary_xlsx_output_files_list,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
+    ).success(
         move_overall_summary_output_files_to_front_page,
         inputs=[summary_xlsx_output_files_list],
         outputs=[topic_extraction_output_files_xlsx],
@@ -2393,6 +2462,15 @@ with app:
         ],
         outputs=[out_xlsx_files, summary_xlsx_output_files_list],
         api_name="export_xlsx",
+    ).success(
+        fn=export_outputs_to_s3,
+        inputs=[
+            summary_xlsx_output_files_list,
+            s3_output_folder_state,
+            save_outputs_to_s3_checkbox,
+            in_data_files,
+        ],
+        outputs=None,
     )
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally

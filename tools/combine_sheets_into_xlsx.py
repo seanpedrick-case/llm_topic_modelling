@@ -8,10 +8,11 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-from tools.config import OUTPUT_FOLDER
+from tools.config import OUTPUT_FOLDER, model_name_map as global_model_name_map
 from tools.helper_functions import (
     clean_column_name,
     convert_reference_table_to_pivot_table,
+    ensure_model_in_map,
     get_basic_response_data,
     load_in_data_file,
 )
@@ -243,6 +244,12 @@ def collect_output_csvs_and_create_excel_output(
             - list: A list of paths to the generated Excel output files.
             - list: A duplicate of the list of paths to the generated Excel output files (for UI compatibility).
     """
+    # Use passed model_name_map if provided and not empty, otherwise use global one
+    if not model_name_map:
+        model_name_map = global_model_name_map
+    
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
 
     if structured_summaries == "Yes":
         structured_summaries = True

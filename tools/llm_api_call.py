@@ -47,6 +47,7 @@ from tools.helper_functions import (
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
+    ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
     load_in_data_file,
@@ -308,6 +309,9 @@ def validate_topics(
     - Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]: Updated reference_df, topic_summary_df, logged_content, conversation_metadata_str, total_input_tokens, total_output_tokens, total_llm_calls
     """
     print("Starting validation process...")
+
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice)
 
     # Calculate number of batches
     num_batches = (len(file_data) + batch_size - 1) // batch_size
@@ -912,6 +916,9 @@ def validate_topics_wrapper(
             Accumulated reference_df, topic_summary_df, logged_content, conversation_metadata_str,
             total_input_tokens, total_output_tokens, total_llm_calls, and a list of output file paths.
     """
+
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice)
 
     # Handle None logged_content
     if logged_content is None:
@@ -2531,6 +2538,9 @@ def extract_topics(
 
     """
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     tic = time.perf_counter()
 
     final_time = 0.0
@@ -2807,6 +2817,7 @@ def extract_topics(
 
                         # 'Zero shot topics' are those supplied by the user
                         # Handle both string paths (CLI) and gr.FileData objects (Gradio)
+                        # Supports CSV, Excel (.xlsx), and Parquet files
                         candidate_topics_path = (
                             candidate_topics
                             if isinstance(candidate_topics, str)
@@ -2816,7 +2827,18 @@ def extract_topics(
                             raise ValueError(
                                 "candidate_topics must be a file path string or a FileData object with a 'name' attribute"
                             )
-                        zero_shot_topics = read_file(candidate_topics_path)
+
+                        # Read the file (supports CSV, Excel .xlsx, and Parquet)
+                        # For Excel files, reads the first sheet by default
+                        try:
+                            zero_shot_topics = read_file(candidate_topics_path)
+                        except Exception as e:
+                            raise ValueError(
+                                f"Error reading candidate topics file '{candidate_topics_path}': {str(e)}. "
+                                f"Supported formats: CSV (.csv), Excel (.xlsx), and Parquet (.parquet). "
+                                f"For Excel files, the first sheet will be used."
+                            ) from e
+
                         zero_shot_topics = zero_shot_topics.fillna(
                             ""
                         )  # Replace NaN with empty string
@@ -3649,6 +3671,9 @@ def wrapper_extract_topics_per_column_value(
     :return: A tuple containing consolidated results, mimicking the return structure of `extract_topics`.
     """
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     acc_input_tokens = 0
     acc_output_tokens = 0
     acc_number_of_calls = 0
@@ -4471,6 +4496,9 @@ def all_in_one_pipeline(
     Returns:
         A tuple matching the UI components updated during the original chained flow.
     """
+
+    # Ensure custom model_choice is registered in model_name_map_state
+    ensure_model_in_map(model_choice, model_name_map_state)
 
     # Load local model if it's not already loaded
     if (

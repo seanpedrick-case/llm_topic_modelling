@@ -1188,3 +1188,34 @@ def update_model_choice(model_source):
         label="Large language model for topic extraction and summarisation",
         multiselect=False,
     )
+
+
+def ensure_model_in_map(model_choice: str, model_name_map_dict: dict = None) -> dict:
+    """
+    Ensures that a model_choice is registered in model_name_map.
+    If the model_choice is not found, it assumes it's an inference-server model
+    and adds it to the map with source "inference-server".
+
+    Args:
+        model_choice (str): The model name to check/register
+        model_name_map_dict (dict, optional): The model_name_map dictionary to update.
+            If None, uses the global model_name_map from config.
+
+    Returns:
+        dict: The model_name_map dictionary (updated if needed)
+    """
+    # Use provided dict or global one
+    if model_name_map_dict is None:
+        from tools.config import model_name_map
+
+        model_name_map_dict = model_name_map
+
+    # If model_choice is not in the map, assume it's an inference-server model
+    if model_choice not in model_name_map_dict:
+        model_name_map_dict[model_choice] = {
+            "short_name": model_choice,
+            "source": "inference-server",
+        }
+        print(f"Registered custom model '{model_choice}' as inference-server model")
+
+    return model_name_map_dict

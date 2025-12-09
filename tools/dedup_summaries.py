@@ -37,6 +37,7 @@ from tools.helper_functions import (
     convert_reference_table_to_pivot_table,
     create_batch_file_path_details,
     create_topic_summary_df_from_reference_table,
+    ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
     get_file_name_no_ext,
@@ -1643,6 +1644,9 @@ def summarise_output_topics(
 
     tic = time.perf_counter()
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     model_choice_clean = clean_column_name(
         model_name_map[model_choice]["short_name"],
         max_length=20,
@@ -2405,6 +2409,9 @@ def wrapper_summarise_output_topics_per_group(
             # For now, it will continue
             continue
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     # Create consolidated output files
     overall_file_name = clean_column_name(reference_data_file_name, max_length=20)
     model_choice_clean = model_name_map[model_choice]["short_name"]
@@ -2647,6 +2654,9 @@ def overall_summary(
         )
     else:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
+
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
 
     batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
     model_choice_clean = model_name_map[model_choice]["short_name"]
