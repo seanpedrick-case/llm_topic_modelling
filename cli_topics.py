@@ -760,6 +760,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 additional_instructions_summary_format=args.additional_summary_instructions,
                 additional_validation_issues_provided="",
                 show_previous_table="Yes",
+                api_url=args.api_url if args.api_url else API_URL,
                 max_tokens=args.max_tokens,
                 model_name_map=model_name_map,
                 max_time_for_loop=99999,
@@ -770,7 +771,6 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 tokenizer=None,
                 assistant_model=None,
                 max_rows=999999,
-                api_url=args.api_url if args.api_url else API_URL,
             )
 
             end_time = time.time()

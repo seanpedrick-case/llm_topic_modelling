@@ -257,8 +257,10 @@ def deduplicate_topics(
         )
 
         # Save the DataFrames to CSV files
-        reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
-        topic_summary_df.to_csv(
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_file_out_path, index=None, encoding="utf-8-sig"
+        )
+        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             unique_topics_file_out_path, index=None, encoding="utf-8-sig"
         )
 
@@ -573,7 +575,7 @@ def deduplicate_topics(
         reference_pivot_file_path = (
             output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
         )
-        reference_df_pivot.to_csv(
+        reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             reference_pivot_file_path, index=None, encoding="utf-8-sig"
         )
         log_output_files.append(reference_pivot_file_path)
@@ -584,8 +586,10 @@ def deduplicate_topics(
     unique_topics_file_out_path = (
         output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
     )
-    reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
-    topic_summary_df.to_csv(
+    reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+        reference_file_out_path, index=None, encoding="utf-8-sig"
+    )
+    topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
         unique_topics_file_out_path, index=None, encoding="utf-8-sig"
     )
 
@@ -690,8 +694,10 @@ def deduplicate_topics_llm(
         )
 
         # Save the DataFrames to CSV files
-        reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
-        topic_summary_df.to_csv(
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_file_out_path, index=None, encoding="utf-8-sig"
+        )
+        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             unique_topics_file_out_path, index=None, encoding="utf-8-sig"
         )
 
@@ -1053,8 +1059,10 @@ def deduplicate_topics_llm(
         + get_file_name_no_ext(unique_topics_table_file_name)
         + "_dedup.csv"
     )
-    reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
-    topic_summary_df.to_csv(
+    reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+        reference_file_out_path, index=None, encoding="utf-8-sig"
+    )
+    topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
         unique_topics_file_out_path, index=None, encoding="utf-8-sig"
     )
 
@@ -2026,7 +2034,9 @@ def summarise_output_topics(
                     + model_choice_clean
                     + ".csv"
                 )
-                reference_table_df_revised_pivot.to_csv(
+                reference_table_df_revised_pivot.drop(
+                    ["1", "2", "3"], axis=1, errors="ignore"
+                ).to_csv(
                     reference_table_df_revised_pivot_path,
                     index=None,
                     encoding="utf-8-sig",
@@ -2041,9 +2051,9 @@ def summarise_output_topics(
                 + model_choice_clean
                 + ".csv"
             )
-            topic_summary_df_revised.to_csv(
-                topic_summary_df_revised_path, index=None, encoding="utf-8-sig"
-            )
+            topic_summary_df_revised.drop(
+                ["1", "2", "3"], axis=1, errors="ignore"
+            ).to_csv(topic_summary_df_revised_path, index=None, encoding="utf-8-sig")
 
             reference_table_df_revised_path = (
                 output_folder
@@ -2052,9 +2062,9 @@ def summarise_output_topics(
                 + model_choice_clean
                 + ".csv"
             )
-            reference_table_df_revised.to_csv(
-                reference_table_df_revised_path, index=None, encoding="utf-8-sig"
-            )
+            reference_table_df_revised.drop(
+                ["1", "2", "3"], axis=1, errors="ignore"
+            ).to_csv(reference_table_df_revised_path, index=None, encoding="utf-8-sig")
 
             log_output_files.extend(
                 [reference_table_df_revised_path, topic_summary_df_revised_path]
@@ -2479,12 +2489,12 @@ def wrapper_summarise_output_topics_per_group(
             + ".csv"
         )
 
-        acc_topic_summary_df_revised.to_csv(
-            consolidated_topic_summary_path, index=None, encoding="utf-8-sig"
-        )
-        acc_reference_table_df_revised.to_csv(
-            consolidated_reference_table_path, index=None, encoding="utf-8-sig"
-        )
+        acc_topic_summary_df_revised.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(consolidated_topic_summary_path, index=None, encoding="utf-8-sig")
+        acc_reference_table_df_revised.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(consolidated_reference_table_path, index=None, encoding="utf-8-sig")
 
         acc_output_files.extend(
             [consolidated_topic_summary_path, consolidated_reference_table_path]
@@ -2813,7 +2823,7 @@ def overall_summary(
         summarised_outputs_df = pd.DataFrame(
             data={"Group": unique_groups, "Summary": summarised_outputs_for_df}
         )
-        summarised_outputs_df.to_csv(
+        summarised_outputs_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             overall_summary_output_csv_path, index=None, encoding="utf-8-sig"
         )
         output_files.append(overall_summary_output_csv_path)

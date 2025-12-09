@@ -1222,13 +1222,13 @@ def validate_topics_wrapper(
 
     # Save consolidated validation dataframes to CSV
     if not acc_reference_df.empty:
-        acc_reference_df.to_csv(
+        acc_reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             validation_reference_table_path, index=None, encoding="utf-8-sig"
         )
         acc_output_files.append(validation_reference_table_path)
 
     if not acc_topic_summary_df.empty:
-        acc_topic_summary_df.to_csv(
+        acc_topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             validation_unique_topics_path, index=None, encoding="utf-8-sig"
         )
         acc_output_files.append(validation_unique_topics_path)
@@ -3087,7 +3087,9 @@ def extract_topics(
 
                     ## Reference table mapping response numbers to topics
                     if output_debug_files == "True":
-                        new_reference_df.to_csv(
+                        new_reference_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             reference_table_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(reference_table_out_path)
@@ -3100,7 +3102,9 @@ def extract_topics(
                     new_topic_summary_df["Group"] = group_name
 
                     if output_debug_files == "True":
-                        new_topic_summary_df.to_csv(
+                        new_topic_summary_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             topic_summary_df_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(topic_summary_df_out_path)
@@ -3241,7 +3245,9 @@ def extract_topics(
                     if output_debug_files == "True":
 
                         # Output reference table
-                        new_reference_df.to_csv(
+                        new_reference_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             reference_table_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(reference_table_out_path)
@@ -3255,7 +3261,9 @@ def extract_topics(
                     new_topic_summary_df["Group"] = group_name
 
                     if output_debug_files == "True":
-                        new_topic_summary_df.to_csv(
+                        new_topic_summary_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             topic_summary_df_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(topic_summary_df_out_path)
@@ -3494,9 +3502,9 @@ def extract_topics(
 
         ## Reference table mapping response numbers to topics
         existing_reference_df_pivot["Group"] = group_name
-        existing_reference_df_pivot.to_csv(
-            reference_table_out_pivot_path, index=None, encoding="utf-8-sig"
-        )
+        existing_reference_df_pivot.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(reference_table_out_pivot_path, index=None, encoding="utf-8-sig")
         log_files_output_paths.append(reference_table_out_pivot_path)
 
         ## Create a dataframe for missing response references:
@@ -3505,9 +3513,9 @@ def extract_topics(
         basic_response_data = get_basic_response_data(file_data, chosen_cols)
 
         # Save simplified file data to log outputs
-        pd.DataFrame(basic_response_data).to_csv(
-            basic_response_data_out_path, index=None, encoding="utf-8-sig"
-        )
+        pd.DataFrame(basic_response_data).drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(basic_response_data_out_path, index=None, encoding="utf-8-sig")
         log_files_output_paths.append(basic_response_data_out_path)
 
         # Note: missing_df creation moved to wrapper functions to handle grouped processing correctly
@@ -3611,6 +3619,7 @@ def wrapper_extract_topics_per_column_value(
     additional_instructions_summary_format: str = "",
     additional_validation_issues_provided: str = "",
     show_previous_table: str = "Yes",
+    api_url: str = None,
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
@@ -3622,7 +3631,6 @@ def wrapper_extract_topics_per_column_value(
     tokenizer: object = None,
     assistant_model: object = None,
     max_rows: int = max_rows,
-    api_url: str = None,
     progress=Progress(track_tqdm=True),  # type: ignore
 ) -> Tuple:  # Mimicking the return tuple structure of extract_topics
     """
@@ -4085,14 +4093,18 @@ def wrapper_extract_topics_per_column_value(
             + ".csv"
         )
 
-        acc_reference_df.to_csv(acc_reference_df_path, index=None, encoding="utf-8-sig")
-        acc_topic_summary_df.to_csv(
+        acc_reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            acc_reference_df_path, index=None, encoding="utf-8-sig"
+        )
+        acc_topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             acc_topic_summary_df_path, index=None, encoding="utf-8-sig"
         )
-        acc_reference_df_pivot.to_csv(
+        acc_reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             acc_reference_df_pivot_path, index=None, encoding="utf-8-sig"
         )
-        acc_missing_df.to_csv(acc_missing_df_path, index=None, encoding="utf-8-sig")
+        acc_missing_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            acc_missing_df_path, index=None, encoding="utf-8-sig"
+        )
 
         acc_log_files_output_paths.append(acc_missing_df_path)
 
@@ -4329,7 +4341,7 @@ def modify_existing_output_tables(
         ## Reference table mapping response numbers to topics
         reference_table_file_name = reference_file_path.replace(".csv", "_mod")
         new_reference_df_file_path = output_folder + reference_table_file_name + ".csv"
-        reference_df.to_csv(
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             new_reference_df_file_path, index=None, encoding="utf-8-sig"
         )
         output_file_list.append(new_reference_df_file_path)
@@ -4356,9 +4368,9 @@ def modify_existing_output_tables(
         modified_unique_table_file_path = (
             output_folder + unique_table_file_name + ".csv"
         )
-        modifiable_topic_summary_df.to_csv(
-            modified_unique_table_file_path, index=None, encoding="utf-8-sig"
-        )
+        modifiable_topic_summary_df.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(modified_unique_table_file_path, index=None, encoding="utf-8-sig")
         output_file_list.append(modified_unique_table_file_path)
 
     else:
