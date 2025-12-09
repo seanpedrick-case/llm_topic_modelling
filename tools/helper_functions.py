@@ -215,10 +215,10 @@ def load_in_data_file(
             file_paths[0], colnames=in_colnames, excel_sheet=in_excel_sheets
         )
         num_batches = math.ceil(len(file_data) / batch_size)
-        print("Total number of batches:", num_batches)
+        print(f"File {file_name} loaded successfully. Number of rows:{len(file_data)}. Total number of batches:{num_batches}")
 
     except Exception as e:
-        print(e)
+        print("Could not load data file due to:", e)
         file_data = pd.DataFrame()
         file_name = ""
         num_batches = 1
