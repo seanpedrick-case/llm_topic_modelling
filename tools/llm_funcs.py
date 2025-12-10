@@ -875,9 +875,9 @@ def call_inference_server_api(
             local_model=None,  # Not used for inference-server
             tokenizer=None,  # Not used for inference-server
             bedrock_runtime=None,  # Not used for inference-server
-            model_source="inference-server",  # Key change: use inference-server
+            model_source="inference-server",
             MAX_OUTPUT_VALIDATION_ATTEMPTS=3,
-            api_url="http://localhost:8080"  # Key change: provide API URL
+            api_url="http://localhost:8080"
         )
     """
     # Extract parameters from the gen_config object

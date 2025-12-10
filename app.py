@@ -2737,6 +2737,7 @@ if __name__ == "__main__":
             ]
 
         # Parse input_file if provided (pipe-separated string for multiple files to handle paths with spaces)
+        # Note: S3 downloads are now handled in cli_topics.py main() function
         input_file_list = []
         if DIRECT_MODE_INPUT_FILE:
             # Use pipe separator to handle file paths with spaces
