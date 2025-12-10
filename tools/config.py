@@ -351,6 +351,12 @@ CHOSEN_LOCAL_MODEL_TYPE = get_or_create_env_var(
     "CHOSEN_LOCAL_MODEL_TYPE", "Qwen 3 4B"
 )  # Gemma 3 1B #  "Gemma 2b" # "Gemma 3 4B"
 
+USE_LLAMA_SWAP = get_or_create_env_var("USE_LLAMA_SWAP", "False")
+if USE_LLAMA_SWAP == "True":
+    USE_LLAMA_SWAP = True
+else:
+    USE_LLAMA_SWAP = False
+
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
     model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
@@ -410,10 +416,11 @@ if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
     inference_server_models = [
         "unnamed-inference-server-model",
-        "gemma_3_12b",
-        "gpt_oss_20b",
         "qwen_3_4b_it",
-        "ministral_3_14b_instruct",
+        "qwen_3_4b_think",
+        "gpt_oss_20b",
+        "gemma_3_12b",
+        "ministral_3_14b_it",
     ]
     model_full_names.extend(inference_server_models)
     model_short_names.extend(inference_server_models)

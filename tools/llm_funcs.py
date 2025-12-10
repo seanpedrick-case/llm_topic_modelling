@@ -86,6 +86,7 @@ from tools.config import (
     TIMEOUT_WAIT,
     USE_BITSANDBYTES,
     USE_LLAMA_CPP,
+    USE_LLAMA_SWAP,
     V_QUANT_LEVEL,
 )
 from tools.helper_functions import _get_env_list
@@ -820,6 +821,7 @@ def call_inference_server_api(
     gen_config: LlamaCPPGenerationConfig,
     api_url: str = "http://localhost:8080",
     model_name: str = None,
+    use_llama_swap: bool = USE_LLAMA_SWAP,
 ):
     """
     Calls a inference-server API endpoint with a formatted user message and system prompt,
@@ -834,7 +836,7 @@ def call_inference_server_api(
         gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
         api_url (str): The base URL of the inference-server API (default: "http://localhost:8080").
         model_name (str): Optional model name to use. If None, uses the default model.
-
+        use_llama_swap (bool): Whether to use llama-swap for the model.
     Returns:
         dict: Response in the same format as call_llama_cpp_chatmodel
 
@@ -904,10 +906,9 @@ def call_inference_server_api(
         "stream": stream,
         "stop": LLM_STOP_STRINGS if LLM_STOP_STRINGS else [],
     }
-
-    # Add model name if specified
-    # if model_name:
-    #    payload["model"] = model_name
+    # Add model name if specified and use llama-swap
+    if model_name and use_llama_swap:
+        payload["model"] = model_name
 
     # Determine the endpoint based on streaming preference
     if stream:
