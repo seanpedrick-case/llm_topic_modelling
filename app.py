@@ -1878,6 +1878,7 @@ with app:
             output_folder,
             candidate_topics,
             azure_endpoint,
+            OUTPUT_DEBUG_FILES,
             api_url,
         )
 

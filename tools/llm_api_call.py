@@ -4788,16 +4788,16 @@ def all_in_one_pipeline(
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,
-        additional_summary_instructions_provided=additional_instructions_summary_format,
-        local_model=model,
-        tokenizer=tokenizer,
-        assistant_model=assistant_model,
         existing_logged_content=out_logged_content,
         sample_reference_table=sample_reference_table_checkbox,
         no_of_sampled_summaries=100,
         random_seed=random_seed,
         output_debug_files=output_debug_files,
         api_url=api_url,
+        additional_summary_instructions_provided=additional_instructions_summary_format,
+        local_model=model,
+        tokenizer=tokenizer,
+        assistant_model=assistant_model,
     )
 
     # Generate summarised_references_markdown from the sampled reference table

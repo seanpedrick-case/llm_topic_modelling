@@ -1274,6 +1274,10 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 hf_api_key_textbox=args.hf_token,
                 azure_endpoint_textbox=args.azure_endpoint,
                 existing_logged_content=list(),
+                sample_reference_table=args.sample_reference_table,
+                no_of_sampled_summaries=args.no_of_sampled_summaries,
+                random_seed=args.random_seed,
+                api_url=args.api_url if args.api_url else API_URL,
                 additional_summary_instructions_provided=args.additional_summary_instructions,
                 output_debug_files=str(args.output_debug_files),
                 reasoning_suffix="",
@@ -1281,10 +1285,6 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 tokenizer=None,
                 assistant_model=None,
                 do_summaries="Yes",
-                sample_reference_table=args.sample_reference_table,
-                no_of_sampled_summaries=args.no_of_sampled_summaries,
-                random_seed=args.random_seed,
-                api_url=args.api_url if args.api_url else API_URL,
             )
 
             end_time = time.time()
