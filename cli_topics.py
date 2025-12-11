@@ -73,7 +73,11 @@ def _generate_session_hash() -> str:
 
 
 def _download_s3_file_if_needed(
-    file_path: str, default_filename: str = "downloaded_file"
+    file_path: str,
+    default_filename: str = "downloaded_file",
+    aws_access_key: str = "",
+    aws_secret_key: str = "",
+    aws_region: str = "",
 ) -> str:
     """
     Download a file from S3 if the path starts with 's3://' or 'S3://', otherwise return the path as-is.
@@ -81,6 +85,9 @@ def _download_s3_file_if_needed(
     Args:
         file_path: File path (either local or S3 URL)
         default_filename: Default filename to use if S3 key doesn't have a filename
+        aws_access_key: AWS access key ID (optional, uses environment/config if not provided)
+        aws_secret_key: AWS secret access key (optional, uses environment/config if not provided)
+        aws_region: AWS region (optional, uses environment/config if not provided)
 
     Returns:
         Local file path (downloaded from S3 or original path)
@@ -126,6 +133,9 @@ def _download_s3_file_if_needed(
             bucket_name=bucket_name_s3,
             key=s3_key,
             local_file_path=local_file_path,
+            aws_access_key_textbox=aws_access_key,
+            aws_secret_key_textbox=aws_secret_key,
+            aws_region_textbox=aws_region,
         )
         print(f"S3 file downloaded successfully: {file_path} -> {local_file_path}")
         return local_file_path
@@ -665,6 +675,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         args = parser.parse_args()
 
     # --- Handle S3 file downloads ---
+    # Get AWS credentials from args or fall back to config values
+    aws_access_key = getattr(args, "aws_access_key", None) or AWS_ACCESS_KEY or ""
+    aws_secret_key = getattr(args, "aws_secret_key", None) or AWS_SECRET_KEY or ""
+    aws_region = getattr(args, "aws_region", None) or AWS_REGION or ""
+
     # Download input files from S3 if needed
     # Note: args.input_file is typically a list (from CLI nargs="+" or from direct mode)
     # but we also handle pipe-separated strings for compatibility
@@ -673,7 +688,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             # Handle list of files (may include S3 paths)
             downloaded_files = []
             for file_path in args.input_file:
-                downloaded_path = _download_s3_file_if_needed(file_path)
+                downloaded_path = _download_s3_file_if_needed(
+                    file_path,
+                    aws_access_key=aws_access_key,
+                    aws_secret_key=aws_secret_key,
+                    aws_region=aws_region,
+                )
                 downloaded_files.append(downloaded_path)
             args.input_file = downloaded_files
         elif isinstance(args.input_file, str):
@@ -682,17 +702,33 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 file_list = [f.strip() for f in args.input_file.split("|") if f.strip()]
                 downloaded_files = []
                 for file_path in file_list:
-                    downloaded_path = _download_s3_file_if_needed(file_path)
+                    downloaded_path = _download_s3_file_if_needed(
+                        file_path,
+                        aws_access_key=aws_access_key,
+                        aws_secret_key=aws_secret_key,
+                        aws_region=aws_region,
+                    )
                     downloaded_files.append(downloaded_path)
                 args.input_file = downloaded_files
             else:
                 # Single file path
-                args.input_file = [_download_s3_file_if_needed(args.input_file)]
+                args.input_file = [
+                    _download_s3_file_if_needed(
+                        args.input_file,
+                        aws_access_key=aws_access_key,
+                        aws_secret_key=aws_secret_key,
+                        aws_region=aws_region,
+                    )
+                ]
 
     # Download candidate topics file from S3 if needed
     if args.candidate_topics:
         args.candidate_topics = _download_s3_file_if_needed(
-            args.candidate_topics, default_filename="downloaded_candidate_topics"
+            args.candidate_topics,
+            default_filename="downloaded_candidate_topics",
+            aws_access_key=aws_access_key,
+            aws_secret_key=aws_secret_key,
+            aws_region=aws_region,
         )
 
     # --- Override model_choice with inference_server_model if provided ---
