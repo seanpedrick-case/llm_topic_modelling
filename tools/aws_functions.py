@@ -96,6 +96,9 @@ def connect_to_s3_client(
             aws_secret_access_key=AWS_SECRET_KEY,
             region_name=region,
         )
+    elif RUN_AWS_FUNCTIONS == "1":
+        print("Connecting to s3 via existing SSO connection")
+        s3_client = boto3.client("s3", region_name=region)
     else:
         s3_client = ""
         out_message = "Cannot connect to S3 service. Please provide access keys under LLM settings, or choose another model type."

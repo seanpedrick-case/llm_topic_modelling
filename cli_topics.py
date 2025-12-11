@@ -5,9 +5,11 @@ import time
 import uuid
 from datetime import datetime
 
+import boto3
+import botocore
 import pandas as pd
 
-from tools.aws_functions import download_file_from_s3
+from tools.aws_functions import download_file_from_s3, export_outputs_to_s3
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.config import (
     API_URL,
@@ -22,6 +24,7 @@ from tools.config import (
     DEDUPLICATION_THRESHOLD,
     DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
+    DYNAMODB_USAGE_LOG_HEADERS,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     HF_TOKEN,
@@ -32,9 +35,14 @@ from tools.config import (
     MAX_TIME_FOR_LOOP,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
+    RUN_AWS_FUNCTIONS,
+    S3_OUTPUTS_BUCKET,
+    S3_OUTPUTS_FOLDER,
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
+    SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
+    USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
     convert_string_to_boolean,
@@ -177,6 +185,73 @@ def get_username_and_folders(
     )
 
 
+def upload_outputs_to_s3_if_enabled(
+    output_files: list,
+    base_file_name: str = None,
+    session_hash: str = "",
+    s3_output_folder: str = S3_OUTPUTS_FOLDER,
+    s3_bucket: str = S3_OUTPUTS_BUCKET,
+    save_outputs_to_s3: bool = None,
+):
+    """
+    Upload output files to S3 if SAVE_OUTPUTS_TO_S3 is enabled.
+
+    Args:
+        output_files: List of output file paths to upload
+        base_file_name: Base file name (input file) for organizing S3 folder structure
+        session_hash: Session hash to include in S3 path
+        s3_output_folder: S3 output folder path
+        s3_bucket: S3 bucket name
+        save_outputs_to_s3: Override for SAVE_OUTPUTS_TO_S3 config (if None, uses config value)
+    """
+    # Use provided value or fall back to config
+    if save_outputs_to_s3 is None:
+        save_outputs_to_s3 = convert_string_to_boolean(SAVE_OUTPUTS_TO_S3)
+
+    if not save_outputs_to_s3:
+        return
+
+    if not s3_bucket:
+        print("Warning: S3_OUTPUTS_BUCKET not configured. Skipping S3 upload.")
+        return
+
+    if not output_files:
+        print("No output files to upload to S3.")
+        return
+
+    # Filter out empty/None values and ensure files exist
+    valid_files = []
+    for file_path in output_files:
+        if file_path and os.path.exists(file_path):
+            valid_files.append(file_path)
+        elif file_path:
+            print(f"Warning: Output file does not exist, skipping: {file_path}")
+
+    if not valid_files:
+        print("No valid output files to upload to S3.")
+        return
+
+    # Construct S3 output folder path
+    # Include session hash if provided and SESSION_OUTPUT_FOLDER is enabled
+    s3_folder_path = s3_output_folder or ""
+    if session_hash and convert_string_to_boolean(SESSION_OUTPUT_FOLDER):
+        if s3_folder_path and not s3_folder_path.endswith("/"):
+            s3_folder_path += "/"
+        s3_folder_path += session_hash + "/"
+
+    print(f"\nUploading {len(valid_files)} output file(s) to S3...")
+    try:
+        export_outputs_to_s3(
+            file_list_state=valid_files,
+            s3_output_folder_state_value=s3_folder_path,
+            save_outputs_to_s3_flag=True,
+            base_file_state=base_file_name,
+            s3_bucket=s3_bucket,
+        )
+    except Exception as e:
+        print(f"Warning: Failed to upload outputs to S3: {e}")
+
+
 def write_usage_log(
     session_hash: str,
     file_name: str,
@@ -193,7 +268,7 @@ def write_usage_log(
     include_conversation_metadata: bool = False,
 ):
     """
-    Write usage log entry to CSV file.
+    Write usage log entry to CSV file and/or DynamoDB.
 
     Args:
         session_hash: Session identifier
@@ -207,10 +282,17 @@ def write_usage_log(
         estimated_time_taken: Time taken in seconds
         cost_code: Cost code for tracking
         save_to_csv: Whether to save to CSV
-        save_to_dynamodb: Whether to save to DynamoDB (not implemented in CLI)
+        save_to_dynamodb: Whether to save to DynamoDB
         include_conversation_metadata: Whether to include conversation metadata in the log
     """
-    if not save_to_csv:
+    # Convert boolean parameters if they're strings
+    if isinstance(save_to_csv, str):
+        save_to_csv = convert_string_to_boolean(save_to_csv)
+    if isinstance(save_to_dynamodb, str):
+        save_to_dynamodb = convert_string_to_boolean(save_to_dynamodb)
+
+    # Return early if neither logging method is enabled
+    if not save_to_csv and not save_to_dynamodb:
         return
 
     if not conversation_metadata:
@@ -277,18 +359,128 @@ def write_usage_log(
             "timestamp",
         ]
 
-    # Write to CSV
-    file_exists = os.path.exists(usage_log_file_path)
-    with open(usage_log_file_path, "a", newline="", encoding="utf-8-sig") as csvfile:
-        writer = csv.writer(csvfile)
-        if not file_exists:
-            # Write headers if file doesn't exist
-            writer.writerow(headers)
-        writer.writerow(data)
+    # Write to CSV if enabled
+    if save_to_csv:
+        # Ensure usage logs folder exists
+        os.makedirs(USAGE_LOGS_FOLDER, exist_ok=True)
 
+        # Construct full file path
+        usage_log_file_path = os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+
+        # Write to CSV
+        file_exists = os.path.exists(usage_log_file_path)
+        with open(
+            usage_log_file_path, "a", newline="", encoding="utf-8-sig"
+        ) as csvfile:
+            writer = csv.writer(csvfile)
+            if not file_exists:
+                # Write headers if file doesn't exist
+                writer.writerow(headers)
+            writer.writerow(data)
+
+    # Write to DynamoDB if enabled
     if save_to_dynamodb:
-        # DynamoDB logging not implemented in CLI - would require boto3 setup
-        print("Note: DynamoDB logging is not implemented in CLI mode.")
+        # DynamoDB logging implementation
+        print("Saving to DynamoDB")
+
+        try:
+            # Connect to DynamoDB
+            if RUN_AWS_FUNCTIONS == "1":
+                try:
+                    print("Connecting to DynamoDB via existing SSO connection")
+                    dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+                    dynamodb.meta.client.list_tables()
+                except Exception as e:
+                    print("No SSO credentials found:", e)
+                    if AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                        print("Trying DynamoDB credentials from environment variables")
+                        dynamodb = boto3.resource(
+                            "dynamodb",
+                            aws_access_key_id=AWS_ACCESS_KEY,
+                            aws_secret_access_key=AWS_SECRET_KEY,
+                            region_name=AWS_REGION,
+                        )
+                    else:
+                        raise Exception(
+                            "AWS credentials for DynamoDB logging not found"
+                        )
+            else:
+                raise Exception("AWS credentials for DynamoDB logging not found")
+
+            # Get table name from config
+            dynamodb_table_name = USAGE_LOG_DYNAMODB_TABLE_NAME
+            if not dynamodb_table_name:
+                raise ValueError(
+                    "USAGE_LOG_DYNAMODB_TABLE_NAME not configured. Cannot save to DynamoDB."
+                )
+
+            # Determine headers for DynamoDB
+            # Use DYNAMODB_USAGE_LOG_HEADERS if available and matches data length,
+            # otherwise use CSV_USAGE_LOG_HEADERS if it matches, otherwise use default headers
+            # Note: headers and data are guaranteed to have the same length and include id/timestamp
+            if DYNAMODB_USAGE_LOG_HEADERS and len(DYNAMODB_USAGE_LOG_HEADERS) == len(
+                data
+            ):
+                dynamodb_headers = list(DYNAMODB_USAGE_LOG_HEADERS)  # Make a copy
+            elif CSV_USAGE_LOG_HEADERS and len(CSV_USAGE_LOG_HEADERS) == len(data):
+                dynamodb_headers = list(CSV_USAGE_LOG_HEADERS)  # Make a copy
+            else:
+                # Use the headers we created which are guaranteed to match data
+                dynamodb_headers = headers
+
+            # Check if table exists, create if it doesn't
+            try:
+                table = dynamodb.Table(dynamodb_table_name)
+                table.load()
+            except botocore.exceptions.ClientError as e:
+                if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                    print(
+                        f"Table '{dynamodb_table_name}' does not exist. Creating it..."
+                    )
+                    attribute_definitions = [
+                        {
+                            "AttributeName": "id",
+                            "AttributeType": "S",
+                        }
+                    ]
+
+                    table = dynamodb.create_table(
+                        TableName=dynamodb_table_name,
+                        KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
+                        AttributeDefinitions=attribute_definitions,
+                        BillingMode="PAY_PER_REQUEST",
+                    )
+                    # Wait until the table exists
+                    table.meta.client.get_waiter("table_exists").wait(
+                        TableName=dynamodb_table_name
+                    )
+                    time.sleep(5)
+                    print(f"Table '{dynamodb_table_name}' created successfully.")
+                else:
+                    raise
+
+            # Prepare the DynamoDB item to upload
+            # Map the headers to values (headers and data should match in length)
+            if len(dynamodb_headers) == len(data):
+                item = {
+                    header: str(value) for header, value in zip(dynamodb_headers, data)
+                }
+            else:
+                # Fallback: use the default headers which are guaranteed to match data
+                print(
+                    f"Warning: DynamoDB headers length ({len(dynamodb_headers)}) doesn't match data length ({len(data)}). Using default headers."
+                )
+                item = {header: str(value) for header, value in zip(headers, data)}
+
+            # Upload to DynamoDB
+            table.put_item(Item=item)
+            print("Successfully uploaded log to DynamoDB")
+
+        except Exception as e:
+            print(f"Could not upload log to DynamoDB due to: {e}")
+            import traceback
+
+            traceback.print_exc()
 
 
 # --- Main CLI Function ---
@@ -930,6 +1122,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             )
 
             # Create Excel output if requested
+            xlsx_files = []
             if args.create_xlsx_output:
                 print("\nCreating Excel output file...")
                 try:
@@ -957,6 +1150,20 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
+
+            # Upload outputs to S3 if enabled
+            all_output_files = (
+                list(topic_extraction_output_files)
+                if topic_extraction_output_files
+                else []
+            )
+            if xlsx_files:
+                all_output_files.extend(xlsx_files)
+            upload_outputs_to_s3_if_enabled(
+                output_files=all_output_files,
+                base_file_name=file_name,
+                session_hash=session_hash,
+            )
 
         # Task 2: Validate Topics
         elif args.task == "validate":
@@ -1216,6 +1423,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 )
 
             # Create Excel output if requested
+            xlsx_files = []
             if args.create_xlsx_output:
                 print("\nCreating Excel output file...")
                 try:
@@ -1244,6 +1452,18 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
+
+            # Upload outputs to S3 if enabled
+            all_output_files = (
+                list(summarisation_input_files) if summarisation_input_files else []
+            )
+            if xlsx_files:
+                all_output_files.extend(xlsx_files)
+            upload_outputs_to_s3_if_enabled(
+                output_files=all_output_files,
+                base_file_name=working_data_file_name_textbox,
+                session_hash=session_hash,
+            )
 
         # Task 4: Summarise Topics
         elif args.task == "summarise":
@@ -1349,6 +1569,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             )
 
             # Create Excel output if requested
+            xlsx_files = []
             if args.create_xlsx_output:
                 print("\nCreating Excel output file...")
                 try:
@@ -1376,6 +1597,18 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
+
+            # Upload outputs to S3 if enabled
+            all_output_files = (
+                list(summary_output_files) if summary_output_files else []
+            )
+            if xlsx_files:
+                all_output_files.extend(xlsx_files)
+            upload_outputs_to_s3_if_enabled(
+                output_files=all_output_files,
+                base_file_name=working_data_file_name_textbox,
+                session_hash=session_hash,
+            )
 
         # Task 5: Overall Summary
         elif args.task == "overall_summary":
@@ -1455,6 +1688,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             )
 
             # Create Excel output if requested
+            xlsx_files = []
             if args.create_xlsx_output:
                 print("\nCreating Excel output file...")
                 try:
@@ -1482,6 +1716,20 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
+
+            # Upload outputs to S3 if enabled
+            all_output_files = (
+                list(overall_summary_output_files)
+                if overall_summary_output_files
+                else []
+            )
+            if xlsx_files:
+                all_output_files.extend(xlsx_files)
+            upload_outputs_to_s3_if_enabled(
+                output_files=all_output_files,
+                base_file_name=working_data_file_name_textbox,
+                session_hash=session_hash,
+            )
 
         # Task 6: All-in-One Pipeline
         elif args.task == "all_in_one":
@@ -1634,6 +1882,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             )
 
             # Create Excel output if requested
+            xlsx_files = []
             if args.create_xlsx_output:
                 print("\nCreating Excel output file...")
                 try:
@@ -1661,6 +1910,21 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
+
+            # Upload outputs to S3 if enabled
+            # Collect all output files from the pipeline
+            all_output_files = []
+            if topic_extraction_output_files:
+                all_output_files.extend(topic_extraction_output_files)
+            if overall_summary_output_files:
+                all_output_files.extend(overall_summary_output_files)
+            if xlsx_files:
+                all_output_files.extend(xlsx_files)
+            upload_outputs_to_s3_if_enabled(
+                output_files=all_output_files,
+                base_file_name=file_name,
+                session_hash=session_hash,
+            )
 
         else:
             print(f"Error: Invalid task '{args.task}'.")
