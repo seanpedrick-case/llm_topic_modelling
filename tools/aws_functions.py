@@ -126,7 +126,7 @@ def download_file_from_s3(
         )
         # boto3.client('s3')
         s3.download_file(bucket_name, key, local_file_path)
-        print(f"File downloaded from S3: s3://{bucket_name}/{key} to {local_file_path}")
+        print(f"File downloaded from S3 to {local_file_path}")
 
 
 def download_folder_from_s3(
@@ -165,10 +165,10 @@ def download_folder_from_s3(
             try:
                 s3.download_file(bucket_name, object_key, local_file_path)
                 print(
-                    f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'"
+                    f"Downloaded file from S3 to {local_file_path}"
                 )
             except Exception as e:
-                print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
+                print(f"Error downloading file from S3: {e}")
 
 
 def download_files_from_s3(
@@ -197,13 +197,13 @@ def download_files_from_s3(
             print("Trying to download all files in AWS folder: ", s3_folder)
             response = s3.list_objects_v2(Bucket=bucket_name, Prefix=s3_folder)
 
-            print("Found files in AWS folder: ", response.get("Contents", []))
+            #print("Found files in AWS folder: ", response.get("Contents", []))
 
             filenames = [
                 obj["Key"].split("/")[-1] for obj in response.get("Contents", [])
             ]
 
-            print("Found filenames in AWS folder: ", filenames)
+            #print("Found filenames in AWS folder: ", filenames)
 
         for filename in filenames:
             object_key = os.path.join(s3_folder, filename)
@@ -216,10 +216,10 @@ def download_files_from_s3(
             try:
                 s3.download_file(bucket_name, object_key, local_file_path)
                 print(
-                    f"Downloaded 's3://{bucket_name}/{object_key}' to '{local_file_path}'"
+                    f"Downloaded file from S3 to {local_file_path}"
                 )
             except Exception as e:
-                print(f"Error downloading 's3://{bucket_name}/{object_key}':", e)
+                print(f"Error downloading file from S3: {e}")
 
 
 def upload_file_to_s3(

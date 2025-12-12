@@ -78,7 +78,7 @@ def download_file_from_s3(bucket_name, key, download_path):
     """Download a file from S3 to the local filesystem."""
     try:
         s3_client.download_file(bucket_name, key, download_path)
-        print(f"Successfully downloaded s3://{bucket_name}/{key} to {download_path}")
+        print(f"Successfully downloaded file from S3 to {download_path}")
     except Exception as e:
         print(f"Error downloading from S3: {e}")
         raise
@@ -96,7 +96,7 @@ def upload_directory_to_s3(local_directory, bucket_name, s3_prefix):
             try:
                 s3_client.upload_file(local_file_path, bucket_name, output_key)
                 print(
-                    f"Successfully uploaded {local_file_path} to s3://{bucket_name}/{output_key}"
+                    f"Successfully uploaded file to S3: {local_file_path}"
                 )
             except Exception as e:
                 print(f"Error uploading to S3: {e}")
@@ -439,7 +439,7 @@ def lambda_handler(event, context):
     try:
         print("--- Starting CLI Topics Main Function ---")
         print(
-            f"Arguments passed to cli_main: {json.dumps({k: v for k, v in cli_args.items() if k not in ['aws_access_key', 'aws_secret_key']}, default=str)}"
+            f"Arguments passed to cli_main: {json.dumps({k: v for k, v in cli_args.items() if k not in ['aws_access_key', 'aws_secret_key', 'google_api_key', 'azure_api_key', 'azure_endpoint', 'api_url', 'hf_token']}, default=str)}"
         )
         cli_main(direct_mode_args=cli_args)
         print("--- CLI Topics Main Function Finished ---")
