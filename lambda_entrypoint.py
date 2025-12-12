@@ -95,9 +95,7 @@ def upload_directory_to_s3(local_directory, bucket_name, s3_prefix):
 
             try:
                 s3_client.upload_file(local_file_path, bucket_name, output_key)
-                print(
-                    f"Successfully uploaded file to S3: {local_file_path}"
-                )
+                print(f"Successfully uploaded file to S3: {local_file_path}")
             except Exception as e:
                 print(f"Error uploading to S3: {e}")
                 raise

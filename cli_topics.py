@@ -1177,8 +1177,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                     )
-                    if xlsx_files:
-                        print(f"Excel output created: {sorted(xlsx_files)}")
+                    # if xlsx_files:
+                    #    print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
 
@@ -1329,8 +1329,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                     )
-                    if xlsx_files:
-                        print(f"Excel output created: {sorted(xlsx_files)}")
+                    # if xlsx_files:
+                    #    print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
 
@@ -1479,8 +1479,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                     )
-                    if xlsx_files:
-                        print(f"Excel output created: {sorted(xlsx_files)}")
+                    # if xlsx_files:
+                    #    print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
 
@@ -1624,8 +1624,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                     )
-                    if xlsx_files:
-                        print(f"Excel output created: {sorted(xlsx_files)}")
+                    # if xlsx_files:
+                    #    print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
 
@@ -1743,8 +1743,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                     )
-                    if xlsx_files:
-                        print(f"Excel output created: {sorted(xlsx_files)}")
+                    # if xlsx_files:
+                    #    print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
 
@@ -1937,8 +1937,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                     )
-                    if xlsx_files:
-                        print(f"Excel output created: {sorted(xlsx_files)}")
+                    # if xlsx_files:
+                    #    print(f"Excel output created: {sorted(xlsx_files)}")
                 except Exception as e:
                     print(f"Warning: Could not create Excel output: {e}")
 
