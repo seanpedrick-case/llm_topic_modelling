@@ -1,6 +1,7 @@
 import argparse
 import csv
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -185,6 +186,34 @@ def get_username_and_folders(
     )
 
 
+def _sanitize_folder_name(folder_name: str, max_length: int = 50) -> str:
+    """
+    Sanitize folder name for S3 compatibility.
+
+    Replaces 'strange' characters (anything that's not alphanumeric, dash, underscore, or full stop)
+    with underscores, and limits the length to max_length characters.
+
+    Args:
+        folder_name: Original folder name to sanitize
+        max_length: Maximum length for the folder name (default: 50)
+
+    Returns:
+        Sanitized folder name
+    """
+    if not folder_name:
+        return folder_name
+
+    # Replace any character that's not alphanumeric, dash, underscore, or full stop with underscore
+    # This handles @, commas, exclamation marks, spaces, etc.
+    sanitized = re.sub(r"[^a-zA-Z0-9._-]", "_", folder_name)
+
+    # Limit length to max_length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length]
+
+    return sanitized
+
+
 def upload_outputs_to_s3_if_enabled(
     output_files: list,
     base_file_name: str = None,
@@ -237,7 +266,9 @@ def upload_outputs_to_s3_if_enabled(
     if session_hash and convert_string_to_boolean(SESSION_OUTPUT_FOLDER):
         if s3_folder_path and not s3_folder_path.endswith("/"):
             s3_folder_path += "/"
-        s3_folder_path += session_hash + "/"
+        # Sanitize session_hash to ensure S3 compatibility
+        sanitized_session_hash = _sanitize_folder_name(session_hash)
+        s3_folder_path += sanitized_session_hash + "/"
 
     print(f"\nUploading {len(valid_files)} output file(s) to S3...")
     try:
