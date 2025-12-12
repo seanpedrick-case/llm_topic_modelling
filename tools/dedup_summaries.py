@@ -37,6 +37,7 @@ from tools.helper_functions import (
     convert_reference_table_to_pivot_table,
     create_batch_file_path_details,
     create_topic_summary_df_from_reference_table,
+    ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
     get_file_name_no_ext,
@@ -239,11 +240,41 @@ def deduplicate_topics(
             "Data file outputs are too short for deduplicating. Returning original data."
         )
 
-        reference_file_out_path = output_folder + reference_table_file_name
-        unique_topics_file_out_path = output_folder + unique_topics_table_file_name
+        # Get file name without extension and create proper output paths
+        reference_table_file_name_no_ext = get_file_name_no_ext(
+            reference_table_file_name
+        )
+        unique_topics_table_file_name_no_ext = get_file_name_no_ext(
+            unique_topics_table_file_name
+        )
+
+        # Create output paths with _dedup suffix to match normal path
+        reference_file_out_path = (
+            output_folder + reference_table_file_name_no_ext + "_dedup.csv"
+        )
+        unique_topics_file_out_path = (
+            output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
+        )
+
+        # Save the DataFrames to CSV files
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_file_out_path, index=None, encoding="utf-8-sig"
+        )
+        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+        )
 
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
+
+        # Create markdown output for display
+        topic_summary_df_revised_display = topic_summary_df.apply(
+            lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
+        )
+        deduplicated_unique_table_markdown = (
+            topic_summary_df_revised_display.to_markdown(index=False)
+        )
+
         return (
             reference_df,
             topic_summary_df,
@@ -544,7 +575,7 @@ def deduplicate_topics(
         reference_pivot_file_path = (
             output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
         )
-        reference_df_pivot.to_csv(
+        reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             reference_pivot_file_path, index=None, encoding="utf-8-sig"
         )
         log_output_files.append(reference_pivot_file_path)
@@ -555,8 +586,10 @@ def deduplicate_topics(
     unique_topics_file_out_path = (
         output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
     )
-    reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
-    topic_summary_df.to_csv(
+    reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+        reference_file_out_path, index=None, encoding="utf-8-sig"
+    )
+    topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
         unique_topics_file_out_path, index=None, encoding="utf-8-sig"
     )
 
@@ -644,20 +677,52 @@ def deduplicate_topics_llm(
             "Data file outputs are too short for deduplicating. Returning original data."
         )
 
-        # print("reference_df:", reference_df)
-        # print("topic_summary_df:", topic_summary_df)
+        # Get file name without extension and create proper output paths
+        reference_table_file_name_no_ext = get_file_name_no_ext(
+            reference_table_file_name
+        )
+        unique_topics_table_file_name_no_ext = get_file_name_no_ext(
+            unique_topics_table_file_name
+        )
 
-        reference_file_out_path = output_folder + reference_table_file_name
-        unique_topics_file_out_path = output_folder + unique_topics_table_file_name
+        # Create output paths with _dedup suffix to match normal path
+        reference_file_out_path = (
+            output_folder + reference_table_file_name_no_ext + "_dedup.csv"
+        )
+        unique_topics_file_out_path = (
+            output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
+        )
+
+        # Save the DataFrames to CSV files
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_file_out_path, index=None, encoding="utf-8-sig"
+        )
+        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+        )
 
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
+
+        # Create markdown output for display
+        topic_summary_df_revised_display = topic_summary_df.apply(
+            lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
+        )
+        deduplicated_unique_table_markdown = (
+            topic_summary_df_revised_display.to_markdown(index=False)
+        )
+
+        # Return with token counts set to 0 for early return
         return (
             reference_df,
             topic_summary_df,
             output_files,
             log_output_files,
             deduplicated_unique_table_markdown,
+            0,  # input_tokens
+            0,  # output_tokens
+            0,  # number_of_calls
+            0.0,  # estimated_time_taken
         )
 
     # For checking that data is not lost during the process
@@ -691,7 +756,17 @@ def deduplicate_topics_llm(
         try:
 
             # Read and process candidate topics
-            candidate_topics_df = read_file(candidate_topics.name)
+            # Handle both string paths (CLI) and gr.FileData objects (Gradio)
+            candidate_topics_path = (
+                candidate_topics
+                if isinstance(candidate_topics, str)
+                else getattr(candidate_topics, "name", None)
+            )
+            if candidate_topics_path is None:
+                raise ValueError(
+                    "candidate_topics must be a file path string or a FileData object with a 'name' attribute"
+                )
+            candidate_topics_df = read_file(candidate_topics_path)
             candidate_topics_df = candidate_topics_df.fillna("")
             candidate_topics_df = candidate_topics_df.astype(str)
 
@@ -752,6 +827,15 @@ def deduplicate_topics_llm(
         client = None
         config = None
         bedrock_runtime = None
+    elif "inference-server" in model_source:
+        client = None
+        config = None
+        bedrock_runtime = None
+        # api_url is already passed to call_llm_with_markdown_table_checks
+        if api_url is None:
+            raise ValueError(
+                "api_url is required when model_source is 'inference-server'"
+            )
     else:
         raise ValueError(f"Unsupported model source: {model_source}")
 
@@ -975,8 +1059,10 @@ def deduplicate_topics_llm(
         + get_file_name_no_ext(unique_topics_table_file_name)
         + "_dedup.csv"
     )
-    reference_df.to_csv(reference_file_out_path, index=None, encoding="utf-8-sig")
-    topic_summary_df.to_csv(
+    reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+        reference_file_out_path, index=None, encoding="utf-8-sig"
+    )
+    topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
         unique_topics_file_out_path, index=None, encoding="utf-8-sig"
     )
 
@@ -1090,6 +1176,10 @@ def sample_reference_table_summaries(
         # If no responses/topics qualify, just go ahead with the original reference dataframe
         if all_summaries.empty:
             sampled_reference_table_df = reference_df
+            # Filter by sentiment only (Response References is a string in original df, not a count)
+            sampled_reference_table_df = sampled_reference_table_df.loc[
+                sampled_reference_table_df["Sentiment"] != "Not Mentioned"
+            ]
         else:
             # FIXED: Preserve Group column in aggregation to maintain group-specific summaries
             sampled_reference_table_df = (
@@ -1106,11 +1196,11 @@ def sample_reference_table_summaries(
                 )
                 .reset_index()
             )
-
-        sampled_reference_table_df = sampled_reference_table_df.loc[
-            (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
-            & (sampled_reference_table_df["Response References"] > 1)
-        ]
+            # Filter by sentiment and count (Response References is now a numeric count after aggregation)
+            sampled_reference_table_df = sampled_reference_table_df.loc[
+                (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
+                & (sampled_reference_table_df["Response References"] > 1)
+            ]
     else:
         sampled_reference_table_df = reference_df
 
@@ -1476,6 +1566,7 @@ def summarise_output_topics(
     context_textbox: str = "",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     model_name_map: dict = model_name_map,
     hf_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -1562,6 +1653,9 @@ def summarise_output_topics(
 
     tic = time.perf_counter()
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     model_choice_clean = clean_column_name(
         model_name_map[model_choice]["short_name"],
         max_length=20,
@@ -1588,6 +1682,7 @@ def summarise_output_topics(
         raise Exception(out_message)
 
     # Load in data file and chosen columns if exists to create pivot table later
+    file_data = pd.DataFrame()
     if in_data_files and chosen_cols:
         file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(
             in_data_files, chosen_cols, 1, in_excel_sheets=in_excel_sheets
@@ -1595,7 +1690,10 @@ def summarise_output_topics(
     else:
         out_message = "No file data found, pivot table output will not be created."
         print(out_message)
-        raise Exception(out_message)
+        # Use sys.stdout.write to avoid issues with progress bars
+        # sys.stdout.write(out_message + "\n")
+        # sys.stdout.flush()
+        # Note: file_data will remain empty, pivot tables will not be created
 
     reference_table_df = reference_table_df.rename(
         columns={"General Topic": "General topic"}, errors="ignore"
@@ -1647,7 +1745,11 @@ def summarise_output_topics(
     if do_summaries == "Yes":
 
         bedrock_runtime = connect_to_bedrock_runtime(
-            model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
         )
 
         create_batch_file_path_details(reference_data_file_name)
@@ -1932,7 +2034,9 @@ def summarise_output_topics(
                     + model_choice_clean
                     + ".csv"
                 )
-                reference_table_df_revised_pivot.to_csv(
+                reference_table_df_revised_pivot.drop(
+                    ["1", "2", "3"], axis=1, errors="ignore"
+                ).to_csv(
                     reference_table_df_revised_pivot_path,
                     index=None,
                     encoding="utf-8-sig",
@@ -1947,9 +2051,9 @@ def summarise_output_topics(
                 + model_choice_clean
                 + ".csv"
             )
-            topic_summary_df_revised.to_csv(
-                topic_summary_df_revised_path, index=None, encoding="utf-8-sig"
-            )
+            topic_summary_df_revised.drop(
+                ["1", "2", "3"], axis=1, errors="ignore"
+            ).to_csv(topic_summary_df_revised_path, index=None, encoding="utf-8-sig")
 
             reference_table_df_revised_path = (
                 output_folder
@@ -1958,9 +2062,9 @@ def summarise_output_topics(
                 + model_choice_clean
                 + ".csv"
             )
-            reference_table_df_revised.to_csv(
-                reference_table_df_revised_path, index=None, encoding="utf-8-sig"
-            )
+            reference_table_df_revised.drop(
+                ["1", "2", "3"], axis=1, errors="ignore"
+            ).to_csv(reference_table_df_revised_path, index=None, encoding="utf-8-sig")
 
             log_output_files.extend(
                 [reference_table_df_revised_path, topic_summary_df_revised_path]
@@ -1987,11 +2091,14 @@ def summarise_output_topics(
         toc = time.perf_counter()
         time_taken = toc - tic
 
-        out_message = "\n".join(out_message)
+        if isinstance(out_message, list):
+            out_message = "\n".join(out_message)
+        else:
+            out_message = out_message
+
         out_message = (
             out_message
-            + " "
-            + f"Topic summarisation finished processing. Total time: {time_taken:.2f}s"
+            + f"\nTopic summarisation finished processing. Total time: {round(float(time_taken), 1)}s"
         )
         print(out_message)
 
@@ -2037,12 +2144,17 @@ def wrapper_summarise_output_topics_per_group(
     context_textbox: str = "",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     model_name_map: dict = model_name_map,
     hf_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
     existing_logged_content: list = list(),
+    sample_reference_table: bool = False,
+    no_of_sampled_summaries: int = default_number_of_sampled_summaries,
+    random_seed: int = 42,
+    api_url: str = None,
     additional_summary_instructions_provided: str = "",
-    output_debug_files: str = "False",
+    output_debug_files: str = OUTPUT_DEBUG_FILES,
     reasoning_suffix: str = reasoning_suffix,
     local_model: object = None,
     tokenizer: object = None,
@@ -2050,10 +2162,6 @@ def wrapper_summarise_output_topics_per_group(
     summarise_topic_descriptions_prompt: str = summarise_topic_descriptions_prompt,
     summarise_topic_descriptions_system_prompt: str = summarise_topic_descriptions_system_prompt,
     do_summaries: str = "Yes",
-    sample_reference_table: bool = False,
-    no_of_sampled_summaries: int = default_number_of_sampled_summaries,
-    random_seed: int = 42,
-    api_url: str = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[
     pd.DataFrame,
@@ -2127,8 +2235,9 @@ def wrapper_summarise_output_topics_per_group(
     all_groups_logged_content = existing_logged_content
 
     # Check if we have data to process
+    # Allow empty sampled_reference_table_df if sample_reference_table is True (it will be created from reference_table_df)
     if (
-        sampled_reference_table_df.empty
+        (sampled_reference_table_df.empty and not sample_reference_table)
         or topic_summary_df.empty
         or reference_table_df.empty
     ):
@@ -2252,6 +2361,7 @@ def wrapper_summarise_output_topics_per_group(
                 context_textbox=context_textbox,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                aws_region_textbox=aws_region_textbox,
                 model_name_map=model_name_map,
                 hf_api_key_textbox=hf_api_key_textbox,
                 azure_endpoint_textbox=azure_endpoint_textbox,
@@ -2316,6 +2426,9 @@ def wrapper_summarise_output_topics_per_group(
             # For now, it will continue
             continue
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     # Create consolidated output files
     overall_file_name = clean_column_name(reference_data_file_name, max_length=20)
     model_choice_clean = model_name_map[model_choice]["short_name"]
@@ -2376,12 +2489,12 @@ def wrapper_summarise_output_topics_per_group(
             + ".csv"
         )
 
-        acc_topic_summary_df_revised.to_csv(
-            consolidated_topic_summary_path, index=None, encoding="utf-8-sig"
-        )
-        acc_reference_table_df_revised.to_csv(
-            consolidated_reference_table_path, index=None, encoding="utf-8-sig"
-        )
+        acc_topic_summary_df_revised.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(consolidated_topic_summary_path, index=None, encoding="utf-8-sig")
+        acc_reference_table_df_revised.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(consolidated_reference_table_path, index=None, encoding="utf-8-sig")
 
         acc_output_files.extend(
             [consolidated_topic_summary_path, consolidated_reference_table_path]
@@ -2436,6 +2549,7 @@ def overall_summary(
     context_textbox: str = "",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     model_name_map: dict = model_name_map,
     hf_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -2480,6 +2594,7 @@ def overall_summary(
         context_textbox (str, optional): Additional context. Defaults to empty string.
         aws_access_key_textbox (str, optional): AWS access key. Defaults to empty string.
         aws_secret_key_textbox (str, optional): AWS secret key. Defaults to empty string.
+        aws_region_textbox (str, optional): AWS region. Defaults to empty string.
         model_name_map (dict, optional): Mapping of model names. Defaults to model_name_map.
         hf_api_key_textbox (str, optional): Hugging Face API key. Defaults to empty string.
         existing_logged_content (list, optional): List of existing logged content. Defaults to empty list.
@@ -2559,6 +2674,9 @@ def overall_summary(
     else:
         comprehensive_summary_format_prompt = comprehensive_summary_format_prompt
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
+
     batch_file_path_details = create_batch_file_path_details(reference_data_file_name)
     model_choice_clean = model_name_map[model_choice]["short_name"]
     model_choice_clean_short = clean_column_name(
@@ -2584,7 +2702,11 @@ def overall_summary(
     if do_summaries == "Yes":
         model_source = model_name_map[model_choice]["source"]
         bedrock_runtime = connect_to_bedrock_runtime(
-            model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
         )
 
         for summary_group in summary_loop:
@@ -2701,7 +2823,7 @@ def overall_summary(
         summarised_outputs_df = pd.DataFrame(
             data={"Group": unique_groups, "Summary": summarised_outputs_for_df}
         )
-        summarised_outputs_df.to_csv(
+        summarised_outputs_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             overall_summary_output_csv_path, index=None, encoding="utf-8-sig"
         )
         output_files.append(overall_summary_output_csv_path)

@@ -121,6 +121,10 @@ def get_file_name_no_ext(file_path: str):
 
 def detect_file_type(filename: str):
     """Detect the file type based on its extension."""
+
+    # Strip quotes and whitespace that might have been accidentally included
+    filename = filename.strip().strip("'\"")
+
     if (
         (filename.endswith(".csv"))
         | (filename.endswith(".csv.gz"))
@@ -145,6 +149,8 @@ def detect_file_type(filename: str):
 
 def read_file(filename: str, sheet: str = ""):
     """Read the file based on its detected type."""
+    # Strip quotes and whitespace that might have been accidentally included
+    filename = filename.strip().strip("'\"")
     file_type = detect_file_type(filename)
 
     if file_type == "csv":
@@ -209,10 +215,12 @@ def load_in_data_file(
             file_paths[0], colnames=in_colnames, excel_sheet=in_excel_sheets
         )
         num_batches = math.ceil(len(file_data) / batch_size)
-        print("Total number of batches:", num_batches)
+        print(
+            f"File {file_name} loaded successfully. Number of rows: {len(file_data)}. Total number of batches: {num_batches}"
+        )
 
     except Exception as e:
-        print(e)
+        print("Could not load data file due to:", e)
         file_data = pd.DataFrame()
         file_name = ""
         num_batches = 1
@@ -420,17 +428,42 @@ def get_basic_response_data(
         chosen_cols = [chosen_cols]
 
     if chosen_cols[0] not in file_data.columns:
-        print(
-            "Column:",
-            chosen_cols[0],
-            "not found in file_data columns:",
-            file_data.columns,
+        error_msg = (
+            f"Column '{chosen_cols[0]}' not found in file_data columns. "
+            f"Available columns: {list(file_data.columns)}"
         )
+        print(error_msg)
+        raise KeyError(error_msg)
 
-    basic_response_data = file_data[[chosen_cols[0]]]
-    basic_response_data = basic_response_data.rename(
-        columns={basic_response_data.columns[0]: "Response"}
-    )
+    # If verify_titles is True, we need to check and include the second column
+    if verify_titles is True:
+        if len(chosen_cols) < 2:
+            error_msg = (
+                "verify_titles is True but only one column provided. "
+                "Need at least 2 columns: one for response text and one for title."
+            )
+            print(error_msg)
+            raise ValueError(error_msg)
+        if chosen_cols[1] not in file_data.columns:
+            error_msg = (
+                f"Column '{chosen_cols[1]}' not found in file_data columns for title. "
+                f"Available columns: {list(file_data.columns)}"
+            )
+            print(error_msg)
+            raise KeyError(error_msg)
+        # Include both columns when verify_titles is True
+        basic_response_data = file_data[[chosen_cols[0], chosen_cols[1]]]
+        basic_response_data = basic_response_data.rename(
+            columns={
+                basic_response_data.columns[0]: "Response",
+                basic_response_data.columns[1]: "Title",
+            }
+        )
+    else:
+        basic_response_data = file_data[[chosen_cols[0]]]
+        basic_response_data = basic_response_data.rename(
+            columns={basic_response_data.columns[0]: "Response"}
+        )
     basic_response_data = basic_response_data.reset_index(
         names="Original Reference"
     )  # .reset_index(drop=True) #
@@ -447,9 +480,6 @@ def get_basic_response_data(
     basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1
 
     if verify_titles is True:
-        basic_response_data = basic_response_data.rename(
-            columns={chosen_cols[1]: "Title"}
-        )
         basic_response_data["Title"] = basic_response_data["Title"].str.strip()
         basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
@@ -1182,3 +1212,34 @@ def update_model_choice(model_source):
         label="Large language model for topic extraction and summarisation",
         multiselect=False,
     )
+
+
+def ensure_model_in_map(model_choice: str, model_name_map_dict: dict = None) -> dict:
+    """
+    Ensures that a model_choice is registered in model_name_map.
+    If the model_choice is not found, it assumes it's an inference-server model
+    and adds it to the map with source "inference-server".
+
+    Args:
+        model_choice (str): The model name to check/register
+        model_name_map_dict (dict, optional): The model_name_map dictionary to update.
+            If None, uses the global model_name_map from config.
+
+    Returns:
+        dict: The model_name_map dictionary (updated if needed)
+    """
+    # Use provided dict or global one
+    if model_name_map_dict is None:
+        from tools.config import model_name_map
+
+        model_name_map_dict = model_name_map
+
+    # If model_choice is not in the map, assume it's an inference-server model
+    if model_choice not in model_name_map_dict:
+        model_name_map_dict[model_choice] = {
+            "short_name": model_choice,
+            "source": "inference-server",
+        }
+        print(f"Registered custom model '{model_choice}' as inference-server model")
+
+    return model_name_map_dict

@@ -47,6 +47,7 @@ from tools.helper_functions import (
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
+    ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
     load_in_data_file,
@@ -266,6 +267,7 @@ def validate_topics(
     show_previous_table: str = "Yes",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     api_url: str = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
@@ -309,6 +311,9 @@ def validate_topics(
     """
     print("Starting validation process...")
 
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice)
+
     # Calculate number of batches
     num_batches = (len(file_data) + batch_size - 1) // batch_size
 
@@ -332,7 +337,11 @@ def validate_topics(
     # Set up bedrock runtime if needed
     if model_source == "AWS":
         bedrock_runtime = connect_to_bedrock_runtime(
-            model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
         )
 
     # Clean file name for output
@@ -867,6 +876,7 @@ def validate_topics_wrapper(
     show_previous_table: str = "Yes",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     api_url: str = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
@@ -912,6 +922,9 @@ def validate_topics_wrapper(
             Accumulated reference_df, topic_summary_df, logged_content, conversation_metadata_str,
             total_input_tokens, total_output_tokens, total_llm_calls, and a list of output file paths.
     """
+
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice)
 
     # Handle None logged_content
     if logged_content is None:
@@ -1063,6 +1076,7 @@ def validate_topics_wrapper(
                 show_previous_table=show_previous_table,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                aws_region_textbox=aws_region_textbox,
                 api_url=api_url,
             )
 
@@ -1208,13 +1222,13 @@ def validate_topics_wrapper(
 
     # Save consolidated validation dataframes to CSV
     if not acc_reference_df.empty:
-        acc_reference_df.to_csv(
+        acc_reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             validation_reference_table_path, index=None, encoding="utf-8-sig"
         )
         acc_output_files.append(validation_reference_table_path)
 
     if not acc_topic_summary_df.empty:
-        acc_topic_summary_df.to_csv(
+        acc_topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             validation_unique_topics_path, index=None, encoding="utf-8-sig"
         )
         acc_output_files.append(validation_unique_topics_path)
@@ -2452,6 +2466,7 @@ def extract_topics(
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     hf_api_key_textbox: str = "",
     azure_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -2530,6 +2545,9 @@ def extract_topics(
     - progress (Progress): A progress tracker.
 
     """
+
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
 
     tic = time.perf_counter()
 
@@ -2674,7 +2692,11 @@ def extract_topics(
     model_source = model_name_map[model_choice]["source"]
 
     bedrock_runtime = connect_to_bedrock_runtime(
-        model_name_map, model_choice, aws_access_key_textbox, aws_secret_key_textbox
+        model_name_map,
+        model_choice,
+        aws_access_key_textbox,
+        aws_secret_key_textbox,
+        aws_region_textbox,
     )
 
     # If this is the first time around, set variables to 0/blank
@@ -2806,7 +2828,29 @@ def extract_topics(
                     if candidate_topics and existing_topic_summary_df.empty:
 
                         # 'Zero shot topics' are those supplied by the user
-                        zero_shot_topics = read_file(candidate_topics.name)
+                        # Handle both string paths (CLI) and gr.FileData objects (Gradio)
+                        # Supports CSV, Excel (.xlsx), and Parquet files
+                        candidate_topics_path = (
+                            candidate_topics
+                            if isinstance(candidate_topics, str)
+                            else getattr(candidate_topics, "name", None)
+                        )
+                        if candidate_topics_path is None:
+                            raise ValueError(
+                                "candidate_topics must be a file path string or a FileData object with a 'name' attribute"
+                            )
+
+                        # Read the file (supports CSV, Excel .xlsx, and Parquet)
+                        # For Excel files, reads the first sheet by default
+                        try:
+                            zero_shot_topics = read_file(candidate_topics_path)
+                        except Exception as e:
+                            raise ValueError(
+                                f"Error reading candidate topics file '{candidate_topics_path}': {str(e)}. "
+                                f"Supported formats: CSV (.csv), Excel (.xlsx), and Parquet (.parquet). "
+                                f"For Excel files, the first sheet will be used."
+                            ) from e
+
                         zero_shot_topics = zero_shot_topics.fillna(
                             ""
                         )  # Replace NaN with empty string
@@ -3043,7 +3087,9 @@ def extract_topics(
 
                     ## Reference table mapping response numbers to topics
                     if output_debug_files == "True":
-                        new_reference_df.to_csv(
+                        new_reference_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             reference_table_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(reference_table_out_path)
@@ -3056,7 +3102,9 @@ def extract_topics(
                     new_topic_summary_df["Group"] = group_name
 
                     if output_debug_files == "True":
-                        new_topic_summary_df.to_csv(
+                        new_topic_summary_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             topic_summary_df_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(topic_summary_df_out_path)
@@ -3197,7 +3245,9 @@ def extract_topics(
                     if output_debug_files == "True":
 
                         # Output reference table
-                        new_reference_df.to_csv(
+                        new_reference_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             reference_table_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(reference_table_out_path)
@@ -3211,7 +3261,9 @@ def extract_topics(
                     new_topic_summary_df["Group"] = group_name
 
                     if output_debug_files == "True":
-                        new_topic_summary_df.to_csv(
+                        new_topic_summary_df.drop(
+                            ["1", "2", "3"], axis=1, errors="ignore"
+                        ).to_csv(
                             topic_summary_df_out_path, index=None, encoding="utf-8-sig"
                         )
                         out_file_paths.append(topic_summary_df_out_path)
@@ -3450,9 +3502,9 @@ def extract_topics(
 
         ## Reference table mapping response numbers to topics
         existing_reference_df_pivot["Group"] = group_name
-        existing_reference_df_pivot.to_csv(
-            reference_table_out_pivot_path, index=None, encoding="utf-8-sig"
-        )
+        existing_reference_df_pivot.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(reference_table_out_pivot_path, index=None, encoding="utf-8-sig")
         log_files_output_paths.append(reference_table_out_pivot_path)
 
         ## Create a dataframe for missing response references:
@@ -3461,9 +3513,9 @@ def extract_topics(
         basic_response_data = get_basic_response_data(file_data, chosen_cols)
 
         # Save simplified file data to log outputs
-        pd.DataFrame(basic_response_data).to_csv(
-            basic_response_data_out_path, index=None, encoding="utf-8-sig"
-        )
+        pd.DataFrame(basic_response_data).drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(basic_response_data_out_path, index=None, encoding="utf-8-sig")
         log_files_output_paths.append(basic_response_data_out_path)
 
         # Note: missing_df creation moved to wrapper functions to handle grouped processing correctly
@@ -3558,6 +3610,7 @@ def wrapper_extract_topics_per_column_value(
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
     hf_api_key_textbox: str = "",
     azure_api_key_textbox: str = "",
     azure_endpoint_textbox: str = "",
@@ -3566,6 +3619,7 @@ def wrapper_extract_topics_per_column_value(
     additional_instructions_summary_format: str = "",
     additional_validation_issues_provided: str = "",
     show_previous_table: str = "Yes",
+    api_url: str = None,
     force_single_topic_prompt: str = force_single_topic_prompt,
     max_tokens: int = max_tokens,
     model_name_map: dict = model_name_map,
@@ -3577,7 +3631,6 @@ def wrapper_extract_topics_per_column_value(
     tokenizer: object = None,
     assistant_model: object = None,
     max_rows: int = max_rows,
-    api_url: str = None,
     progress=Progress(track_tqdm=True),  # type: ignore
 ) -> Tuple:  # Mimicking the return tuple structure of extract_topics
     """
@@ -3638,6 +3691,9 @@ def wrapper_extract_topics_per_column_value(
     :param progress: Gradio Progress object for tracking progress.
     :return: A tuple containing consolidated results, mimicking the return structure of `extract_topics`.
     """
+
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice, model_name_map)
 
     acc_input_tokens = 0
     acc_output_tokens = 0
@@ -3821,6 +3877,7 @@ def wrapper_extract_topics_per_column_value(
                 produce_structured_summary_radio=produce_structured_summary_radio,
                 aws_access_key_textbox=aws_access_key_textbox,
                 aws_secret_key_textbox=aws_secret_key_textbox,
+                aws_region_textbox=aws_region_textbox,
                 hf_api_key_textbox=hf_api_key_textbox,
                 azure_api_key_textbox=azure_api_key_textbox,
                 azure_endpoint_textbox=azure_endpoint_textbox,
@@ -4036,14 +4093,18 @@ def wrapper_extract_topics_per_column_value(
             + ".csv"
         )
 
-        acc_reference_df.to_csv(acc_reference_df_path, index=None, encoding="utf-8-sig")
-        acc_topic_summary_df.to_csv(
+        acc_reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            acc_reference_df_path, index=None, encoding="utf-8-sig"
+        )
+        acc_topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             acc_topic_summary_df_path, index=None, encoding="utf-8-sig"
         )
-        acc_reference_df_pivot.to_csv(
+        acc_reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             acc_reference_df_pivot_path, index=None, encoding="utf-8-sig"
         )
-        acc_missing_df.to_csv(acc_missing_df_path, index=None, encoding="utf-8-sig")
+        acc_missing_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            acc_missing_df_path, index=None, encoding="utf-8-sig"
+        )
 
         acc_log_files_output_paths.append(acc_missing_df_path)
 
@@ -4280,7 +4341,7 @@ def modify_existing_output_tables(
         ## Reference table mapping response numbers to topics
         reference_table_file_name = reference_file_path.replace(".csv", "_mod")
         new_reference_df_file_path = output_folder + reference_table_file_name + ".csv"
-        reference_df.to_csv(
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
             new_reference_df_file_path, index=None, encoding="utf-8-sig"
         )
         output_file_list.append(new_reference_df_file_path)
@@ -4307,9 +4368,9 @@ def modify_existing_output_tables(
         modified_unique_table_file_path = (
             output_folder + unique_table_file_name + ".csv"
         )
-        modifiable_topic_summary_df.to_csv(
-            modified_unique_table_file_path, index=None, encoding="utf-8-sig"
-        )
+        modifiable_topic_summary_df.drop(
+            ["1", "2", "3"], axis=1, errors="ignore"
+        ).to_csv(modified_unique_table_file_path, index=None, encoding="utf-8-sig")
         output_file_list.append(modified_unique_table_file_path)
 
     else:
@@ -4373,6 +4434,7 @@ def all_in_one_pipeline(
     produce_structures_summary_choice: str,
     aws_access_key_text: str,
     aws_secret_key_text: str,
+    aws_region_text: str,
     hf_api_key_text: str,
     azure_api_key_text: str,
     azure_endpoint_text: str,
@@ -4462,6 +4524,9 @@ def all_in_one_pipeline(
         A tuple matching the UI components updated during the original chained flow.
     """
 
+    # Ensure custom model_choice is registered in model_name_map_state
+    ensure_model_in_map(model_choice, model_name_map_state)
+
     # Load local model if it's not already loaded
     if (
         (model_name_map_state[model_choice]["source"] == "Local")
@@ -4478,6 +4543,15 @@ def all_in_one_pipeline(
     total_time_taken = 0
     out_message = list()
     out_logged_content = list()
+
+    print(
+        "Analysing file: ",
+        in_data_files,
+        "column(s): ",
+        chosen_cols,
+        "with model: ",
+        model_choice,
+    )
 
     # 1) Extract topics (group-aware)
     (
@@ -4536,6 +4610,7 @@ def all_in_one_pipeline(
         produce_structured_summary_radio=produce_structures_summary_choice,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
+        aws_region_textbox=aws_region_text,
         hf_api_key_textbox=hf_api_key_text,
         azure_api_key_textbox=azure_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,
@@ -4709,19 +4784,20 @@ def all_in_one_pipeline(
         context_textbox=context_text,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
+        aws_region_textbox=aws_region_text,
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,
-        additional_summary_instructions_provided=additional_instructions_summary_format,
-        local_model=model,
-        tokenizer=tokenizer,
-        assistant_model=assistant_model,
         existing_logged_content=out_logged_content,
         sample_reference_table=sample_reference_table_checkbox,
         no_of_sampled_summaries=100,
         random_seed=random_seed,
         output_debug_files=output_debug_files,
         api_url=api_url,
+        additional_summary_instructions_provided=additional_instructions_summary_format,
+        local_model=model,
+        tokenizer=tokenizer,
+        assistant_model=assistant_model,
     )
 
     # Generate summarised_references_markdown from the sampled reference table
@@ -4767,6 +4843,7 @@ def all_in_one_pipeline(
         context_textbox=context_text,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,
+        aws_region_textbox=aws_region_text,
         model_name_map=model_name_map_state,
         hf_api_key_textbox=hf_api_key_text,
         azure_endpoint_textbox=azure_endpoint_text,
