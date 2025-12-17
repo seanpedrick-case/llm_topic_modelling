@@ -191,7 +191,8 @@ def add_cover_sheet(
         # Convert markdown to RichText if applicable
         formatted_value = markdown_to_richtext(value)
         cell.value = formatted_value
-        cell.alignment = Alignment(wrap_text=True)
+        # Set left alignment for all metadata values (including numbers)
+        cell.alignment = Alignment(horizontal="left", wrap_text=True)
 
         # Apply number formatting with thousand separators for numeric fields
         if label in number_format_fields:
@@ -549,7 +550,7 @@ def collect_output_csvs_and_create_excel_output(
             csv_files.append(reference_table_csv_path)
             sheet_names.append("Response level data")
             column_widths["Response level data"] = {
-                "A": 15,
+                "A": 12,
                 "B": 30,
                 "C": 40,
                 "D": 10,
@@ -572,14 +573,14 @@ def collect_output_csvs_and_create_excel_output(
                 reference_pivot_table = pd.read_csv(reference_pivot_table_csv_path)
 
             # Base widths and wrap
-            column_widths["Topic response pivot table"] = {"A": 15, "B": 100, "C": 15}
+            column_widths["Topic response pivot table"] = {"A": 12, "B": 100, "C": 12}
             wrap_text_columns["Topic response pivot table"] = ["B", "C"]
 
             num_cols = len(reference_pivot_table.columns)
-            col_letters = [get_column_letter(i) for i in range(3, num_cols + 1)]
+            col_letters = [get_column_letter(i) for i in range(4, num_cols + 1)]
 
             for col_letter in col_letters:
-                column_widths["Topic response pivot table"][col_letter] = 25
+                column_widths["Topic response pivot table"][col_letter] = 20
 
             wrap_text_columns["Topic response pivot table"].extend(col_letters)
     else:
@@ -733,7 +734,7 @@ def collect_output_csvs_and_create_excel_output(
     output_xlsx_filename = (
         output_folder
         + file_path_details
-        + ("_structured_summaries" if structured_summaries else "_topic_analysis")
+        + ("_structured_summaries" if structured_summaries else "_theme_analysis")
         + ".xlsx"
     )
 
