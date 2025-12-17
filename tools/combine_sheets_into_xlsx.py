@@ -1,9 +1,12 @@
 import os
+import re
 from datetime import date, datetime
-from typing import List
+from typing import List, Union
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -17,6 +20,97 @@ from tools.helper_functions import (
     get_basic_response_data,
     load_in_data_file,
 )
+
+
+def markdown_to_richtext(
+    text: Union[str, float, int, None],
+) -> Union[CellRichText, str, float, int, None]:
+    """
+    Convert markdown formatting in text to Excel RichText formatting.
+
+    Supports:
+    - **text** or __text__ for bold
+    - *text* or _text_ for italic (when not bold)
+    - ***text*** or ___text___ for bold+italic
+
+    Args:
+        text: The text to convert (can be string, number, or None)
+
+    Returns:
+        CellRichText object if markdown is found, otherwise returns the original value
+    """
+    # Return non-string values as-is
+    if not isinstance(text, str):
+        return text
+
+    # Check if text contains markdown formatting
+    if not re.search(r"(\*\*|__|\*|_)(?=\S)", text):
+        return text
+
+    # Create RichText object
+    rich_text = CellRichText()
+
+    # Process in order: triple markers first, then double, then single
+    # This prevents conflicts (e.g., ***text*** being matched as **text** + *text*)
+    # Pattern order matters: longer patterns first
+    # Use word boundaries to ensure markers are not part of words (e.g., filenames with underscores)
+    # (?<!\w) = not preceded by word character, (?!\w) = not followed by word character
+    patterns = [
+        (r"(?<!\w)\*\*\*([^*]+?)\*\*\*(?!\w)", True, True),  # ***bold+italic***
+        (r"(?<!\w)___([^_]+?)___(?!\w)", True, True),  # ___bold+italic___
+        (r"(?<!\w)\*\*([^*]+?)\*\*(?!\w)", True, False),  # **bold**
+        (r"(?<!\w)__([^_]+?)__(?!\w)", True, False),  # __bold__
+        (r"(?<!\w)\*([^*]+?)\*(?!\w)", False, True),  # *italic*
+        (r"(?<!\w)_([^_]+?)_(?!\w)", False, True),  # _italic_
+    ]
+
+    # Track which parts of the string have been processed
+    processed = [False] * len(text)
+
+    # Find all matches with their positions, processing longer patterns first
+    all_matches = []
+    for pattern, is_bold, is_italic in patterns:
+        for match in re.finditer(pattern, text):
+            start, end = match.span()
+            # Check if this region overlaps with already processed area
+            # Allow if it's completely within unprocessed area
+            if start < len(processed) and end <= len(processed):
+                if not any(processed[i] for i in range(start, end)):
+                    all_matches.append((start, end, match.group(1), is_bold, is_italic))
+                    # Mark as processed
+                    for i in range(start, end):
+                        if i < len(processed):
+                            processed[i] = True
+
+    # Sort matches by position
+    all_matches.sort(key=lambda x: x[0])
+
+    last_pos = 0
+
+    for start, end, content, is_bold, is_italic in all_matches:
+        # Add plain text before the match
+        if start > last_pos:
+            plain_text = text[last_pos:start]
+            if plain_text:
+                rich_text.append(plain_text)
+
+        # Create font for this segment (use InlineFont for RichText)
+        font = InlineFont(b=is_bold, i=is_italic)
+        rich_text.append(TextBlock(font, content))
+
+        last_pos = end
+
+    # Add remaining plain text
+    if last_pos < len(text):
+        remaining = text[last_pos:]
+        if remaining:
+            rich_text.append(remaining)
+
+    # If we didn't add anything, return original text
+    if len(rich_text) == 0:
+        return text
+
+    return rich_text
 
 
 def add_cover_sheet(
@@ -35,7 +129,7 @@ def add_cover_sheet(
     file_name: str,
     column_name: str,
     number_of_responses_with_topic_assignment: int,
-    custom_title: str = "Cover Sheet",
+    custom_title: str = "Cover sheet",
 ):
     ws = wb.create_sheet(title=custom_title, index=0)
 
@@ -43,7 +137,7 @@ def add_cover_sheet(
     ws.freeze_panes = "A2"
 
     # Write title
-    ws["A1"] = "Large Language Model Topic analysis"
+    ws["A1"] = "Large Language Model thematic analysis"
     ws["A1"].font = Font(size=14, bold=True)
     ws["A1"].alignment = Alignment(wrap_text=True, vertical="top")
 
@@ -51,7 +145,8 @@ def add_cover_sheet(
     row = 3
     for paragraph in intro_paragraphs:
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
-        cell = ws.cell(row=row, column=1, value=paragraph)
+        formatted_paragraph = markdown_to_richtext(paragraph)
+        cell = ws.cell(row=row, column=1, value=formatted_paragraph)
         cell.alignment = Alignment(wrap_text=True, vertical="top")
         ws.row_dimensions[row].height = 60  # Adjust height as needed
         row += 2
@@ -75,16 +170,38 @@ def add_cover_sheet(
         "Total time taken for all LLM calls (seconds)": round(float(time_taken), 1),
     }
 
+    # Define which metadata fields should have number formatting with thousand separators
+    number_format_fields = {
+        "Number of responses": "#,##0",
+        "Number of responses with text": "#,##0",
+        "Number of responses with text five plus words": "#,##0",
+        "Number of responses with at least one assigned topic": "#,##0",
+        "Number of LLM calls": "#,##0",
+        "Total number of input tokens from LLM calls": "#,##0",
+        "Total number of output tokens from LLM calls": "#,##0",
+        "Total time taken for all LLM calls (seconds)": "#,##0.0",
+    }
+
     for i, (label, value) in enumerate(metadata.items()):
         row_num = meta_start + i
         ws[f"A{row_num}"] = label
         ws[f"A{row_num}"].font = Font(bold=True)
 
         cell = ws[f"B{row_num}"]
-        cell.value = value
-        cell.alignment = Alignment(wrap_text=True)
+        # Convert markdown to RichText if applicable
+        formatted_value = markdown_to_richtext(value)
+        cell.value = formatted_value
+        # Set left alignment for all metadata values (including numbers)
+        cell.alignment = Alignment(horizontal="left", wrap_text=True)
+
+        # Apply number formatting with thousand separators for numeric fields
+        if label in number_format_fields:
+            # Only apply formatting if value is not RichText (numbers can't be RichText)
+            if not isinstance(cell.value, CellRichText):
+                cell.number_format = number_format_fields[label]
+
         # Optional: Adjust column widths
-        ws.column_dimensions["A"].width = 25
+        ws.column_dimensions["A"].width = 50
         ws.column_dimensions["B"].width = 75
 
     # Ensure first row cells are wrapped on the cover sheet
@@ -151,9 +268,34 @@ def csvs_to_excel(
             for col_idx, value in enumerate(row, start=1):
                 cell = ws.cell(row=r_idx, column=col_idx)
 
+                # Convert markdown to RichText if applicable
+                formatted_value = markdown_to_richtext(value)
+                if formatted_value != value:
+                    cell.value = formatted_value
+                else:
+                    cell.value = value
+
                 # Bold header row
                 if r_idx == 1:
-                    cell.font = Font(bold=True)
+                    # If cell already has RichText, we need to apply bold to all segments
+                    if isinstance(cell.value, CellRichText):
+                        # Create new RichText with bold applied to all segments
+                        bold_rich_text = CellRichText()
+                        for segment in cell.value:
+                            if isinstance(segment, TextBlock):
+                                # Preserve italic if present, add bold
+                                is_italic = segment.font.i if segment.font else False
+                                bold_font = InlineFont(b=True, i=is_italic)
+                                bold_rich_text.append(
+                                    TextBlock(bold_font, segment.text)
+                                )
+                            else:
+                                bold_rich_text.append(
+                                    TextBlock(InlineFont(b=True), str(segment))
+                                )
+                        cell.value = bold_rich_text
+                    else:
+                        cell.font = Font(bold=True)
 
                 # Set vertical alignment to middle by default
                 cell.alignment = Alignment(vertical="center")
@@ -332,8 +474,8 @@ def collect_output_csvs_and_create_excel_output(
     if not structured_summary_df.empty:
         csv_files.append(overall_summary_csv_path)
         sheet_names.append("Overall summary")
-        column_widths["Overall summary"] = {"A": 20, "B": 100}
-        wrap_text_columns["Overall summary"] = ["B"]
+        column_widths["Overall summary"] = {"A": 15, "B": 120}
+        wrap_text_columns["Overall summary"] = ["A", "B"]
 
     if not master_reference_df_state.empty:
         # Simplify table to just responses column and the Response reference number
@@ -387,7 +529,14 @@ def collect_output_csvs_and_create_excel_output(
     if unique_topic_table_csv_path:
         csv_files.append(unique_topic_table_csv_path)
         sheet_names.append("Topic summary")
-        column_widths["Topic summary"] = {"A": 25, "B": 25, "C": 15, "D": 15, "F": 100}
+        column_widths["Topic summary"] = {
+            "A": 25,
+            "B": 25,
+            "C": 15,
+            "D": 15,
+            "E": 10,
+            "F": 100,
+        }
         wrap_text_columns["Topic summary"] = ["B", "F"]
     else:
         print("Relevant unique topic files not found, excluding from xlsx output.")
@@ -400,7 +549,13 @@ def collect_output_csvs_and_create_excel_output(
         else:
             csv_files.append(reference_table_csv_path)
             sheet_names.append("Response level data")
-            column_widths["Response level data"] = {"A": 15, "B": 30, "C": 40, "H": 100}
+            column_widths["Response level data"] = {
+                "A": 12,
+                "B": 30,
+                "C": 40,
+                "D": 10,
+                "H": 100,
+            }
             wrap_text_columns["Response level data"] = ["C", "G"]
     else:
         print("Relevant reference files not found, excluding from xlsx output.")
@@ -418,14 +573,14 @@ def collect_output_csvs_and_create_excel_output(
                 reference_pivot_table = pd.read_csv(reference_pivot_table_csv_path)
 
             # Base widths and wrap
-            column_widths["Topic response pivot table"] = {"A": 25, "B": 100}
-            wrap_text_columns["Topic response pivot table"] = ["B"]
+            column_widths["Topic response pivot table"] = {"A": 12, "B": 100, "C": 12}
+            wrap_text_columns["Topic response pivot table"] = ["B", "C"]
 
             num_cols = len(reference_pivot_table.columns)
-            col_letters = [get_column_letter(i) for i in range(3, num_cols + 1)]
+            col_letters = [get_column_letter(i) for i in range(4, num_cols + 1)]
 
             for col_letter in col_letters:
-                column_widths["Topic response pivot table"][col_letter] = 25
+                column_widths["Topic response pivot table"][col_letter] = 20
 
             wrap_text_columns["Topic response pivot table"].extend(col_letters)
     else:
@@ -478,7 +633,7 @@ def collect_output_csvs_and_create_excel_output(
         csv_files.append(original_data_csv_path)
 
     sheet_names.append("Original data")
-    column_widths["Original data"] = {"A": 20, "B": 20, "C": 20}
+    column_widths["Original data"] = {"A": 10, "B": 20, "C": 20}
     wrap_text_columns["Original data"] = ["C"]
     if isinstance(chosen_cols, list) and chosen_cols:
         chosen_cols = chosen_cols[0]
@@ -579,7 +734,7 @@ def collect_output_csvs_and_create_excel_output(
     output_xlsx_filename = (
         output_folder
         + file_path_details
-        + ("_structured_summaries" if structured_summaries else "_topic_analysis")
+        + ("_structured_summaries" if structured_summaries else "_theme_analysis")
         + ".xlsx"
     )
 

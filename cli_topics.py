@@ -25,6 +25,7 @@ from tools.config import (
     DEDUPLICATION_THRESHOLD,
     DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
+    DIRECT_MODE_S3_UPLOAD_ONLY_XLSX,
     DYNAMODB_USAGE_LOG_HEADERS,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
@@ -1393,7 +1394,6 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                     in_api_key=args.google_api_key,
                     temperature=args.temperature,
                     model_source=model_source,
-                    bedrock_runtime=None,
                     local_model=None,
                     tokenizer=None,
                     assistant_model=None,
@@ -1409,6 +1409,19 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                     azure_endpoint=args.azure_endpoint,
                     output_debug_files=str(args.output_debug_files),
                     api_url=args.api_url if args.api_url else API_URL,
+                    aws_access_key_textbox=(
+                        args.aws_access_key if hasattr(args, "aws_access_key") else ""
+                    ),
+                    aws_secret_key_textbox=(
+                        args.aws_secret_key if hasattr(args, "aws_secret_key") else ""
+                    ),
+                    aws_region_textbox=(
+                        args.aws_region if hasattr(args, "aws_region") else ""
+                    ),
+                    azure_api_key_textbox=(
+                        args.azure_api_key if hasattr(args, "azure_api_key") else ""
+                    ),
+                    model_name_map=model_name_map,
                 )
 
             end_time = time.time()
@@ -1944,15 +1957,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
 
             # Upload outputs to S3 if enabled
             # Collect all output files from the pipeline
-            all_output_files = []
-            if topic_extraction_output_files:
-                all_output_files.extend(topic_extraction_output_files)
-            if overall_summary_output_files:
-                all_output_files.extend(overall_summary_output_files)
+            all_s3_output_files = []
+            if topic_extraction_output_files and not DIRECT_MODE_S3_UPLOAD_ONLY_XLSX:
+                all_s3_output_files.extend(topic_extraction_output_files)
+            if overall_summary_output_files and not DIRECT_MODE_S3_UPLOAD_ONLY_XLSX:
+                all_s3_output_files.extend(overall_summary_output_files)
             if xlsx_files:
-                all_output_files.extend(xlsx_files)
+                all_s3_output_files.extend(xlsx_files)
             upload_outputs_to_s3_if_enabled(
-                output_files=all_output_files,
+                output_files=all_s3_output_files,
                 base_file_name=file_name,
                 session_hash=session_hash,
             )

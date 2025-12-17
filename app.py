@@ -1853,6 +1853,10 @@ with app:
         candidate_topics=None,
         azure_endpoint="",
         api_url=None,
+        aws_access_key_textbox="",
+        aws_secret_key_textbox="",
+        aws_region_textbox="",
+        azure_api_key_textbox="",
     ):
         # Ensure custom model_choice is registered in model_name_map
         ensure_model_in_map(model_choice)
@@ -1880,6 +1884,10 @@ with app:
             azure_endpoint,
             OUTPUT_DEBUG_FILES,
             api_url,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
+            azure_api_key_textbox,
         )
 
     deduplicate_llm_previous_data_btn.click(
@@ -1912,6 +1920,10 @@ with app:
             candidate_topics,
             azure_endpoint_textbox,
             api_url_textbox,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
+            azure_api_key_textbox,
         ],
         outputs=[
             master_reference_df_state,
