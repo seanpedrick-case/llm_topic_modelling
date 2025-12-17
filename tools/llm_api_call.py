@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.config import (
+    ALL_IN_ONE_USE_LLM_DEDUP,
     BATCH_SIZE_DEFAULT,
     CHOSEN_LOCAL_MODEL_TYPE,
     DEDUPLICATION_THRESHOLD,
@@ -39,6 +40,7 @@ from tools.config import (
 )
 from tools.dedup_summaries import (
     deduplicate_topics,
+    deduplicate_topics_llm,
     overall_summary,
     process_debug_output_iteration,
     wrapper_summarise_output_topics_per_group,
@@ -2293,12 +2295,17 @@ def process_batch_with_llm(
         client, client_config = construct_azure_client(
             in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox
         )
-    elif "anthropic.claude" in model_choice:
+    elif "AWS" in model_source:
         print("Using AWS Bedrock model:", model_choice)
         pass
-    else:
+    elif "Local" in model_source:
         print("Using local model:", model_choice)
         pass
+    elif "inference-server" in model_source:
+        print("Using inference-server model:", model_choice)
+        pass
+    else:
+        raise ValueError(f"Unsupported model source: {model_source}")
 
     batch_prompts = [formatted_prompt]
 
@@ -4553,6 +4560,8 @@ def all_in_one_pipeline(
         model_choice,
     )
 
+    model_source = model_name_map_state[model_choice]["source"]
+
     # 1) Extract topics (group-aware)
     (
         display_markdown,
@@ -4705,6 +4714,7 @@ def all_in_one_pipeline(
         )
 
     # 2) Deduplication
+    print("Deduplicating topic names with fuzzy matching")
     (
         ref_df_loaded,
         unique_df_loaded,
@@ -4735,6 +4745,65 @@ def all_in_one_pipeline(
         chosen_cols=chosen_cols,
         output_folder=output_folder,
     )
+
+    print("force_zero_shot_choice:", force_zero_shot_choice)
+    print("ALL_IN_ONE_USE_LLM_DEDUP:", ALL_IN_ONE_USE_LLM_DEDUP)
+    # LLM-based deduplication if enabled
+    if force_zero_shot_choice == "No" and ALL_IN_ONE_USE_LLM_DEDUP:
+        # Set up model source and bedrock runtime if needed
+
+        print("Deduplicating topic names with LLM")
+
+        # Call LLM deduplication
+        (
+            ref_df_after_dedup,
+            unique_df_after_dedup,
+            summarisation_input_files,
+            log_files_output_dedup,
+            summarised_output_markdown,
+            dedup_input_tokens,
+            dedup_output_tokens,
+            dedup_number_of_calls,
+            dedup_estimated_time_taken,
+        ) = deduplicate_topics_llm(
+            reference_df=ref_df_after_dedup,
+            topic_summary_df=unique_df_after_dedup,
+            reference_table_file_name=working_data_file_name_textbox,
+            unique_topics_table_file_name=unique_topics_table_file_name_textbox,
+            model_choice=model_choice,
+            in_api_key=in_api_key,
+            temperature=temperature,
+            model_source=model_source,
+            local_model=model,
+            tokenizer=tokenizer,
+            assistant_model=assistant_model,
+            in_excel_sheets=in_excel_sheets,
+            merge_sentiment=merge_sentiment,
+            merge_general_topics=merge_general_topics,
+            in_data_files=in_data_files,
+            chosen_cols=chosen_cols,
+            output_folder=output_folder,
+            candidate_topics=candidate_topics,
+            azure_endpoint=azure_endpoint_text,
+            output_debug_files=output_debug_files,
+            api_url=api_url,
+            aws_access_key_textbox=aws_access_key_text,
+            aws_secret_key_textbox=aws_secret_key_text,
+            aws_region_textbox=aws_region_text,
+            azure_api_key_textbox=azure_api_key_text,
+            model_name_map=model_name_map_state,
+        )
+
+        # Update token counts and time taken
+        total_input_tokens += dedup_input_tokens
+        total_output_tokens += dedup_output_tokens
+        total_number_of_calls += dedup_number_of_calls
+        total_time_taken += dedup_estimated_time_taken
+        out_message.append(
+            f"LLM deduplication completed: {dedup_input_tokens} input tokens, "
+            f"{dedup_output_tokens} output tokens, {dedup_number_of_calls} calls, "
+            f"{dedup_estimated_time_taken:.2f}s"
+        )
 
     # 3) Summarisation
     (

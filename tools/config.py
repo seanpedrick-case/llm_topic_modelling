@@ -14,6 +14,30 @@ HOST_NAME = socket.gethostname()
 # Set or retrieve configuration variables for the redaction app
 
 
+def ensure_folder_exists(output_folder: str):
+    """Checks if the specified folder exists, creates it if not."""
+
+    if not os.path.exists(output_folder):
+        # Create the folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        pass
+        # print(f"The {output_folder} folder already exists.")
+
+
+def _get_env_list(env_var_name: str, strip_strings: bool = True) -> List[str]:
+    """Parses a comma-separated environment variable into a list of strings."""
+    value = env_var_name[1:-1].strip().replace('"', "").replace("'", "")
+    if not value:
+        return []
+    # Split by comma and filter out any empty strings that might result from extra commas
+    if strip_strings:
+        return [s.strip() for s in value.split(",") if s.strip()]
+    else:
+        return [codecs.decode(s, "unicode_escape") for s in value.split(",") if s]
+
+
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
     """
     Get an environmental variable, and set it to a default value if it doesn't exist
@@ -171,7 +195,9 @@ SAVE_OUTPUTS_TO_S3 = get_or_create_env_var("SAVE_OUTPUTS_TO_S3", "False")
 # By default, logs are put into a subfolder of today's date and the host name of the instance running the app. This is to avoid at all possible the possibility of log files from one instance overwriting the logs of another instance on S3. If running the app on one system always, or just locally, it is not necessary to make the log folders so specific.
 # Another way to address this issue would be to write logs to another type of storage, e.g. database such as dynamodb. I may look into this in future.
 
-SAVE_LOGS_TO_CSV = get_or_create_env_var("SAVE_LOGS_TO_CSV", "True")
+SAVE_LOGS_TO_CSV = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_LOGS_TO_CSV", "True")
+)
 
 USE_LOG_SUBFOLDERS = get_or_create_env_var("USE_LOG_SUBFOLDERS", "True")
 
@@ -223,7 +249,9 @@ CSV_USAGE_LOG_HEADERS = get_or_create_env_var(
 )  # If blank, uses component labels
 
 ### DYNAMODB logs. Whether to save to DynamoDB, and the headers of the table
-SAVE_LOGS_TO_DYNAMODB = get_or_create_env_var("SAVE_LOGS_TO_DYNAMODB", "False")
+SAVE_LOGS_TO_DYNAMODB = convert_string_to_boolean(
+    get_or_create_env_var("SAVE_LOGS_TO_DYNAMODB", "False")
+)
 
 ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
     "ACCESS_LOG_DYNAMODB_TABLE_NAME", "llm_topic_model_access_log"
@@ -430,6 +458,7 @@ if RUN_INFERENCE_SERVER == "1":
         "CHOSEN_INFERENCE_SERVER_MODEL", inference_server_models[0]
     )
 
+    # If the chosen inference server model is not in the list of inference server models, add it to the list
     if CHOSEN_INFERENCE_SERVER_MODEL not in inference_server_models:
         model_full_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
         model_short_names.append(CHOSEN_INFERENCE_SERVER_MODEL)
@@ -452,6 +481,11 @@ else:
 default_model_source = model_name_map[default_model_choice]["source"]
 model_sources = list(
     set([model_name_map[model]["source"] for model in model_full_names])
+)
+
+DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
+    "DIRECT_MODE_INFERENCE_SERVER_MODEL",
+    CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else "",
 )
 
 
@@ -828,7 +862,9 @@ DIRECT_MODE_RANDOM_SEED = get_or_create_env_var(
 DIRECT_MODE_CREATE_XLSX_OUTPUT = get_or_create_env_var(
     "DIRECT_MODE_CREATE_XLSX_OUTPUT", "True"
 )
-# CHOSEN_INFERENCE_SERVER_MODEL is defined later, so we'll handle it after that definition
+DIRECT_MODE_S3_UPLOAD_ONLY_XLSX = convert_string_to_boolean(
+    get_or_create_env_var("DIRECT_MODE_S3_UPLOAD_ONLY_XLSX", "False")
+)
 
 MAX_QUEUE_SIZE = int(get_or_create_env_var("MAX_QUEUE_SIZE", "5"))
 
@@ -840,24 +876,13 @@ ROOT_PATH = get_or_create_env_var("ROOT_PATH", "")
 
 DEFAULT_CONCURRENCY_LIMIT = get_or_create_env_var("DEFAULT_CONCURRENCY_LIMIT", "3")
 
-GET_DEFAULT_ALLOW_LIST = get_or_create_env_var("GET_DEFAULT_ALLOW_LIST", "")
-
-ALLOW_LIST_PATH = get_or_create_env_var(
-    "ALLOW_LIST_PATH", ""
-)  # config/default_allow_list.csv
-
-S3_ALLOW_LIST_PATH = get_or_create_env_var(
-    "S3_ALLOW_LIST_PATH", ""
-)  # default_allow_list.csv # This is a path within the named S3 bucket
-
-if ALLOW_LIST_PATH:
-    OUTPUT_ALLOW_LIST_PATH = ALLOW_LIST_PATH
-else:
-    OUTPUT_ALLOW_LIST_PATH = "config/default_allow_list.csv"
-
 FILE_INPUT_HEIGHT = int(get_or_create_env_var("FILE_INPUT_HEIGHT", "125"))
 
 SHOW_EXAMPLES = get_or_create_env_var("SHOW_EXAMPLES", "True")
+
+ALL_IN_ONE_USE_LLM_DEDUP = convert_string_to_boolean(
+    get_or_create_env_var("ALL_IN_ONE_USE_LLM_DEDUP", "False")
+)
 
 ###
 # COST CODE OPTIONS
@@ -895,40 +920,7 @@ if ENFORCE_COST_CODES == "True":
 ###
 
 
-def ensure_folder_exists(output_folder: str):
-    """Checks if the specified folder exists, creates it if not."""
-
-    if not os.path.exists(output_folder):
-        # Create the folder if it doesn't exist
-        os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
-    else:
-        pass
-        # print(f"The {output_folder} folder already exists.")
-
-
-def _get_env_list(env_var_name: str, strip_strings: bool = True) -> List[str]:
-    """Parses a comma-separated environment variable into a list of strings."""
-    value = env_var_name[1:-1].strip().replace('"', "").replace("'", "")
-    if not value:
-        return []
-    # Split by comma and filter out any empty strings that might result from extra commas
-    if strip_strings:
-        return [s.strip() for s in value.split(",") if s.strip()]
-    else:
-        return [codecs.decode(s, "unicode_escape") for s in value.split(",") if s]
-
-
 # Convert string environment variables to string or list
-if SAVE_LOGS_TO_CSV == "True":
-    SAVE_LOGS_TO_CSV = True
-else:
-    SAVE_LOGS_TO_CSV = False
-if SAVE_LOGS_TO_DYNAMODB == "True":
-    SAVE_LOGS_TO_DYNAMODB = True
-else:
-    SAVE_LOGS_TO_DYNAMODB = False
-
 if CSV_ACCESS_LOG_HEADERS:
     CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
 if CSV_FEEDBACK_LOG_HEADERS:
@@ -942,9 +934,3 @@ if DYNAMODB_FEEDBACK_LOG_HEADERS:
     DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
 if DYNAMODB_USAGE_LOG_HEADERS:
     DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
-
-# Set DIRECT_MODE_INFERENCE_SERVER_MODEL after CHOSEN_INFERENCE_SERVER_MODEL is defined
-DIRECT_MODE_INFERENCE_SERVER_MODEL = get_or_create_env_var(
-    "DIRECT_MODE_INFERENCE_SERVER_MODEL",
-    CHOSEN_INFERENCE_SERVER_MODEL if CHOSEN_INFERENCE_SERVER_MODEL else "",
-)

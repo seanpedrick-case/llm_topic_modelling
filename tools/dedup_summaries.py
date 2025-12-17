@@ -622,7 +622,6 @@ def deduplicate_topics_llm(
     in_api_key: str,
     temperature: float,
     model_source: str,
-    bedrock_runtime=None,
     local_model=None,
     tokenizer=None,
     assistant_model=None,
@@ -636,6 +635,11 @@ def deduplicate_topics_llm(
     azure_endpoint: str = "",
     output_debug_files: str = "False",
     api_url: str = None,
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
+    azure_api_key_textbox: str = "",
+    model_name_map: dict = model_name_map,
 ):
     """
     Deduplicate topics using LLM semantic understanding to identify and merge similar topics.
@@ -646,10 +650,9 @@ def deduplicate_topics_llm(
         reference_table_file_name (str): Base file name for the output reference table.
         unique_topics_table_file_name (str): Base file name for the output unique topics table.
         model_choice (str): The LLM model to use for deduplication.
-        in_api_key (str): API key for the LLM service.
+        in_api_key (str): Google API key for the LLM service (for Gemini models).
         temperature (float): Temperature setting for the LLM.
         model_source (str): Source of the model (AWS, Gemini, Local, etc.).
-        bedrock_runtime: AWS Bedrock runtime client (if using AWS).
         local_model: Local model instance (if using local model).
         tokenizer: Tokenizer for local model.
         assistant_model: Assistant model for speculative decoding.
@@ -662,6 +665,12 @@ def deduplicate_topics_llm(
         candidate_topics (optional): Candidate topics file for zero-shot guidance. Defaults to None.
         azure_endpoint (str, optional): Azure endpoint for the LLM. Defaults to "".
         output_debug_files (str, optional): Whether to output debug files. Defaults to "False".
+        api_url (str, optional): API URL for inference-server models. Defaults to None.
+        aws_access_key_textbox (str, optional): AWS access key for Bedrock. Defaults to "".
+        aws_secret_key_textbox (str, optional): AWS secret key for Bedrock. Defaults to "".
+        aws_region_textbox (str, optional): AWS region for Bedrock. Defaults to "".
+        azure_api_key_textbox (str, optional): Azure API key for Azure/OpenAI models. Defaults to "".
+        model_name_map (dict, optional): Mapping of model names to their configurations. Defaults to model_name_map from config.
     """
 
     output_files = list()
@@ -732,14 +741,15 @@ def deduplicate_topics_llm(
     if topic_summary_df.empty:
         topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
 
-        # Merge topic numbers back to the original dataframe
-        reference_df = reference_df.merge(
-            topic_summary_df[
-                ["General topic", "Subtopic", "Sentiment", "Topic number"]
-            ],
-            on=["General topic", "Subtopic", "Sentiment"],
-            how="left",
-        )
+        if "Topic number" not in reference_df.columns:
+            # Merge topic numbers back to the original dataframe
+            reference_df = reference_df.merge(
+                topic_summary_df[
+                    ["General topic", "Subtopic", "Sentiment", "Topic number"]
+                ],
+                on=["General topic", "Subtopic", "Sentiment"],
+                how="left",
+            )
 
     # Load data files if provided
     if in_data_files and chosen_cols:
@@ -806,6 +816,7 @@ def deduplicate_topics_llm(
 
     # Set up model clients based on model source
     if "Gemini" in model_source:
+        print("Using Gemini model:", model_choice)
         client, config = construct_gemini_generative_model(
             in_api_key,
             temperature,
@@ -815,19 +826,32 @@ def deduplicate_topics_llm(
             LLM_SEED,
         )
         bedrock_runtime = None
+    elif "Azure/OpenAI" in model_source:
+        print("Using Azure/OpenAI AI Inference model:", model_choice)
+        if azure_api_key_textbox:
+            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
+        client, config = construct_azure_client(
+            in_api_key=azure_api_key_textbox, endpoint=azure_endpoint
+        )
+        bedrock_runtime = None
     elif "AWS" in model_source:
-        if not bedrock_runtime:
-            bedrock_runtime = boto3.client("bedrock-runtime")
+        print("Using AWS Bedrock model:", model_choice)
+        bedrock_runtime = connect_to_bedrock_runtime(
+            model_name_map,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
+        )
         client = None
         config = None
-    elif "Azure/OpenAI" in model_source:
-        client, config = construct_azure_client(in_api_key, azure_endpoint)
-        bedrock_runtime = None
     elif "Local" in model_source:
+        print("Using local model:", model_choice)
         client = None
         config = None
         bedrock_runtime = None
     elif "inference-server" in model_source:
+        print("Using inference-server model:", model_choice)
         client = None
         config = None
         bedrock_runtime = None
@@ -1011,14 +1035,16 @@ def deduplicate_topics_llm(
     # Remake topic_summary_df based on new reference_df
     topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
 
-    # Merge the topic numbers back to the original dataframe
-    reference_df = reference_df.merge(
-        topic_summary_df[
-            ["General topic", "Subtopic", "Sentiment", "Group", "Topic number"]
-        ],
-        on=["General topic", "Subtopic", "Sentiment", "Group"],
-        how="left",
-    )
+    if "Topic number" not in reference_df.columns:
+
+        # Merge the topic numbers back to the original dataframe
+        reference_df = reference_df.merge(
+            topic_summary_df[
+                ["General topic", "Subtopic", "Sentiment", "Group", "Topic number"]
+            ],
+            on=["General topic", "Subtopic", "Sentiment", "Group"],
+            how="left",
+        )
 
     # Create pivot table if file data is available
     if not file_data.empty:
@@ -2713,17 +2739,12 @@ def overall_summary(
 
             print("Creating overall summary for group:", summary_group)
 
-            summary_text = topic_summary_df.loc[
+            # Get the group-specific DataFrame
+            group_df = topic_summary_df.loc[
                 topic_summary_df["Group"] == summary_group
-            ].to_markdown(index=False)
+            ].copy()
 
-            formatted_summary_prompt = [
-                summarise_everything_prompt.format(
-                    topic_summary_table=summary_text,
-                    summary_format=comprehensive_summary_format_prompt,
-                )
-            ]
-
+            # Prepare the system prompt first (needed for token counting)
             formatted_summarise_everything_system_prompt = (
                 summarise_everything_system_prompt.format(
                     column_name=chosen_cols, consultation_context=context_textbox
@@ -2736,6 +2757,82 @@ def overall_summary(
                     + "\n"
                     + reasoning_suffix
                 )
+
+            # Create a test prompt with empty table to get base token count
+            test_summary_text = ""
+            test_formatted_summary_prompt = [
+                summarise_everything_prompt.format(
+                    topic_summary_table=test_summary_text,
+                    summary_format=comprehensive_summary_format_prompt,
+                )
+            ]
+
+            # Calculate base token count (system prompt + prompt template without table)
+            full_test_text = (
+                formatted_summarise_everything_system_prompt
+                + "\n"
+                + test_formatted_summary_prompt[0]
+            )
+            base_token_count = count_tokens_in_text(
+                full_test_text, tokenizer, model_source
+            )
+
+            # Calculate available tokens for the summary table
+            available_tokens = LLM_CONTEXT_LENGTH - base_token_count
+
+            # Truncate DataFrame rows if needed to fit within context limit
+            if len(group_df) > 0:
+                # Start with all rows and check if they fit
+                current_summary_text = group_df.to_markdown(index=False)
+                current_token_count = count_tokens_in_text(
+                    current_summary_text, tokenizer, model_source
+                )
+
+                # If the full table exceeds available tokens, truncate rows
+                if current_token_count > available_tokens:
+                    print(
+                        f"Warning: Summary table for group '{summary_group}' exceeds context limit. "
+                        f"Truncating rows. Table tokens: {current_token_count}, Available: {available_tokens}"
+                    )
+
+                    # Binary search approach: find the maximum number of rows that fit
+                    # Start with all rows and reduce until we fit
+                    num_rows = len(group_df)
+                    min_rows = 0
+                    max_rows = num_rows
+                    best_df = group_df.iloc[:0]  # Empty DataFrame as fallback
+
+                    # Try to find the maximum number of rows that fit
+                    while min_rows < max_rows:
+                        mid_rows = (min_rows + max_rows + 1) // 2
+                        test_df = group_df.iloc[:mid_rows]
+                        test_summary = test_df.to_markdown(index=False)
+                        test_token_count = count_tokens_in_text(
+                            test_summary, tokenizer, model_source
+                        )
+
+                        if test_token_count <= available_tokens:
+                            best_df = test_df
+                            min_rows = mid_rows
+                        else:
+                            max_rows = mid_rows - 1
+
+                    # Use the best fitting DataFrame
+                    group_df = best_df
+                    print(
+                        f"Truncated to {len(group_df)} rows (from {num_rows} original rows) "
+                        f"to fit within context limit."
+                    )
+
+            # Create summary_text from (possibly truncated) DataFrame
+            summary_text = group_df.to_markdown(index=False)
+
+            formatted_summary_prompt = [
+                summarise_everything_prompt.format(
+                    topic_summary_table=summary_text,
+                    summary_format=comprehensive_summary_format_prompt,
+                )
+            ]
 
             try:
                 response, conversation_history, metadata, response_text = (
