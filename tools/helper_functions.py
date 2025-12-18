@@ -1114,12 +1114,12 @@ def generate_zero_shot_topics_df(
                     .str.capitalize()
                 )
 
-        zero_shot_topics_columns_lowercase = zero_shot_topics.columns.str.lower()
+        zero_shot_topics.columns = zero_shot_topics.columns.str.lower()
 
         # If number of columns is 1, keep only subtopics
         if (
             zero_shot_topics.shape[1] == 1
-            and "general topic" not in zero_shot_topics_columns_lowercase
+            and "general topic" not in zero_shot_topics.columns
         ):
             print("Found only Subtopic in zero shot topics")
             zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
@@ -1127,67 +1127,61 @@ def generate_zero_shot_topics_df(
         # Allow for possibility that the user only wants to set general topics and not subtopics
         elif (
             zero_shot_topics.shape[1] == 1
-            and "general topic" in zero_shot_topics_columns_lowercase
+            and "general topic" in zero_shot_topics.columns
         ):
             print("Found only General topic in zero shot topics")
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics.iloc[:, 0])
             zero_shot_topics_subtopics_list = [""] * zero_shot_topics.shape[0]
         # If general topic, subtopic and description are specified
         elif set(["general topic", "subtopic", "description"]).issubset(
-            zero_shot_topics_columns_lowercase
+            zero_shot_topics.columns
         ):
             print("Found General topic, Subtopic and Description in zero shot topics")
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
-            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
-            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics["general topic"])
+            zero_shot_topics_subtopics_list = list(zero_shot_topics["subtopic"])
+            zero_shot_topics_description_list = list(zero_shot_topics["description"])
         # If general topic and subtopic are specified
         elif (
-            set(["general topic", "subtopic"]).issubset(
-                zero_shot_topics_columns_lowercase
-            )
-            and "description" not in zero_shot_topics_columns_lowercase
+            set(["general topic", "subtopic"]).issubset(zero_shot_topics.columns)
+            and "description" not in zero_shot_topics.columns
         ):
             print("Found General topic and Subtopic in zero shot topics")
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
-            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics["general topic"])
+            zero_shot_topics_subtopics_list = list(zero_shot_topics["subtopic"])
         # If subtopic and description are specified
         elif (
-            set(["subtopic", "description"]).issubset(
-                zero_shot_topics_columns_lowercase
-            )
-            and "general topic" not in zero_shot_topics_columns_lowercase
+            set(["subtopic", "description"]).issubset(zero_shot_topics.columns)
+            and "general topic" not in zero_shot_topics.columns
         ):
             print("Found Subtopic and Description in zero shot topics")
             zero_shot_topics_gen_topics_list = [""] * zero_shot_topics.shape[0]
-            zero_shot_topics_subtopics_list = list(zero_shot_topics["Subtopic"])
-            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
+            zero_shot_topics_subtopics_list = list(zero_shot_topics["subtopic"])
+            zero_shot_topics_description_list = list(zero_shot_topics["description"])
         elif (
-            set(["general topic", "description"]).issubset(
-                zero_shot_topics_columns_lowercase
-            )
-            and "subtopic" not in zero_shot_topics_columns_lowercase
+            set(["general topic", "description"]).issubset(zero_shot_topics.columns)
+            and "subtopic" not in zero_shot_topics.columns
         ):
             print("Found General topic and Description in zero shot topics")
-            zero_shot_topics_gen_topics_list = list(zero_shot_topics["General topic"])
+            zero_shot_topics_gen_topics_list = list(zero_shot_topics["general topic"])
             zero_shot_topics_subtopics_list = [""] * zero_shot_topics.shape[0]
-            zero_shot_topics_description_list = list(zero_shot_topics["Description"])
+            zero_shot_topics_description_list = list(zero_shot_topics["description"])
 
         # If number of columns is at least 2, keep general topics and subtopics
         # (only if named columns don't exist)
         elif (
             zero_shot_topics.shape[1] == 2
-            and "description" not in zero_shot_topics_columns_lowercase
-            and "general topic" not in zero_shot_topics_columns_lowercase
-            and "subtopic" not in zero_shot_topics_columns_lowercase
+            and "description" not in zero_shot_topics.columns
+            and "general topic" not in zero_shot_topics.columns
+            and "subtopic" not in zero_shot_topics.columns
         ):
             zero_shot_topics_gen_topics_list = list(zero_shot_topics.iloc[:, 0])
             zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 1])
         # If number of columns is at least 3, assume general topics, subtopics and descriptions were intended for the first three columns
         elif (
             zero_shot_topics.shape[1] >= 3
-            and "general topic" not in zero_shot_topics_columns_lowercase
-            and "subtopic" not in zero_shot_topics_columns_lowercase
-            and "description" not in zero_shot_topics_columns_lowercase
+            and "general topic" not in zero_shot_topics.columns
+            and "subtopic" not in zero_shot_topics.columns
+            and "description" not in zero_shot_topics.columns
         ):
             zero_shot_topics_gen_topics_list = list(zero_shot_topics.iloc[:, 0])
             zero_shot_topics_subtopics_list = list(zero_shot_topics.iloc[:, 1])

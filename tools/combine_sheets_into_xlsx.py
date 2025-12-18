@@ -33,6 +33,8 @@ def markdown_to_richtext(
     - *text* or _text_ for italic (when not bold)
     - ***text*** or ___text___ for bold+italic
 
+    Also removes HTML <br> tags (and variants like <br/> and <br />).
+
     Args:
         text: The text to convert (can be string, number, or None)
 
@@ -42,6 +44,9 @@ def markdown_to_richtext(
     # Return non-string values as-is
     if not isinstance(text, str):
         return text
+
+    # Remove <br> tags (case-insensitive, handles <br>, <br/>, <br />)
+    text = re.sub(r"<br\s*/?>", "", text, flags=re.IGNORECASE)
 
     # Check if text contains markdown formatting
     if not re.search(r"(\*\*|__|\*|_)(?=\S)", text):
