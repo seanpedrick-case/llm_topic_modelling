@@ -2650,7 +2650,7 @@ with app:
             model_choice,
             temperature_slide,
             display_topic_table_markdown,
-            conversation_metadata_textbox,
+            conversation_metadata_textbox_placeholder,
         ],
         FEEDBACK_LOGS_FOLDER,
     )
@@ -2671,7 +2671,7 @@ with app:
             model_choice,
             temperature_slide,
             display_topic_table_markdown,
-            conversation_metadata_textbox,
+            conversation_metadata_textbox_placeholder,
         ],
         None,
         preprocess=False,
