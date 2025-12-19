@@ -35,6 +35,7 @@ from tools.config import (
     DIRECT_MODE_CONTEXT,
     DIRECT_MODE_CREATE_XLSX_OUTPUT,
     DIRECT_MODE_DEDUP_METHOD,
+    DIRECT_MODE_DEFAULT_COST_CODE,
     DIRECT_MODE_EXCEL_SHEETS,
     DIRECT_MODE_FORCE_SINGLE_TOPIC,
     DIRECT_MODE_FORCE_ZERO_SHOT,
@@ -2649,7 +2650,7 @@ with app:
             model_choice,
             temperature_slide,
             display_topic_table_markdown,
-            conversation_metadata_textbox,
+            conversation_metadata_textbox_placeholder,
         ],
         FEEDBACK_LOGS_FOLDER,
     )
@@ -2670,7 +2671,7 @@ with app:
             model_choice,
             temperature_slide,
             display_topic_table_markdown,
-            conversation_metadata_textbox,
+            conversation_metadata_textbox_placeholder,
         ],
         None,
         preprocess=False,
@@ -2837,7 +2838,11 @@ if __name__ == "__main__":
             "save_logs_to_csv": SAVE_LOGS_TO_CSV,
             "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
             "usage_logs_folder": USAGE_LOGS_FOLDER,
-            "cost_code": DEFAULT_COST_CODE,
+            "cost_code": (
+                DIRECT_MODE_DEFAULT_COST_CODE
+                if DIRECT_MODE_DEFAULT_COST_CODE
+                else DEFAULT_COST_CODE
+            ),
         }
 
         print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")

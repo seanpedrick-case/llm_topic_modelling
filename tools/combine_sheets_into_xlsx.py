@@ -33,6 +33,8 @@ def markdown_to_richtext(
     - *text* or _text_ for italic (when not bold)
     - ***text*** or ___text___ for bold+italic
 
+    Also removes HTML <br> tags (and variants like <br/> and <br />).
+
     Args:
         text: The text to convert (can be string, number, or None)
 
@@ -42,6 +44,9 @@ def markdown_to_richtext(
     # Return non-string values as-is
     if not isinstance(text, str):
         return text
+
+    # Remove <br> tags (case-insensitive, handles <br>, <br/>, <br />)
+    text = re.sub(r"<br\s*/?>", "", text, flags=re.IGNORECASE)
 
     # Check if text contains markdown formatting
     if not re.search(r"(\*\*|__|\*|_)(?=\S)", text):
@@ -532,12 +537,12 @@ def collect_output_csvs_and_create_excel_output(
         column_widths["Topic summary"] = {
             "A": 25,
             "B": 25,
-            "C": 15,
+            "C": 12,
             "D": 15,
             "E": 10,
             "F": 100,
         }
-        wrap_text_columns["Topic summary"] = ["B", "F"]
+        wrap_text_columns["Topic summary"] = ["A", "B", "D", "F"]
     else:
         print("Relevant unique topic files not found, excluding from xlsx output.")
 
@@ -642,10 +647,10 @@ def collect_output_csvs_and_create_excel_output(
 
     # Intro page text
     intro_text = [
-        "This workbook contains outputs from the large language model topic analysis of open text data. Each sheet corresponds to a different CSV report included in the analysis.",
+        "This workbook contains outputs from the Large Language Model (LLM) thematic analysis of open text data. Each sheet corresponds to a different CSV report included in the analysis.",
         f"The file analysed was {short_file_name}, the column analysed was '{chosen_cols}' and the data was grouped by column '{group}'."
-        " Please contact the LLM Topic Modelling app administrator if you need any explanation on how to use the results."
-        "Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this analysis **need to be checked by a human** to check for harmful outputs, false information, and bias.",
+        " Please contact the app administrator if you need any explanation on how to use the results."
+        "LLMs are not 100% accurate and may produce biased or harmful outputs. All outputs from this analysis **need to be checked by a human** to check for harmful outputs, false information, and bias.",
     ]
 
     # Get values for number of rows, number of responses, and number of responses longer than five words
