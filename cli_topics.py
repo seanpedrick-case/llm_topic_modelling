@@ -44,6 +44,7 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
+    UPLOAD_USAGE_LOG_TO_S3_OUTPUTS,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
@@ -256,6 +257,17 @@ def upload_outputs_to_s3_if_enabled(
             valid_files.append(file_path)
         elif file_path:
             print(f"Warning: Output file does not exist, skipping: {file_path}")
+
+    # Check if usage log should be uploaded to S3 output folder
+    if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS:
+        usage_log_file_path = os.path.join(USAGE_LOGS_FOLDER, USAGE_LOG_FILE_NAME)
+        if os.path.exists(usage_log_file_path):
+            valid_files.append(usage_log_file_path)
+            print(f"Including usage log in S3 upload: {usage_log_file_path}")
+        else:
+            print(
+                f"Usage log not found at {usage_log_file_path}, skipping usage log upload."
+            )
 
     if not valid_files:
         print("No valid output files to upload to S3.")

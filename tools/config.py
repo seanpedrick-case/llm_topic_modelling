@@ -187,6 +187,9 @@ MPLCONFIGDIR = get_or_create_env_var(
 S3_OUTPUTS_BUCKET = get_or_create_env_var("S3_OUTPUTS_BUCKET", "")
 S3_OUTPUTS_FOLDER = get_or_create_env_var("S3_OUTPUTS_FOLDER", "")
 SAVE_OUTPUTS_TO_S3 = get_or_create_env_var("SAVE_OUTPUTS_TO_S3", "False")
+UPLOAD_USAGE_LOG_TO_S3_OUTPUTS = convert_string_to_boolean(
+    get_or_create_env_var("UPLOAD_USAGE_LOG_TO_S3_OUTPUTS", "False")
+)  # Whether to upload usage log to S3 output folder when uploading outputs
 
 ###
 # LOGGING OPTIONS
