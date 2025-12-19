@@ -897,6 +897,10 @@ GET_COST_CODES = get_or_create_env_var("GET_COST_CODES", "False")
 
 DEFAULT_COST_CODE = get_or_create_env_var("DEFAULT_COST_CODE", "")
 
+DIRECT_MODE_DEFAULT_COST_CODE = get_or_create_env_var(
+    "DIRECT_MODE_DEFAULT_COST_CODE", ""
+)
+
 COST_CODES_PATH = get_or_create_env_var(
     "COST_CODES_PATH", ""
 )  # 'config/COST_CENTRES.csv' # file should be a csv file with a single table in it that has two columns with a header. First column should contain cost codes, second column should contain a name or description for the cost code
