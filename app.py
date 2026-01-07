@@ -35,6 +35,7 @@ from tools.config import (
     DIRECT_MODE_CONTEXT,
     DIRECT_MODE_CREATE_XLSX_OUTPUT,
     DIRECT_MODE_DEDUP_METHOD,
+    DIRECT_MODE_DEFAULT_COST_CODE,
     DIRECT_MODE_EXCEL_SHEETS,
     DIRECT_MODE_FORCE_SINGLE_TOPIC,
     DIRECT_MODE_FORCE_ZERO_SHOT,
@@ -922,7 +923,6 @@ with app:
 
         with gr.Accordion("Response sentiment analysis", open=False):
             sentiment_checkbox = gr.Radio(
-                label="Response sentiment analysis",
                 value="Negative or Positive",
                 choices=[
                     "Negative or Positive",
@@ -1857,6 +1857,7 @@ with app:
         aws_secret_key_textbox="",
         aws_region_textbox="",
         azure_api_key_textbox="",
+        sentiment_checkbox="Negative or Positive",
     ):
         # Ensure custom model_choice is registered in model_name_map
         ensure_model_in_map(model_choice)
@@ -1888,6 +1889,7 @@ with app:
             aws_secret_key_textbox,
             aws_region_textbox,
             azure_api_key_textbox,
+            sentiment_checkbox=sentiment_checkbox,
         )
 
     deduplicate_llm_previous_data_btn.click(
@@ -1924,6 +1926,7 @@ with app:
             aws_secret_key_textbox,
             aws_region_textbox,
             azure_api_key_textbox,
+            sentiment_checkbox,
         ],
         outputs=[
             master_reference_df_state,
@@ -2649,7 +2652,7 @@ with app:
             model_choice,
             temperature_slide,
             display_topic_table_markdown,
-            conversation_metadata_textbox,
+            conversation_metadata_textbox_placeholder,
         ],
         FEEDBACK_LOGS_FOLDER,
     )
@@ -2670,7 +2673,7 @@ with app:
             model_choice,
             temperature_slide,
             display_topic_table_markdown,
-            conversation_metadata_textbox,
+            conversation_metadata_textbox_placeholder,
         ],
         None,
         preprocess=False,
@@ -2837,7 +2840,11 @@ if __name__ == "__main__":
             "save_logs_to_csv": SAVE_LOGS_TO_CSV,
             "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,
             "usage_logs_folder": USAGE_LOGS_FOLDER,
-            "cost_code": DEFAULT_COST_CODE,
+            "cost_code": (
+                DIRECT_MODE_DEFAULT_COST_CODE
+                if DIRECT_MODE_DEFAULT_COST_CODE
+                else DEFAULT_COST_CODE
+            ),
         }
 
         print(f"Running in direct mode with task: {DIRECT_MODE_TASK}")

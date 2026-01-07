@@ -25,8 +25,10 @@ from tools.config import (
     DEDUPLICATION_THRESHOLD,
     DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
+    DIRECT_MODE_DEFAULT_COST_CODE,
     DIRECT_MODE_S3_UPLOAD_ONLY_XLSX,
     DYNAMODB_USAGE_LOG_HEADERS,
+    ENABLE_BATCH_DEDUPLICATION,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     HF_TOKEN,
@@ -35,6 +37,7 @@ from tools.config import (
     LLM_SEED,
     LLM_TEMPERATURE,
     MAX_TIME_FOR_LOOP,
+    MAXIMUM_ZERO_SHOT_TOPICS,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
     RUN_AWS_FUNCTIONS,
@@ -44,6 +47,7 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
+    UPLOAD_USAGE_LOG_TO_S3_OUTPUTS,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
@@ -222,6 +226,7 @@ def upload_outputs_to_s3_if_enabled(
     s3_output_folder: str = S3_OUTPUTS_FOLDER,
     s3_bucket: str = S3_OUTPUTS_BUCKET,
     save_outputs_to_s3: bool = None,
+    task_usage_log_path: str = None,
 ):
     """
     Upload output files to S3 if SAVE_OUTPUTS_TO_S3 is enabled.
@@ -233,6 +238,7 @@ def upload_outputs_to_s3_if_enabled(
         s3_output_folder: S3 output folder path
         s3_bucket: S3 bucket name
         save_outputs_to_s3: Override for SAVE_OUTPUTS_TO_S3 config (if None, uses config value)
+        task_usage_log_path: Path to task-specific usage log file to upload (if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS is enabled)
     """
     # Use provided value or fall back to config
     if save_outputs_to_s3 is None:
@@ -256,6 +262,18 @@ def upload_outputs_to_s3_if_enabled(
             valid_files.append(file_path)
         elif file_path:
             print(f"Warning: Output file does not exist, skipping: {file_path}")
+
+    # Check if task-specific usage log should be uploaded to S3 output folder
+    if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and task_usage_log_path:
+        if os.path.exists(task_usage_log_path):
+            valid_files.append(task_usage_log_path)
+            print(
+                f"Including task-specific usage log in S3 upload: {task_usage_log_path}"
+            )
+        else:
+            print(
+                f"Task-specific usage log not found at {task_usage_log_path}, skipping usage log upload."
+            )
 
     if not valid_files:
         print("No valid output files to upload to S3.")
@@ -298,6 +316,7 @@ def write_usage_log(
     save_to_csv: bool = SAVE_LOGS_TO_CSV,
     save_to_dynamodb: bool = SAVE_LOGS_TO_DYNAMODB,
     include_conversation_metadata: bool = False,
+    output_folder: str = None,
 ):
     """
     Write usage log entry to CSV file and/or DynamoDB.
@@ -316,6 +335,10 @@ def write_usage_log(
         save_to_csv: Whether to save to CSV
         save_to_dynamodb: Whether to save to DynamoDB
         include_conversation_metadata: Whether to include conversation metadata in the log
+        output_folder: Output folder path for creating task-specific usage log file (if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS is enabled)
+
+    Returns:
+        str or None: Path to task-specific usage log file if created, None otherwise
     """
     # Convert boolean parameters if they're strings
     if isinstance(save_to_csv, str):
@@ -349,7 +372,7 @@ def write_usage_log(
             else (text_column[0] if text_column else "")
         ),
         model_choice,
-        conversation_metadata if conversation_metadata else "",
+        "",  # conversation_metadata if conversation_metadata else "",
         input_tokens,
         output_tokens,
         number_of_calls,
@@ -392,6 +415,7 @@ def write_usage_log(
         ]
 
     # Write to CSV if enabled
+    task_specific_log_path = None
     if save_to_csv:
         # Ensure usage logs folder exists
         os.makedirs(USAGE_LOGS_FOLDER, exist_ok=True)
@@ -409,6 +433,31 @@ def write_usage_log(
                 # Write headers if file doesn't exist
                 writer.writerow(headers)
             writer.writerow(data)
+
+        # Create task-specific usage log file if enabled and output folder provided
+        if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and output_folder:
+            # Ensure output folder exists
+            os.makedirs(output_folder, exist_ok=True)
+
+            # Create task-specific usage log file name
+            # Use session hash and timestamp to make it unique
+            base_name = (
+                os.path.splitext(os.path.basename(file_name))[0]
+                if file_name
+                else "usage"
+            )
+            task_log_filename = f"{base_name}_usage_log_{session_hash[:8]}_{timestamp.replace(':', '-').replace(' ', '_')}.csv"
+            task_specific_log_path = os.path.join(output_folder, task_log_filename)
+
+            # Write task-specific CSV file with headers and single entry
+            with open(
+                task_specific_log_path, "w", newline="", encoding="utf-8-sig"
+            ) as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(headers)
+                writer.writerow(data)
+
+            print(f"Created task-specific usage log: {task_specific_log_path}")
 
     # Write to DynamoDB if enabled
     if save_to_dynamodb:
@@ -513,6 +562,8 @@ def write_usage_log(
             import traceback
 
             traceback.print_exc()
+
+    return task_specific_log_path
 
 
 # --- Main CLI Function ---
@@ -776,6 +827,17 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         default="",
         help="Additional instructions for summary format.",
     )
+    extract_group.add_argument(
+        "--enable_batch_deduplication",
+        default=ENABLE_BATCH_DEDUPLICATION,
+        help=f"Enable deduplication after each batch during topic extraction (True/False). Default: {ENABLE_BATCH_DEDUPLICATION}",
+    )
+    extract_group.add_argument(
+        "--maximum_zero_shot_topics",
+        type=int,
+        default=MAXIMUM_ZERO_SHOT_TOPICS,
+        help=f"Maximum number of topics before triggering LLM-based deduplication. Default: {MAXIMUM_ZERO_SHOT_TOPICS}",
+    )
 
     # --- Validation Arguments ---
     validate_group = parser.add_argument_group("Topic Validation Options")
@@ -886,7 +948,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     )
     logging_group.add_argument(
         "--cost_code",
-        default=DEFAULT_COST_CODE,
+        default=(
+            DIRECT_MODE_DEFAULT_COST_CODE
+            if DIRECT_MODE_DEFAULT_COST_CODE
+            else DEFAULT_COST_CODE
+        ),
         help="Cost code for tracking usage.",
     )
 
@@ -988,6 +1054,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     )
     args.sample_reference_table = args.sample_reference_table == "True"
     args.output_debug_files = args.output_debug_files == "True"
+
+    # Update config module values for batch deduplication settings if provided via CLI
+    # These need to be set before importing/using llm_api_call functions
+    import tools.config as config_module
+
+    if hasattr(args, "enable_batch_deduplication"):
+        config_module.ENABLE_BATCH_DEDUPLICATION = args.enable_batch_deduplication
+    if hasattr(args, "maximum_zero_shot_topics"):
+        config_module.MAXIMUM_ZERO_SHOT_TOPICS = args.maximum_zero_shot_topics
 
     # Get username and folders
     (
@@ -1138,12 +1213,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 print("Generated Files:", sorted(topic_extraction_output_files))
 
             # Write usage log (before Excel creation so it can be included in Excel)
-            write_usage_log(
+            task_usage_log_path = write_usage_log(
                 session_hash=session_hash,
                 file_name=file_name,
                 text_column=args.text_column,
                 model_choice=args.model_choice,
-                conversation_metadata=conversation_metadata_textbox or "",
+                conversation_metadata="",  # conversation_metadata_textbox or "",
                 input_tokens=input_tokens_num or 0,
                 output_tokens=output_tokens_num or 0,
                 number_of_calls=number_of_calls_num or 0,
@@ -1151,6 +1226,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 cost_code=args.cost_code,
                 save_to_csv=args.save_logs_to_csv,
                 save_to_dynamodb=args.save_logs_to_dynamodb,
+                output_folder=args.output_dir,
             )
 
             # Create Excel output if requested
@@ -1195,6 +1271,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 output_files=all_output_files,
                 base_file_name=file_name,
                 session_hash=session_hash,
+                task_usage_log_path=task_usage_log_path,
             )
 
         # Task 2: Validate Topics
@@ -1291,12 +1368,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 print("Generated Files:", sorted(validation_output_files))
 
             # Write usage log
-            write_usage_log(
+            task_usage_log_path = write_usage_log(
                 session_hash=session_hash,
                 file_name=file_name,
                 text_column=args.text_column,
                 model_choice=args.model_choice,
-                conversation_metadata=conversation_metadata_textbox or "",
+                conversation_metadata="",  # conversation_metadata_textbox or "",
                 input_tokens=input_tokens_num or 0,
                 output_tokens=output_tokens_num or 0,
                 number_of_calls=number_of_calls_num or 0,
@@ -1304,6 +1381,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 cost_code=args.cost_code,
                 save_to_csv=args.save_logs_to_csv,
                 save_to_dynamodb=args.save_logs_to_dynamodb,
+                output_folder=args.output_dir,
             )
 
             # Create Excel output if requested
@@ -1422,6 +1500,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         args.azure_api_key if hasattr(args, "azure_api_key") else ""
                     ),
                     model_name_map=model_name_map,
+                    sentiment_checkbox=(
+                        args.sentiment
+                        if hasattr(args, "sentiment")
+                        else "Negative or Positive"
+                    ),
                 )
 
             end_time = time.time()
@@ -1432,6 +1515,9 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             print(f"\nOutput files saved to: {args.output_dir}")
             if summarisation_input_files:
                 print("Generated Files:", sorted(summarisation_input_files))
+
+            # Initialize task_usage_log_path
+            task_usage_log_path = None
 
             # Write usage log (only for LLM deduplication which has token counts)
             if args.method == "llm":
@@ -1451,7 +1537,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                     else processing_time
                 )
 
-                write_usage_log(
+                task_usage_log_path = write_usage_log(
                     session_hash=session_hash,
                     file_name=working_data_file_name_textbox,
                     text_column=args.text_column if args.text_column else "",
@@ -1464,6 +1550,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                     cost_code=args.cost_code,
                     save_to_csv=args.save_logs_to_csv,
                     save_to_dynamodb=args.save_logs_to_dynamodb,
+                    output_folder=args.output_dir,
                 )
 
             # Create Excel output if requested
@@ -1507,6 +1594,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 output_files=all_output_files,
                 base_file_name=working_data_file_name_textbox,
                 session_hash=session_hash,
+                task_usage_log_path=task_usage_log_path,
             )
 
         # Task 4: Summarise Topics
@@ -1597,12 +1685,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 print("Generated Files:", sorted(summary_output_files))
 
             # Write usage log
-            write_usage_log(
+            task_usage_log_path = write_usage_log(
                 session_hash=session_hash,
                 file_name=working_data_file_name_textbox,
                 text_column=args.text_column if args.text_column else "",
                 model_choice=args.model_choice,
-                conversation_metadata=conversation_metadata_textbox or "",
+                conversation_metadata="",  # conversation_metadata_textbox or "",
                 input_tokens=input_tokens_num or 0,
                 output_tokens=output_tokens_num or 0,
                 number_of_calls=number_of_calls_num or 0,
@@ -1610,6 +1698,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 cost_code=args.cost_code,
                 save_to_csv=args.save_logs_to_csv,
                 save_to_dynamodb=args.save_logs_to_dynamodb,
+                output_folder=args.output_dir,
             )
 
             # Create Excel output if requested
@@ -1652,6 +1741,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 output_files=all_output_files,
                 base_file_name=working_data_file_name_textbox,
                 session_hash=session_hash,
+                task_usage_log_path=task_usage_log_path,
             )
 
         # Task 5: Overall Summary
@@ -1716,12 +1806,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 print("Generated Files:", sorted(overall_summary_output_files))
 
             # Write usage log
-            write_usage_log(
+            task_usage_log_path = write_usage_log(
                 session_hash=session_hash,
                 file_name=working_data_file_name_textbox,
                 text_column=args.text_column if args.text_column else "",
                 model_choice=args.model_choice,
-                conversation_metadata=conversation_metadata_textbox or "",
+                conversation_metadata="",  # conversation_metadata_textbox or "",
                 input_tokens=input_tokens_num or 0,
                 output_tokens=output_tokens_num or 0,
                 number_of_calls=number_of_calls_num or 0,
@@ -1729,6 +1819,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 cost_code=args.cost_code,
                 save_to_csv=args.save_logs_to_csv,
                 save_to_dynamodb=args.save_logs_to_dynamodb,
+                output_folder=args.output_dir,
             )
 
             # Create Excel output if requested
@@ -1773,6 +1864,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 output_files=all_output_files,
                 base_file_name=working_data_file_name_textbox,
                 session_hash=session_hash,
+                task_usage_log_path=task_usage_log_path,
             )
 
         # Task 6: All-in-One Pipeline
@@ -1910,12 +2002,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 print("Generated Files:", sorted(overall_summary_output_files))
 
             # Write usage log
-            write_usage_log(
+            task_usage_log_path = write_usage_log(
                 session_hash=session_hash,
                 file_name=file_name,
                 text_column=args.text_column,
                 model_choice=args.model_choice,
-                conversation_metadata=conversation_metadata_textbox or "",
+                conversation_metadata="",  # conversation_metadata_textbox or "",
                 input_tokens=input_tokens_num or 0,
                 output_tokens=output_tokens_num or 0,
                 number_of_calls=number_of_calls_num or 0,
@@ -1923,6 +2015,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 cost_code=args.cost_code,
                 save_to_csv=args.save_logs_to_csv,
                 save_to_dynamodb=args.save_logs_to_dynamodb,
+                output_folder=args.output_dir,
             )
 
             # Create Excel output if requested
@@ -1968,6 +2061,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 output_files=all_s3_output_files,
                 base_file_name=file_name,
                 session_hash=session_hash,
+                task_usage_log_path=task_usage_log_path,
             )
 
         else:
