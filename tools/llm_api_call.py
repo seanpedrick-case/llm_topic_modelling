@@ -5396,9 +5396,7 @@ def all_in_one_pipeline(
         total_number_of_calls += dedup_number_of_calls
         total_time_taken += dedup_estimated_time_taken
         out_message.append(
-            f"LLM deduplication completed: {dedup_input_tokens} input tokens, "
-            f"{dedup_output_tokens} output tokens, {dedup_number_of_calls} calls, "
-            f"{dedup_estimated_time_taken:.2f}s"
+            f"LLM deduplication completed. Total time: {dedup_estimated_time_taken:.2f}s"
         )
 
     # 3) Summarisation

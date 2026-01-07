@@ -3086,6 +3086,14 @@ def overall_summary(
                 summarised_output = ""
                 summarised_output_for_df = ""
 
+            # Remove multiple consecutive line breaks (2 or more) and replace with single line break
+            if summarised_output_for_df:
+                summarised_output_for_df = re.sub(
+                    r"\n{2,}", "\n", summarised_output_for_df
+                )
+            if summarised_output:
+                summarised_output = re.sub(r"\n{2,}", "\n", summarised_output)
+
             summarised_outputs_for_df.append(summarised_output_for_df)
             summarised_outputs.append(summarised_output)
             txt_summarised_outputs.append(
@@ -3155,6 +3163,7 @@ def overall_summary(
             summarised_outputs_df_for_display["Summary"]
             .apply(lambda x: markdown.markdown(x) if isinstance(x, str) else x)
             .str.replace(r"\n", "<br>", regex=False)
+            .str.replace(r"(<br>\s*){2,}", "<br>", regex=True)
         )
         html_output_table = summarised_outputs_df_for_display.to_html(
             index=False, escape=False
