@@ -28,6 +28,7 @@ from tools.config import (
     DIRECT_MODE_DEFAULT_COST_CODE,
     DIRECT_MODE_S3_UPLOAD_ONLY_XLSX,
     DYNAMODB_USAGE_LOG_HEADERS,
+    ENABLE_BATCH_DEDUPLICATION,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     HF_TOKEN,
@@ -36,6 +37,7 @@ from tools.config import (
     LLM_SEED,
     LLM_TEMPERATURE,
     MAX_TIME_FOR_LOOP,
+    MAXIMUM_ZERO_SHOT_TOPICS,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
     RUN_AWS_FUNCTIONS,
@@ -825,6 +827,17 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         default="",
         help="Additional instructions for summary format.",
     )
+    extract_group.add_argument(
+        "--enable_batch_deduplication",
+        default=ENABLE_BATCH_DEDUPLICATION,
+        help=f"Enable deduplication after each batch during topic extraction (True/False). Default: {ENABLE_BATCH_DEDUPLICATION}",
+    )
+    extract_group.add_argument(
+        "--maximum_zero_shot_topics",
+        type=int,
+        default=MAXIMUM_ZERO_SHOT_TOPICS,
+        help=f"Maximum number of topics before triggering LLM-based deduplication. Default: {MAXIMUM_ZERO_SHOT_TOPICS}",
+    )
 
     # --- Validation Arguments ---
     validate_group = parser.add_argument_group("Topic Validation Options")
@@ -1041,6 +1054,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     )
     args.sample_reference_table = args.sample_reference_table == "True"
     args.output_debug_files = args.output_debug_files == "True"
+
+    # Update config module values for batch deduplication settings if provided via CLI
+    # These need to be set before importing/using llm_api_call functions
+    import tools.config as config_module
+
+    if hasattr(args, "enable_batch_deduplication"):
+        config_module.ENABLE_BATCH_DEDUPLICATION = args.enable_batch_deduplication
+    if hasattr(args, "maximum_zero_shot_topics"):
+        config_module.MAXIMUM_ZERO_SHOT_TOPICS = args.maximum_zero_shot_topics
 
     # Get username and folders
     (
@@ -1478,6 +1500,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         args.azure_api_key if hasattr(args, "azure_api_key") else ""
                     ),
                     model_name_map=model_name_map,
+                    sentiment_checkbox=(
+                        args.sentiment
+                        if hasattr(args, "sentiment")
+                        else "Negative or Positive"
+                    ),
                 )
 
             end_time = time.time()

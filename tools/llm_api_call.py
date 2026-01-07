@@ -19,6 +19,7 @@ from tools.config import (
     BATCH_SIZE_DEFAULT,
     CHOSEN_LOCAL_MODEL_TYPE,
     DEDUPLICATION_THRESHOLD,
+    ENABLE_BATCH_DEDUPLICATION,
     ENABLE_VALIDATION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
@@ -106,6 +107,53 @@ output_debug_files = OUTPUT_DEBUG_FILES
 max_text_length = 500
 
 ### HELPER FUNCTIONS
+
+
+def remove_markdown_emphasis(text: str) -> str:
+    """
+    Remove markdown emphasis characters from text that are not used in general English.
+    Removes: ** (bold), * (italic), __ (bold), _ (italic), ~~ (strikethrough), ` (code), # (headers)
+    """
+    if not isinstance(text, str):
+        return text
+
+    # Remove markdown emphasis patterns in order of specificity
+
+    # Remove strikethrough: ~~text~~
+    text = re.sub(r"~~([^~]+)~~", r"\1", text)
+
+    # Remove bold with double asterisks: **text** (handles cases with or without spaces)
+    text = re.sub(r"\*\*([^*]+?)\*\*", r"\1", text)
+    # Remove any remaining double asterisks
+    text = text.replace("**", "")
+
+    # Remove bold with double underscores: __text__
+    text = re.sub(r"__([^_]+?)__", r"\1", text)
+    # Remove any remaining double underscores
+    text = text.replace("__", "")
+
+    # Remove italic with single asterisks: *text* (but preserve asterisks that are part of words)
+    # Only match when asterisk is at word boundary or surrounded by non-word characters
+    text = re.sub(r"(?<!\w)\*([^*\s]+?)\*(?!\w)", r"\1", text)
+    text = re.sub(r"(?<!\w)\*([^*\s]+?)(?!\w)", r"\1", text)  # Handle unpaired *
+
+    # Remove italic with single underscores: _text_ (but preserve underscores in words)
+    # Only match when underscore is at word boundary
+    text = re.sub(r"(?<!\w)_([^_\s]+?)_(?!\w)", r"\1", text)
+    text = re.sub(r"(?<!\w)_([^_\s]+?)(?!\w)", r"\1", text)  # Handle unpaired _
+
+    # Remove inline code: `text`
+    text = re.sub(r"`([^`]+?)`", r"\1", text)
+
+    # Remove header markers at the start: # text or ## text etc.
+    text = re.sub(r"^#+\s+", "", text)
+    text = re.sub(r"^#+", "", text)  # Remove any remaining # at start
+
+    # Clean up any remaining standalone emphasis characters that might be left
+    # Only remove if they're clearly not part of words
+    text = re.sub(r"(?<!\w)[*_](?!\w)", "", text)
+
+    return text.strip()
 
 
 def normalise_string(text: str):
@@ -763,6 +811,169 @@ def validate_topics(
                 validation_loop.close()
                 tqdm._instances.clear()
             break
+
+        # Deduplicate topics after each batch if enabled and conditions are met
+        if (
+            ENABLE_BATCH_DEDUPLICATION
+            and force_zero_shot_radio == "No"
+            and produce_structured_summary_radio == "No"
+            and not validation_reference_df.empty
+            and not validation_topic_summary_df.empty
+        ):
+            print(
+                f"Deduplicating topics after validation batch {validation_latest_batch_completed}..."
+            )
+            # Create temporary file names for deduplication
+            reference_table_file_name = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_reference"
+            unique_topics_table_file_name = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_unique_topics"
+
+            # Prepare file_data for deduplication if available
+            in_data_files_for_dedup = None
+            validation_num_batches = None
+            validation_data_file_names_textbox = None
+            if not file_data.empty and chosen_cols:
+                # Pass file_data as DataFrame and calculate num_batches
+                in_data_files_for_dedup = file_data
+                validation_num_batches = (len(file_data) + batch_size - 1) // batch_size
+                validation_data_file_names_textbox = file_name
+
+            try:
+                topics_before = validation_topic_summary_df.drop_duplicates(
+                    subset=["General topic", "Subtopic"]
+                ).shape[0]
+                # Call deduplicate_topics function
+                (
+                    validation_reference_df,
+                    validation_topic_summary_df,
+                    _,
+                    _,
+                    _,
+                ) = deduplicate_topics(
+                    reference_df=validation_reference_df,
+                    topic_summary_df=validation_topic_summary_df,
+                    reference_table_file_name=reference_table_file_name,
+                    unique_topics_table_file_name=unique_topics_table_file_name,
+                    in_excel_sheets="",  # in_excel_sheets not available in validate_topics
+                    merge_sentiment="No",
+                    merge_general_topics="Yes",
+                    score_threshold=DEDUPLICATION_THRESHOLD,
+                    in_data_files=in_data_files_for_dedup,
+                    chosen_cols=(
+                        chosen_cols
+                        if isinstance(chosen_cols, list)
+                        else [chosen_cols] if chosen_cols else []
+                    ),
+                    output_folder=output_folder,
+                    deduplicate_topics="Yes",
+                    output_files="False",
+                    total_number_of_batches=validation_num_batches,
+                    data_file_names_textbox=validation_data_file_names_textbox,
+                )
+                topics_after = validation_topic_summary_df.drop_duplicates(
+                    subset=["General topic", "Subtopic"]
+                ).shape[0]
+                print(
+                    f"Topics deduplicated successfully after validation batch {validation_latest_batch_completed}. "
+                    f"Topics before: {topics_before}, Topics after: {topics_after}"
+                )
+                if topics_after > topics_before:
+                    print(
+                        f"WARNING: Number of topics increased from {topics_before} to {topics_after}. "
+                        f"This may be due to Group column differences. "
+                        f"Input had {validation_topic_summary_df['Group'].nunique() if 'Group' in validation_topic_summary_df.columns else 0} unique Group values."
+                    )
+            except Exception as e:
+                print(
+                    f"Warning: Deduplication failed after validation batch {validation_latest_batch_completed}: {str(e)}. Continuing with original topics."
+                )
+
+            # Check if number of topics exceeds MAXIMUM_ZERO_SHOT_TOPICS and use LLM deduplication if needed
+            topics_after_dedup = validation_topic_summary_df.drop_duplicates(
+                subset=["General topic", "Subtopic"]
+            ).shape[0]
+            if topics_after_dedup > MAXIMUM_ZERO_SHOT_TOPICS:
+                print(
+                    f"Number of topics ({topics_after_dedup}) exceeds MAXIMUM_ZERO_SHOT_TOPICS ({MAXIMUM_ZERO_SHOT_TOPICS}). "
+                    f"Using LLM-based deduplication after validation batch {validation_latest_batch_completed}..."
+                )
+                try:
+                    # Prepare file names for LLM deduplication
+                    reference_table_file_name_llm = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_reference_llm"
+                    unique_topics_table_file_name_llm = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_unique_topics_llm"
+
+                    # Prepare in_data_files - use file_data if available
+                    in_data_files_for_llm_dedup = (
+                        file_data if not file_data.empty else None
+                    )
+
+                    # Store topics count before LLM deduplication
+                    topics_before_llm_dedup = (
+                        validation_topic_summary_df.drop_duplicates(
+                            subset=["General topic", "Subtopic"]
+                        ).shape[0]
+                    )
+
+                    # Call deduplicate_topics_llm function
+                    (
+                        validation_reference_df,
+                        validation_topic_summary_df,
+                        _,
+                        _,
+                        _,
+                        _,
+                        _,
+                        _,
+                        _,
+                    ) = deduplicate_topics_llm(
+                        reference_df=validation_reference_df,
+                        topic_summary_df=validation_topic_summary_df,
+                        reference_table_file_name=reference_table_file_name_llm,
+                        unique_topics_table_file_name=unique_topics_table_file_name_llm,
+                        model_choice=model_choice,
+                        in_api_key=in_api_key,
+                        temperature=temperature,
+                        model_source=model_source,
+                        local_model=(
+                            local_model if "local_model" in locals() else None
+                        ),
+                        tokenizer=tokenizer if "tokenizer" in locals() else None,
+                        assistant_model=None,  # assistant_model not typically available in this scope
+                        in_excel_sheets="",  # in_excel_sheets not available in validate_topics
+                        merge_sentiment="No",
+                        merge_general_topics="Yes",
+                        in_data_files=in_data_files_for_llm_dedup,
+                        chosen_cols=(
+                            chosen_cols
+                            if isinstance(chosen_cols, list)
+                            else [chosen_cols] if chosen_cols else []
+                        ),
+                        output_folder=output_folder,
+                        candidate_topics=None,
+                        azure_endpoint=azure_endpoint_textbox,
+                        output_debug_files=output_debug_files,
+                        api_url=api_url,
+                        aws_access_key_textbox=aws_access_key_textbox,
+                        aws_secret_key_textbox=aws_secret_key_textbox,
+                        aws_region_textbox=aws_region_textbox,
+                        azure_api_key_textbox=azure_api_key_textbox,
+                        model_name_map=model_name_map,
+                        output_files="False",
+                        sentiment_checkbox=sentiment_checkbox,
+                    )
+                    topics_after_llm_dedup = (
+                        validation_topic_summary_df.drop_duplicates(
+                            subset=["General topic", "Subtopic"]
+                        ).shape[0]
+                    )
+                    print(
+                        f"LLM-based deduplication completed successfully after validation batch {validation_latest_batch_completed}. "
+                        f"Number of topics before LLM deduplication: {topics_before_llm_dedup}, Number of topics after LLM deduplication: {topics_after_llm_dedup}"
+                    )
+                except Exception as e:
+                    print(
+                        f"Warning: LLM-based deduplication failed after validation batch {validation_latest_batch_completed}: {str(e)}. "
+                        f"Continuing with existing topics."
+                    )
 
     # Combine validation logged content
     validation_all_logged_content = [
@@ -1509,6 +1720,32 @@ def clean_markdown_table(text: str):
         formatted_row = "|" + "|".join(cells) + "|"
         formatted_rows.append(formatted_row)
 
+    # Step 3: Remove duplicate rows while preserving header and separator rows
+    if len(formatted_rows) > 0:
+        # Keep the first row (header)
+        deduplicated_rows = [formatted_rows[0]]
+        seen_rows = {formatted_rows[0]}  # Track seen rows
+
+        # Check if second row is a separator (contains alignment markers)
+        separator_row = None
+        if len(formatted_rows) > 1:
+            second_row = formatted_rows[1]
+            # Check if it's a separator row (contains ":-", ":-:", or similar alignment markers)
+            if ":-" in second_row or ":-:" in second_row or "-:" in second_row:
+                separator_row = second_row
+                deduplicated_rows.append(separator_row)
+                seen_rows.add(separator_row)
+
+        # Process data rows (skip header and separator)
+        start_idx = 2 if separator_row else 1
+        for row in formatted_rows[start_idx:]:
+            # Only add if we haven't seen this exact row before
+            if row not in seen_rows:
+                deduplicated_rows.append(row)
+                seen_rows.add(row)
+
+        formatted_rows = deduplicated_rows
+
     # Join everything back together
     result = "\n".join(formatted_rows)
 
@@ -1635,6 +1872,42 @@ def convert_response_text_to_dataframe(
         print("Error when trying to parse table:", e)
         is_error = True
         out_df = pd.DataFrame()
+
+    # Fill down blank values in General Topic/General topic column if it exists
+    # Also remove markdown emphasis characters from topic columns
+    if not out_df.empty:
+        # Check for both possible column name variations
+        general_topic_col = None
+        for col in out_df.columns:
+            if col.lower().strip() in ["general topic", "general_topic"]:
+                general_topic_col = col
+                break
+
+        if general_topic_col is not None:
+            # Fill down blank/NaN values in the General topic column
+            out_df[general_topic_col] = out_df[general_topic_col].ffill()
+            # Also fill empty strings if they appear after non-empty values
+            # Convert empty strings to NaN temporarily for ffill, then back
+            mask_empty = out_df[general_topic_col].astype(str).str.strip() == ""
+            out_df.loc[mask_empty, general_topic_col] = pd.NA
+            out_df[general_topic_col] = out_df[general_topic_col].ffill()
+            # Convert back any remaining NA to empty string if needed
+            out_df[general_topic_col] = out_df[general_topic_col].fillna("")
+
+        # Remove markdown emphasis from General topic, Subtopic, and Sentiment columns
+        for col_name in ["General topic", "Subtopic", "Sentiment"]:
+            # Check for column name variations (case-insensitive, handle underscores)
+            matching_col = None
+            for col in out_df.columns:
+                if col.lower().strip().replace("_", " ") == col_name.lower():
+                    matching_col = col
+                    break
+
+            if matching_col is not None:
+                # Remove markdown emphasis characters
+                out_df[matching_col] = (
+                    out_df[matching_col].astype(str).apply(remove_markdown_emphasis)
+                )
 
     return out_df, is_error
 
@@ -1772,6 +2045,7 @@ def write_llm_output_and_logs(
 
     # Check if response is "No change" - if so, return input dataframes
     stripped_response = response_text.strip()
+
     if stripped_response.lower().startswith("no change"):
         print("LLM response indicates no changes needed, returning input dataframes")
 
@@ -1875,60 +2149,147 @@ def write_llm_output_and_logs(
     else:
         # Something went wrong with the table output, so add empty columns
         print("Table output has wrong number of columns, adding with blank values")
+
+        # Check for and handle duplicate column names which can cause DataFrame access issues
+        if topic_with_response_df.columns.duplicated().any():
+            # Remove duplicate column names by adding suffix
+            topic_with_response_df.columns = [
+                (
+                    f"{col}_{i}"
+                    if topic_with_response_df.columns.tolist().count(col) > 1
+                    and topic_with_response_df.columns.tolist()[: i + 1].count(col) > 1
+                    else col
+                )
+                for i, col in enumerate(topic_with_response_df.columns)
+            ]
+
         # First, rename first two columns that should always exist.
-        new_column_names = {
-            topic_with_response_df.columns[0]: "General topic",
-            topic_with_response_df.columns[1]: "Subtopic",
-        }
-        topic_with_response_df.rename(columns=new_column_names, inplace=True)
+        if len(topic_with_response_df.columns) >= 2:
+            new_column_names = {
+                topic_with_response_df.columns[0]: "General topic",
+                topic_with_response_df.columns[1]: "Subtopic",
+            }
+            topic_with_response_df.rename(columns=new_column_names, inplace=True)
+        else:
+            # If we don't have enough columns, create a minimal valid structure
+            topic_with_response_df = pd.DataFrame(
+                columns=[
+                    "General topic",
+                    "Subtopic",
+                    "Sentiment",
+                    "Response References",
+                    "Summary",
+                ]
+            )
 
         # Add empty columns if they are not present
+        # Ensure we're assigning to a Series, not accidentally creating a DataFrame
         if "Sentiment" not in topic_with_response_df.columns:
-            topic_with_response_df["Sentiment"] = "Not assessed"
+            topic_with_response_df["Sentiment"] = pd.Series(
+                ["Not assessed"] * len(topic_with_response_df), dtype=str
+            )
         if "Response References" not in topic_with_response_df.columns:
             if batch_size_number == 1:
-                topic_with_response_df["Response References"] = "1"
+                topic_with_response_df["Response References"] = pd.Series(
+                    ["1"] * len(topic_with_response_df), dtype=str
+                )
             else:
-                topic_with_response_df["Response References"] = ""
+                topic_with_response_df["Response References"] = pd.Series(
+                    [""] * len(topic_with_response_df), dtype=str
+                )
         if "Summary" not in topic_with_response_df.columns:
-            topic_with_response_df["Summary"] = ""
+            topic_with_response_df["Summary"] = pd.Series(
+                [""] * len(topic_with_response_df), dtype=str
+            )
 
-        topic_with_response_df = topic_with_response_df[
-            ["General topic", "Subtopic", "Sentiment", "Response References", "Summary"]
+        # Ensure we only have the expected columns and they're all Series
+        expected_cols = [
+            "General topic",
+            "Subtopic",
+            "Sentiment",
+            "Response References",
+            "Summary",
         ]
+        topic_with_response_df = topic_with_response_df[expected_cols].copy()
+
+        # Verify all columns are Series (not DataFrames)
+        for col in expected_cols:
+            if col in topic_with_response_df.columns:
+                if not isinstance(topic_with_response_df[col], pd.Series):
+                    # If somehow it's a DataFrame, take the first column
+                    topic_with_response_df[col] = (
+                        topic_with_response_df[col].iloc[:, 0]
+                        if hasattr(topic_with_response_df[col], "iloc")
+                        else topic_with_response_df[col]
+                    )
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
 
+    # Ensure we have a valid DataFrame with the expected columns before processing
+    if topic_with_response_df.empty:
+        # If DataFrame is empty, create a minimal valid structure
+        topic_with_response_df = pd.DataFrame(
+            columns=[
+                "General topic",
+                "Subtopic",
+                "Sentiment",
+                "Response References",
+                "Summary",
+            ]
+        )
+
     # For instances where you end up with float values in Response References
-    topic_with_response_df["Response References"] = (
-        topic_with_response_df["Response References"]
-        .astype(str)
-        .str.replace(".0", "", regex=False)
-    )
+    # Ensure we're working with a Series by using iloc if needed
+    if (
+        "Response References" in topic_with_response_df.columns
+        and not topic_with_response_df.empty
+    ):
+        # Handle case where column access might return DataFrame (e.g., duplicate column names)
+        try:
+            response_ref_series = topic_with_response_df["Response References"]
+            # If it's a DataFrame (due to duplicate columns), take first column
+            if isinstance(response_ref_series, pd.DataFrame):
+                response_ref_series = response_ref_series.iloc[:, 0]
+            topic_with_response_df["Response References"] = response_ref_series.astype(
+                str
+            ).str.replace(".0", "", regex=False)
+        except Exception as e:
+            print(f"Warning: Error processing Response References column: {e}")
+            # Fallback: create a simple Series
+            topic_with_response_df["Response References"] = topic_with_response_df[
+                "Response References"
+            ].astype(str)
 
     # Strip and lower case topic names to remove issues where model is randomly capitalising topics/sentiment
-    topic_with_response_df["General topic"] = (
-        topic_with_response_df["General topic"]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .str.capitalize()
-    )
-    topic_with_response_df["Subtopic"] = (
-        topic_with_response_df["Subtopic"]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .str.capitalize()
-    )
-    topic_with_response_df["Sentiment"] = (
-        topic_with_response_df["Sentiment"]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .str.capitalize()
-    )
+    # Also remove markdown emphasis characters
+    # Ensure we're working with Series, not DataFrames
+    for col_name in ["General topic", "Subtopic", "Sentiment"]:
+        if (
+            col_name in topic_with_response_df.columns
+            and not topic_with_response_df.empty
+        ):
+            try:
+                col_series = topic_with_response_df[col_name]
+                # If it's a DataFrame (due to duplicate columns), take first column
+                if isinstance(col_series, pd.DataFrame):
+                    col_series = col_series.iloc[:, 0]
+                # Remove markdown emphasis, then strip, lower, and capitalize
+                topic_with_response_df[col_name] = (
+                    col_series.astype(str)
+                    .apply(remove_markdown_emphasis)
+                    .str.strip()
+                    .str.lower()
+                    .str.capitalize()
+                )
+            except Exception as e:
+                print(f"Warning: Error processing {col_name} column: {e}")
+                # Fallback: just convert to string and remove markdown emphasis
+                topic_with_response_df[col_name] = (
+                    topic_with_response_df[col_name]
+                    .astype(str)
+                    .apply(remove_markdown_emphasis)
+                )
 
     topic_table_out_path = (
         output_folder
@@ -2063,13 +2424,42 @@ def write_llm_output_and_logs(
             ]
         )
 
+    # Ensure new_reference_df has all required columns
+    required_cols = [
+        "Response References",
+        "General topic",
+        "Subtopic",
+        "Sentiment",
+        "Summary",
+        "Start row of group",
+    ]
+    for col in required_cols:
+        if col not in new_reference_df.columns:
+            new_reference_df[col] = ""
+
     # Append on old reference data
     if not new_reference_df.empty:
-        out_reference_df = pd.concat([new_reference_df, existing_reference_df]).dropna(
-            how="all"
-        )
+        # Reset index to avoid reindexing errors with duplicate indices
+        new_reference_df = new_reference_df.reset_index(drop=True)
+        if not existing_reference_df.empty:
+            existing_reference_df = existing_reference_df.reset_index(drop=True)
+            # Ensure existing_reference_df also has all required columns
+            for col in required_cols:
+                if col not in existing_reference_df.columns:
+                    existing_reference_df[col] = ""
+        out_reference_df = pd.concat(
+            [new_reference_df, existing_reference_df], ignore_index=True
+        ).dropna(how="all")
     else:
-        out_reference_df = existing_reference_df
+        out_reference_df = (
+            existing_reference_df.copy()
+            if not existing_reference_df.empty
+            else new_reference_df
+        ).reset_index(drop=True)
+        # Ensure out_reference_df has all required columns
+        for col in required_cols:
+            if col not in out_reference_df.columns:
+                out_reference_df[col] = ""
 
     # Remove duplicate Response References for the same topic
     out_reference_df.drop_duplicates(
@@ -2125,9 +2515,13 @@ def write_llm_output_and_logs(
     )
 
     # Join existing and new unique topics
-    out_topic_summary_df = pd.concat([new_topic_summary_df, existing_topics_df]).dropna(
-        how="all"
-    )
+    # Reset index to avoid reindexing errors with duplicate indices
+    new_topic_summary_df = new_topic_summary_df.reset_index(drop=True)
+    if not existing_topics_df.empty:
+        existing_topics_df = existing_topics_df.reset_index(drop=True)
+    out_topic_summary_df = pd.concat(
+        [new_topic_summary_df, existing_topics_df], ignore_index=True
+    ).dropna(how="all")
 
     out_topic_summary_df = out_topic_summary_df.rename(
         columns={
@@ -2139,9 +2533,11 @@ def write_llm_output_and_logs(
 
     # print("out_topic_summary_df:", out_topic_summary_df)
 
-    out_topic_summary_df = out_topic_summary_df.drop_duplicates(
-        ["General topic", "Subtopic", "Sentiment"]
-    ).drop(["Number of responses", "Summary"], axis=1, errors="ignore")
+    out_topic_summary_df = (
+        out_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment"])
+        .drop(["Number of responses", "Summary"], axis=1, errors="ignore")
+        .reset_index(drop=True)
+    )
 
     # Get count of rows that refer to particular topics
     reference_counts = (
@@ -2981,6 +3377,8 @@ def extract_topics(
                             ["Main heading", "Subheading"], ascending=[True, True]
                         )
 
+                    print("Number of topics:", topics_df_for_markdown.shape[0])
+
                     unique_topics_markdown = topics_df_for_markdown.to_markdown(
                         index=False
                     )
@@ -3307,6 +3705,179 @@ def extract_topics(
             existing_reference_df = new_reference_df.dropna(how="all")
             existing_topic_summary_df = new_topic_summary_df.dropna(how="all")
             existing_topics_table = new_topic_df.dropna(how="all")
+
+            # Deduplicate topics after each batch if enabled and conditions are met
+            if (
+                ENABLE_BATCH_DEDUPLICATION
+                and force_zero_shot_radio == "No"
+                and produce_structured_summary_radio == "No"
+                and not existing_reference_df.empty
+                and not existing_topic_summary_df.empty
+            ):
+                print(f"Deduplicating topics after batch {latest_batch_completed}...")
+                # Create temporary file names for deduplication
+                reference_table_file_name = (
+                    f"{file_name_clean}_batch_{latest_batch_completed}_reference"
+                )
+                unique_topics_table_file_name = (
+                    f"{file_name_clean}_batch_{latest_batch_completed}_unique_topics"
+                )
+
+                # Prepare file_data for deduplication if available
+                in_data_files_for_dedup = in_data_file
+                extract_num_batches = None
+                extract_data_file_names_textbox = None
+                if not file_data.empty and chosen_cols:
+                    # Pass file_data as DataFrame and use available num_batches and file_name
+                    in_data_files_for_dedup = file_data
+                    extract_num_batches = num_batches
+                    extract_data_file_names_textbox = file_name
+
+                try:
+                    topics_before = existing_topic_summary_df.drop_duplicates(
+                        subset=["General topic", "Subtopic"]
+                    ).shape[0]
+                    # Call deduplicate_topics function
+                    (
+                        existing_reference_df,
+                        existing_topic_summary_df,
+                        _,
+                        _,
+                        _,
+                    ) = deduplicate_topics(
+                        reference_df=existing_reference_df,
+                        topic_summary_df=existing_topic_summary_df,
+                        reference_table_file_name=reference_table_file_name,
+                        unique_topics_table_file_name=unique_topics_table_file_name,
+                        in_excel_sheets=(
+                            ",".join(in_excel_sheets)
+                            if isinstance(in_excel_sheets, list)
+                            else in_excel_sheets
+                        ),
+                        merge_sentiment="No",
+                        merge_general_topics="Yes",
+                        score_threshold=DEDUPLICATION_THRESHOLD,
+                        in_data_files=in_data_files_for_dedup,
+                        chosen_cols=(
+                            chosen_cols
+                            if isinstance(chosen_cols, list)
+                            else [chosen_cols] if chosen_cols else []
+                        ),
+                        output_folder=output_folder,
+                        deduplicate_topics="Yes",
+                        output_files="False",
+                        total_number_of_batches=extract_num_batches,
+                        data_file_names_textbox=extract_data_file_names_textbox,
+                    )
+                    topics_after = existing_topic_summary_df.drop_duplicates(
+                        subset=["General topic", "Subtopic"]
+                    ).shape[0]
+                    print(
+                        f"Topics deduplicated successfully after batch {latest_batch_completed}. "
+                        f"Topics before: {topics_before}, Topics after: {topics_after}"
+                    )
+                    if topics_after > topics_before:
+                        print(
+                            f"WARNING: Number of topics increased from {topics_before} to {topics_after}. "
+                            f"This may be due to Group column differences. "
+                            f"Input had {existing_topic_summary_df['Group'].nunique() if 'Group' in existing_topic_summary_df.columns else 0} unique Group values."
+                        )
+                except Exception as e:
+                    print(
+                        f"Warning: Deduplication failed after batch {latest_batch_completed}: {str(e)}. Continuing with original topics."
+                    )
+
+                # Check if number of topics exceeds MAXIMUM_ZERO_SHOT_TOPICS and use LLM deduplication if needed
+                topics_after_dedup = existing_topic_summary_df.drop_duplicates(
+                    subset=["General topic", "Subtopic"]
+                ).shape[0]
+                if topics_after_dedup > MAXIMUM_ZERO_SHOT_TOPICS:
+                    print(
+                        f"Number of topics ({topics_after_dedup}) exceeds MAXIMUM_ZERO_SHOT_TOPICS ({MAXIMUM_ZERO_SHOT_TOPICS}). "
+                        f"Using LLM-based deduplication after batch {latest_batch_completed}..."
+                    )
+                    try:
+                        # Prepare file names for LLM deduplication
+                        reference_table_file_name_llm = f"{file_name_clean}_batch_{latest_batch_completed}_reference_llm"
+                        unique_topics_table_file_name_llm = f"{file_name_clean}_batch_{latest_batch_completed}_unique_topics_llm"
+
+                        # Prepare in_data_files - use file_data if available, otherwise use in_data_file
+                        in_data_files_for_llm_dedup = (
+                            file_data if not file_data.empty else in_data_file
+                        )
+
+                        # Store topics count before LLM deduplication
+                        topics_before_llm_dedup = (
+                            existing_topic_summary_df.drop_duplicates(
+                                subset=["General topic", "Subtopic"]
+                            ).shape[0]
+                        )
+
+                        # Call deduplicate_topics_llm function
+                        (
+                            existing_reference_df,
+                            existing_topic_summary_df,
+                            _,
+                            _,
+                            _,
+                            _,
+                            _,
+                            _,
+                            _,
+                        ) = deduplicate_topics_llm(
+                            reference_df=existing_reference_df,
+                            topic_summary_df=existing_topic_summary_df,
+                            reference_table_file_name=reference_table_file_name_llm,
+                            unique_topics_table_file_name=unique_topics_table_file_name_llm,
+                            model_choice=model_choice,
+                            in_api_key=in_api_key,
+                            temperature=temperature,
+                            model_source=model_source,
+                            local_model=(
+                                local_model if "local_model" in locals() else None
+                            ),
+                            tokenizer=tokenizer if "tokenizer" in locals() else None,
+                            assistant_model=None,  # assistant_model not typically available in this scope
+                            in_excel_sheets=(
+                                ",".join(in_excel_sheets)
+                                if isinstance(in_excel_sheets, list)
+                                else in_excel_sheets
+                            ),
+                            merge_sentiment="No",
+                            merge_general_topics="Yes",
+                            in_data_files=in_data_files_for_llm_dedup,
+                            chosen_cols=(
+                                chosen_cols
+                                if isinstance(chosen_cols, list)
+                                else [chosen_cols] if chosen_cols else []
+                            ),
+                            output_folder=output_folder,
+                            candidate_topics=None,
+                            azure_endpoint=azure_endpoint_textbox,
+                            output_debug_files=output_debug_files,
+                            api_url=api_url,
+                            aws_access_key_textbox=aws_access_key_textbox,
+                            aws_secret_key_textbox=aws_secret_key_textbox,
+                            aws_region_textbox=aws_region_textbox,
+                            azure_api_key_textbox=azure_api_key_textbox,
+                            model_name_map=model_name_map,
+                            output_files="False",
+                            sentiment_checkbox=sentiment_checkbox,
+                        )
+                        topics_after_llm_dedup = (
+                            existing_topic_summary_df.drop_duplicates(
+                                subset=["General topic", "Subtopic"]
+                            ).shape[0]
+                        )
+                        print(
+                            f"LLM-based deduplication completed successfully after batch {latest_batch_completed}. "
+                            f"Number of topics before LLM deduplication: {topics_before_llm_dedup}, Number of topics after LLM deduplication: {topics_after_llm_dedup}"
+                        )
+                    except Exception as e:
+                        print(
+                            f"Warning: LLM-based deduplication failed after batch {latest_batch_completed}: {str(e)}. "
+                            f"Continuing with existing topics."
+                        )
 
             # The topic table that can be modified does not need the summary column
             modifiable_topic_summary_df = existing_topic_summary_df.drop(
@@ -3909,14 +4480,38 @@ def wrapper_extract_topics_per_column_value(
             # Aggregate results
             # The DFs returned by extract_topics are already cumulative for *its own run*.
             # We now make them cumulative for the *wrapper's run*.
-            acc_reference_df = pd.concat([acc_reference_df, seg_reference_df])
+            # Reset indices before concatenation to avoid reindexing errors
+            if not acc_reference_df.empty:
+                acc_reference_df = acc_reference_df.reset_index(drop=True)
+            if not seg_reference_df.empty:
+                seg_reference_df = seg_reference_df.reset_index(drop=True)
+            acc_reference_df = pd.concat(
+                [acc_reference_df, seg_reference_df], ignore_index=True
+            )
+
+            if not acc_topic_summary_df.empty:
+                acc_topic_summary_df = acc_topic_summary_df.reset_index(drop=True)
+            if not seg_topic_summary_df.empty:
+                seg_topic_summary_df = seg_topic_summary_df.reset_index(drop=True)
             acc_topic_summary_df = pd.concat(
-                [acc_topic_summary_df, seg_topic_summary_df]
+                [acc_topic_summary_df, seg_topic_summary_df], ignore_index=True
             )
+
+            if not acc_reference_df_pivot.empty:
+                acc_reference_df_pivot = acc_reference_df_pivot.reset_index(drop=True)
+            if not seg_reference_df_pivot.empty:
+                seg_reference_df_pivot = seg_reference_df_pivot.reset_index(drop=True)
             acc_reference_df_pivot = pd.concat(
-                [acc_reference_df_pivot, seg_reference_df_pivot]
+                [acc_reference_df_pivot, seg_reference_df_pivot], ignore_index=True
             )
-            acc_missing_df = pd.concat([acc_missing_df, seg_missing_df])
+
+            if not acc_missing_df.empty:
+                acc_missing_df = acc_missing_df.reset_index(drop=True)
+            if not seg_missing_df.empty:
+                seg_missing_df = seg_missing_df.reset_index(drop=True)
+            acc_missing_df = pd.concat(
+                [acc_missing_df, seg_missing_df], ignore_index=True
+            )
 
             # For lists, extend. Use set to remove duplicates if paths might be re-added.
             acc_out_file_paths.extend(
@@ -4792,6 +5387,7 @@ def all_in_one_pipeline(
             aws_region_textbox=aws_region_text,
             azure_api_key_textbox=azure_api_key_text,
             model_name_map=model_name_map_state,
+            sentiment_checkbox=sentiment_choice,
         )
 
         # Update token counts and time taken

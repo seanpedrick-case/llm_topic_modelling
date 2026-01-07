@@ -322,7 +322,7 @@ BATCH_SIZE_DEFAULT = int(
     get_or_create_env_var("BATCH_SIZE_DEFAULT", "5")
 )  # Default batch size for LLM calls
 MAXIMUM_ZERO_SHOT_TOPICS = int(
-    get_or_create_env_var("MAXIMUM_ZERO_SHOT_TOPICS", "120")
+    get_or_create_env_var("MAXIMUM_ZERO_SHOT_TOPICS", "100")
 )  # Maximum number of zero shot topics to process
 MAX_SPACES_GPU_RUN_TIME = int(
     get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "240")
@@ -331,6 +331,10 @@ MAX_SPACES_GPU_RUN_TIME = int(
 DEDUPLICATION_THRESHOLD = int(
     get_or_create_env_var("DEDUPLICATION_THRESHOLD", "90")
 )  # Deduplication threshold for topic summary tables
+
+ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "False")
+)  # Whether to deduplicate topics after each batch during extraction
 
 ###
 # Model options
@@ -724,7 +728,6 @@ LLM_TOP_K = int(
 LLM_MIN_P = float(get_or_create_env_var("LLM_MIN_P", "0"))
 LLM_TOP_P = float(get_or_create_env_var("LLM_TOP_P", "0.95"))
 LLM_REPETITION_PENALTY = float(get_or_create_env_var("LLM_REPETITION_PENALTY", "1.0"))
-
 LLM_LAST_N_TOKENS = int(get_or_create_env_var("LLM_LAST_N_TOKENS", "512"))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
 LLM_SEED = int(get_or_create_env_var("LLM_SEED", "42"))

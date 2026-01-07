@@ -923,7 +923,6 @@ with app:
 
         with gr.Accordion("Response sentiment analysis", open=False):
             sentiment_checkbox = gr.Radio(
-                label="Response sentiment analysis",
                 value="Negative or Positive",
                 choices=[
                     "Negative or Positive",
@@ -1858,6 +1857,7 @@ with app:
         aws_secret_key_textbox="",
         aws_region_textbox="",
         azure_api_key_textbox="",
+        sentiment_checkbox="Negative or Positive",
     ):
         # Ensure custom model_choice is registered in model_name_map
         ensure_model_in_map(model_choice)
@@ -1889,6 +1889,7 @@ with app:
             aws_secret_key_textbox,
             aws_region_textbox,
             azure_api_key_textbox,
+            sentiment_checkbox=sentiment_checkbox,
         )
 
     deduplicate_llm_previous_data_btn.click(
@@ -1925,6 +1926,7 @@ with app:
             aws_secret_key_textbox,
             aws_region_textbox,
             azure_api_key_textbox,
+            sentiment_checkbox,
         ],
         outputs=[
             master_reference_df_state,

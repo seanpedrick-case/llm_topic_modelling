@@ -422,6 +422,8 @@ def collect_output_csvs_and_create_excel_output(
     missing_df_state_csv_path = ""
     overall_summary_csv_path = ""
     number_of_responses_with_topic_assignment = 0
+    # Track all temporary CSV files created for xlsx conversion
+    temp_csv_files_for_cleanup = list()
 
     if in_group_col:
         group = in_group_col
@@ -429,6 +431,7 @@ def collect_output_csvs_and_create_excel_output(
         group = "All"
 
     overall_summary_csv_path = output_folder + "overall_summary_for_xlsx.csv"
+    temp_csv_files_for_cleanup.append(overall_summary_csv_path)
 
     if structured_summaries is True and not master_unique_topics_df_state.empty:
         print("Producing overall summary based on structured summaries.")
@@ -512,11 +515,13 @@ def collect_output_csvs_and_create_excel_output(
 
         reference_table_csv_path = output_folder + "reference_df_for_xlsx.csv"
         master_reference_df_state.to_csv(reference_table_csv_path, index=None)
+        temp_csv_files_for_cleanup.append(reference_table_csv_path)
 
         reference_pivot_table_csv_path = (
             output_folder + "reference_pivot_df_for_xlsx.csv"
         )
         reference_pivot_table.to_csv(reference_pivot_table_csv_path, index=None)
+        temp_csv_files_for_cleanup.append(reference_pivot_table_csv_path)
 
         short_file_name = os.path.basename(file_name)
 
@@ -530,6 +535,7 @@ def collect_output_csvs_and_create_excel_output(
             output_folder + "unique_topic_table_df_for_xlsx.csv"
         )
         master_unique_topics_df_state.to_csv(unique_topic_table_csv_path, index=None)
+        temp_csv_files_for_cleanup.append(unique_topic_table_csv_path)
 
     if unique_topic_table_csv_path:
         csv_files.append(unique_topic_table_csv_path)
@@ -596,6 +602,7 @@ def collect_output_csvs_and_create_excel_output(
     if not missing_df_state.empty:
         missing_df_state_csv_path = output_folder + "missing_df_state_df_for_xlsx.csv"
         missing_df_state.to_csv(missing_df_state_csv_path, index=None)
+        temp_csv_files_for_cleanup.append(missing_df_state_csv_path)
 
     if missing_df_state_csv_path:
         if structured_summaries:
@@ -609,8 +616,6 @@ def collect_output_csvs_and_create_excel_output(
             wrap_text_columns["Missing responses"] = ["C"]
     else:
         print("Relevant missing responses files not found, excluding from xlsx output.")
-
-    new_csv_files = csv_files.copy()
 
     # Original data file
     original_ext = os.path.splitext(original_data_file_path)[1].lower()
@@ -636,6 +641,7 @@ def collect_output_csvs_and_create_excel_output(
         )
         df.to_csv(original_data_csv_path, index=False)
         csv_files.append(original_data_csv_path)
+        temp_csv_files_for_cleanup.append(original_data_csv_path)
 
     sheet_names.append("Original data")
     column_widths["Original data"] = {"A": 10, "B": 20, "C": 20}
@@ -768,8 +774,12 @@ def collect_output_csvs_and_create_excel_output(
 
     xlsx_output_filenames = [xlsx_output_filename]
 
-    # Delete intermediate csv files
-    for csv_file in new_csv_files:
-        os.remove(csv_file)
+    # Delete all intermediate '_for_xlsx.csv' files
+    for csv_file in temp_csv_files_for_cleanup:
+        try:
+            if os.path.exists(csv_file):
+                os.remove(csv_file)
+        except Exception as e:
+            print(f"Could not delete temporary CSV file '{csv_file}' due to: {e}")
 
     return xlsx_output_filenames, xlsx_output_filenames

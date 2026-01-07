@@ -2,9 +2,9 @@
 # System prompt
 ###
 
-generic_system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset."""
+generic_system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset. Use British English spelling and grammar."""
 
-system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. {consultation_context}"""
+system_prompt = """You are a researcher analysing responses from an open text dataset. You are analysing a single column from this dataset called '{column_name}'. {consultation_context} Use British English spelling and grammar."""
 
 markdown_additional_prompt = """ You will be given a request for a markdown table. You must respond with ONLY the markdown table. Do not include any introduction, explanation, or concluding text."""
 
@@ -172,7 +172,7 @@ excel_plain_text_format_prompt = "Return a comprehensive summary that covers all
 
 llm_deduplication_system_prompt = """You are an expert at analysing and consolidating topic categories. Your task is to identify semantically similar topics that should be merged together, even if they use different wording or synonyms."""
 
-llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
+llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and should be merged together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}.
 
 Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
 - "Transportation issues" and "Public transport problems" 
@@ -181,12 +181,10 @@ Analyse the following topics table and identify groups of topics that describe e
 
 Create a markdown table with the following columns:
 1. 'Original General topic' - The current general topic name
-2. 'Original Subtopic' - The current subtopic name  
-3. 'Original Sentiment' - The current sentiment
-4. 'Merged General topic' - The consolidated general topic name (use the most descriptive)
-5. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive)
-6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
-7. 'Merge Reason' - Brief explanation of why these topics should be merged
+2. 'Original Subtopic' - The current subtopic name{sentiment_columns}
+3. 'Merged General topic' - The consolidated general topic name (use the most descriptive)
+4. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive){merged_sentiment_columns}
+5. 'Merge Reason' - Brief explanation of why these topics should be merged
 
 Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
 
@@ -195,9 +193,9 @@ Topics to analyse:
 
 Merged topics table:"""
 
-llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics, and Sentiment classifications. Your task is to identify topics that are semantically similar and should be merged together, even if they use different wording.
+llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and should be merged together, even if they use different wording.
 
-Additionally, you have been provided with a list of candidate topics that represent preferred topic categories. When merging topics, prioritise fitting similar topics into these existing candidate categories rather than creating new ones. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge.
+Additionally, you have been provided with a list of candidate topics that represent preferred topic categories. When merging topics, prioritise fitting similar topics into these existing candidate categories rather than creating new ones. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}.
 
 Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
 - "Transportation issues" and "Public transport problems" 
@@ -208,12 +206,10 @@ When merging topics, consider the candidate topics provided below and try to map
 
 Create a markdown table with the following columns:
 1. 'Original General topic' - The current general topic name
-2. 'Original Subtopic' - The current subtopic name  
-3. 'Original Sentiment' - The current sentiment
-4. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar)
-5. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar)
-6. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)
-7. 'Merge Reason' - Brief explanation of why these topics should be merged
+2. 'Original Subtopic' - The current subtopic name{sentiment_columns}
+3. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar)
+4. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar){merged_sentiment_columns}
+5. 'Merge Reason' - Brief explanation of why these topics should be merged
 
 Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
 

@@ -1,7 +1,8 @@
 import os
 import re
 import time
-from typing import List, Tuple
+from io import StringIO
+from typing import List, Tuple, Union
 
 import boto3
 import gradio as gr
@@ -24,6 +25,7 @@ from tools.config import (
     MAX_GROUPS,
     MAX_SPACES_GPU_RUN_TIME,
     MAX_TIME_FOR_LOOP,
+    MAXIMUM_ZERO_SHOT_TOPICS,
     NUMBER_OF_RETRY_ATTEMPTS,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
@@ -80,6 +82,7 @@ reasoning_suffix = REASONING_SUFFIX
 output_debug_files = OUTPUT_DEBUG_FILES
 default_number_of_sampled_summaries = DEFAULT_SAMPLED_SUMMARIES
 max_text_length = 500
+max_number_of_topics = MAXIMUM_ZERO_SHOT_TOPICS
 
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
@@ -206,10 +209,13 @@ def deduplicate_topics(
     merge_sentiment: str = "No",
     merge_general_topics: str = "No",
     score_threshold: int = 90,
-    in_data_files: List[str] = list(),
+    in_data_files: Union[List[str], pd.DataFrame] = list(),
     chosen_cols: List[str] = "",
     output_folder: str = OUTPUT_FOLDER,
     deduplicate_topics: str = "Yes",
+    output_files: str = "True",
+    total_number_of_batches: int = None,
+    data_file_names_textbox: str = None,
 ):
     """
     Deduplicate topics based on a reference and unique topics table, merging similar topics.
@@ -223,15 +229,40 @@ def deduplicate_topics(
         merge_sentiment (str, optional): Whether to merge topics regardless of sentiment ("Yes" or "No"). Defaults to "No".
         merge_general_topics (str, optional): Whether to merge topics across different general topics ("Yes" or "No"). Defaults to "No".
         score_threshold (int, optional): Fuzzy matching score threshold for deduplication. Defaults to 90.
-        in_data_files (List[str], optional): List of input data file paths. Defaults to [].
+        in_data_files (Union[List[str], pd.DataFrame], optional): List of input data file paths or a pandas DataFrame. If a DataFrame is provided, it will be used directly without loading from file. Defaults to [].
         chosen_cols (List[str], optional): List of chosen columns from the input data files. Defaults to "".
         output_folder (str, optional): Folder path to save output files. Defaults to OUTPUT_FOLDER.
         deduplicate_topics (str, optional): Whether to perform topic deduplication ("Yes" or "No"). Defaults to "Yes".
+        output_files (str, optional): Whether to output files ("True" or "False"). Defaults to "True".
+        total_number_of_batches (int, optional): Total number of batches when in_data_files is a DataFrame. If None and in_data_files is a DataFrame, defaults to 1. Defaults to None.
+        data_file_names_textbox (str, optional): File name when in_data_files is a DataFrame. If None and in_data_files is a DataFrame, defaults to "dataframe". Defaults to None.
     """
-    output_files = list()
+    # Save the parameter value before it gets overwritten
+    should_output_files = output_files
+    output_files = list()  # This is now the list of output file paths
     log_output_files = list()
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
+    # Use provided values if available, otherwise use defaults
+    if data_file_names_textbox is None:
+        data_file_names_textbox = "dataframe"
+    if total_number_of_batches is None:
+        total_number_of_batches = 1
+
+    # Validate that required columns exist in reference_df
+    if "Response References" not in reference_df.columns:
+        raise ValueError(
+            "reference_df must contain 'Response References' column. "
+            f"Available columns: {list(reference_df.columns)}"
+        )
+
+    # Add 'Topic number' column if it doesn't exist (row number starting from 1)
+    if "Topic number" not in topic_summary_df.columns:
+        if not topic_summary_df.empty:
+            topic_summary_df["Topic number"] = range(1, len(topic_summary_df) + 1)
+        else:
+            # If empty, create empty column - it will be populated when DataFrame is recreated
+            topic_summary_df["Topic number"] = pd.Series(dtype="int64")
 
     if (len(reference_df["Response References"].unique()) == 1) | (
         len(topic_summary_df["Topic number"].unique()) == 1
@@ -256,16 +287,16 @@ def deduplicate_topics(
             output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
         )
 
-        # Save the DataFrames to CSV files
-        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-            reference_file_out_path, index=None, encoding="utf-8-sig"
-        )
-        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
-        )
-
-        output_files.append(reference_file_out_path)
-        output_files.append(unique_topics_file_out_path)
+        if should_output_files == "True":
+            # Save the DataFrames to CSV files
+            reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+                reference_file_out_path, index=None, encoding="utf-8-sig"
+            )
+            topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+                unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+            )
+            output_files.append(reference_file_out_path)
+            output_files.append(unique_topics_file_out_path)
 
         # Create markdown output for display
         topic_summary_df_revised_display = topic_summary_df.apply(
@@ -298,10 +329,37 @@ def deduplicate_topics(
             how="left",
         )
 
-    if in_data_files and chosen_cols:
-        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(
-            in_data_files, chosen_cols, 1, in_excel_sheets
-        )
+    # Check if in_data_files is not empty (handles both DataFrame and list)
+    has_data_files = (
+        (isinstance(in_data_files, pd.DataFrame) and not in_data_files.empty)
+        or (isinstance(in_data_files, list) and len(in_data_files) > 0)
+        or (not isinstance(in_data_files, (pd.DataFrame, list)) and in_data_files)
+    )
+    if has_data_files and chosen_cols:
+        # Check if in_data_files is already a DataFrame
+        if isinstance(in_data_files, pd.DataFrame):
+            # Use the DataFrame directly
+            file_data = in_data_files.copy()
+            # Filter to chosen columns if specified
+            if chosen_cols and isinstance(chosen_cols, list):
+                # Ensure all chosen columns exist in the DataFrame
+                available_cols = [
+                    col for col in chosen_cols if col in file_data.columns
+                ]
+                if available_cols:
+                    file_data = file_data[available_cols]
+                else:
+                    print(
+                        f"Warning: None of the chosen columns {chosen_cols} found in DataFrame. Using all columns."
+                    )
+
+        else:
+            # Load from file path(s) as before
+            file_data, data_file_names_textbox, total_number_of_batches = (
+                load_in_data_file(
+                    in_data_files, chosen_cols, total_number_of_batches, in_excel_sheets
+                )
+            )
     else:
         out_message = "No file data found, pivot table output will not be created."
         print(out_message)
@@ -340,7 +398,6 @@ def deduplicate_topics(
                     deduplicated_topic_map_df = pd.concat(results).reset_index(
                         drop=True
                     )
-                    # --- MODIFIED SECTION END ---
 
                 else:
                     # This case should allow cross-topic matching but is still grouping by Sentiment
@@ -546,6 +603,27 @@ def deduplicate_topics(
             inplace=True,
         )
 
+        # Before recreating topic_summary_df, check if input had Group information
+        # If input topic_summary_df doesn't have Group or all have same Group, normalize reference_df Group
+        input_has_group = "Group" in topic_summary_df.columns
+        input_unique_groups = (
+            topic_summary_df["Group"].nunique() if input_has_group else 0
+        )
+
+        # If input didn't have meaningful Group distinction, normalize to single Group
+        if not input_has_group or input_unique_groups <= 1:
+            # Get the most common Group value from reference_df, or use "All" if not present
+            if "Group" in reference_df.columns and not reference_df["Group"].empty:
+                most_common_group = (
+                    reference_df["Group"].mode()[0]
+                    if len(reference_df["Group"].mode()) > 0
+                    else "All"
+                )
+            else:
+                most_common_group = "All"
+            # Normalize all Groups to the most common one to prevent topic count increase
+            reference_df["Group"] = most_common_group
+
         # Remake topic_summary_df based on new reference_df
         topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
 
@@ -575,10 +653,11 @@ def deduplicate_topics(
         reference_pivot_file_path = (
             output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
         )
-        reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-            reference_pivot_file_path, index=None, encoding="utf-8-sig"
-        )
-        log_output_files.append(reference_pivot_file_path)
+        if should_output_files == "True":
+            reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+                reference_pivot_file_path, index=None, encoding="utf-8-sig"
+            )
+            log_output_files.append(reference_pivot_file_path)
 
     reference_file_out_path = (
         output_folder + reference_table_file_name_no_ext + "_dedup.csv"
@@ -586,15 +665,17 @@ def deduplicate_topics(
     unique_topics_file_out_path = (
         output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
     )
-    reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-        reference_file_out_path, index=None, encoding="utf-8-sig"
-    )
-    topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-        unique_topics_file_out_path, index=None, encoding="utf-8-sig"
-    )
 
-    output_files.append(reference_file_out_path)
-    output_files.append(unique_topics_file_out_path)
+    if should_output_files == "True":
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_file_out_path, index=None, encoding="utf-8-sig"
+        )
+        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+        )
+
+        output_files.append(reference_file_out_path)
+        output_files.append(unique_topics_file_out_path)
 
     # Outputs for markdown table output
     topic_summary_df_revised_display = topic_summary_df.apply(
@@ -603,6 +684,8 @@ def deduplicate_topics(
     deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(
         index=False
     )
+
+    print("Deduplication task successfully completed")
 
     return (
         reference_df,
@@ -628,7 +711,7 @@ def deduplicate_topics_llm(
     in_excel_sheets: str = "",
     merge_sentiment: str = "No",
     merge_general_topics: str = "No",
-    in_data_files: List[str] = list(),
+    in_data_files: Union[List[str], pd.DataFrame] = list(),
     chosen_cols: List[str] = "",
     output_folder: str = OUTPUT_FOLDER,
     candidate_topics=None,
@@ -640,6 +723,8 @@ def deduplicate_topics_llm(
     aws_region_textbox: str = "",
     azure_api_key_textbox: str = "",
     model_name_map: dict = model_name_map,
+    output_files: str = "True",
+    sentiment_checkbox: str = "Negative or Positive",
 ):
     """
     Deduplicate topics using LLM semantic understanding to identify and merge similar topics.
@@ -659,7 +744,7 @@ def deduplicate_topics_llm(
         in_excel_sheets (str, optional): Comma-separated list of Excel sheet names to load. Defaults to "".
         merge_sentiment (str, optional): Whether to merge topics regardless of sentiment ("Yes" or "No"). Defaults to "No".
         merge_general_topics (str, optional): Whether to merge topics across different general topics ("Yes" or "No"). Defaults to "No".
-        in_data_files (List[str], optional): List of input data file paths. Defaults to [].
+        in_data_files (Union[List[str], pd.DataFrame], optional): List of input data file paths or a pandas DataFrame. If a DataFrame is provided, it will be used directly without loading from file. Defaults to [].
         chosen_cols (List[str], optional): List of chosen columns from the input data files. Defaults to "".
         output_folder (str, optional): Folder path to save output files. Defaults to OUTPUT_FOLDER.
         candidate_topics (optional): Candidate topics file for zero-shot guidance. Defaults to None.
@@ -671,9 +756,14 @@ def deduplicate_topics_llm(
         aws_region_textbox (str, optional): AWS region for Bedrock. Defaults to "".
         azure_api_key_textbox (str, optional): Azure API key for Azure/OpenAI models. Defaults to "".
         model_name_map (dict, optional): Mapping of model names to their configurations. Defaults to model_name_map from config.
+        output_files (str, optional): Whether to output files ("True" or "False"). Defaults to "True".
+        sentiment_checkbox (str, optional): Sentiment analysis option ("Negative or Positive", "Negative, Neutral, or Positive", or "Do not assess sentiment"). Defaults to "Negative or Positive".
+        output_files (str, optional): Whether to output files ("True" or "False"). Defaults to "True".
     """
 
-    output_files = list()
+    # Save the parameter value before it gets overwritten
+    should_output_files = output_files
+    output_files = list()  # This is now the list of output file paths
     log_output_files = list()
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
@@ -702,16 +792,17 @@ def deduplicate_topics_llm(
             output_folder + unique_topics_table_file_name_no_ext + "_dedup.csv"
         )
 
-        # Save the DataFrames to CSV files
-        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-            reference_file_out_path, index=None, encoding="utf-8-sig"
-        )
-        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
-        )
+        if should_output_files == "True":
+            # Save the DataFrames to CSV files
+            reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+                reference_file_out_path, index=None, encoding="utf-8-sig"
+            )
+            topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+                unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+            )
 
-        output_files.append(reference_file_out_path)
-        output_files.append(unique_topics_file_out_path)
+            output_files.append(reference_file_out_path)
+            output_files.append(unique_topics_file_out_path)
 
         # Create markdown output for display
         topic_summary_df_revised_display = topic_summary_df.apply(
@@ -752,10 +843,36 @@ def deduplicate_topics_llm(
             )
 
     # Load data files if provided
-    if in_data_files and chosen_cols:
-        file_data, data_file_names_textbox, total_number_of_batches = load_in_data_file(
-            in_data_files, chosen_cols, 1, in_excel_sheets
-        )
+    # Check if in_data_files is not empty (handles both DataFrame and list)
+    has_data_files = (
+        (isinstance(in_data_files, pd.DataFrame) and not in_data_files.empty)
+        or (isinstance(in_data_files, list) and len(in_data_files) > 0)
+        or (not isinstance(in_data_files, (pd.DataFrame, list)) and in_data_files)
+    )
+    if has_data_files and chosen_cols:
+        # Check if in_data_files is already a DataFrame
+        if isinstance(in_data_files, pd.DataFrame):
+            # Use the DataFrame directly
+            file_data = in_data_files.copy()
+            # Filter to chosen columns if specified
+            if chosen_cols and isinstance(chosen_cols, list):
+                # Ensure all chosen columns exist in the DataFrame
+                available_cols = [
+                    col for col in chosen_cols if col in file_data.columns
+                ]
+                if available_cols:
+                    file_data = file_data[available_cols]
+                else:
+                    print(
+                        f"Warning: None of the chosen columns {chosen_cols} found in DataFrame. Using all columns."
+                    )
+            data_file_names_textbox = "dataframe"
+            total_number_of_batches = 1
+        else:
+            # Load from file path(s) as before
+            file_data, data_file_names_textbox, total_number_of_batches = (
+                load_in_data_file(in_data_files, chosen_cols, 1, in_excel_sheets)
+            )
     else:
         out_message = "No file data found, pivot table output will not be created."
         print(out_message)
@@ -796,18 +913,43 @@ def deduplicate_topics_llm(
             print(f"Error processing candidate topics: {e}")
             candidate_topics_table = ""
 
-    # Prepare topics table for LLM analysis
-    topics_table = topic_summary_df[
-        ["General topic", "Subtopic", "Sentiment", "Number of responses"]
-    ].to_markdown(index=False)
+    # Determine if sentiment should be included based on sentiment_checkbox
+    include_sentiment = sentiment_checkbox != "Do not assess sentiment"
+
+    # Prepare topics table for LLM analysis (conditionally include sentiment)
+    if include_sentiment:
+        topics_table = topic_summary_df[
+            ["General topic", "Subtopic", "Sentiment", "Number of responses"]
+        ].to_markdown(index=False)
+        sentiment_text = ", and Sentiment classifications"
+        sentiment_columns = "\n3. 'Original Sentiment' - The current sentiment"
+        merged_sentiment_columns = "\n4. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)"
+    else:
+        topics_table = topic_summary_df[
+            ["General topic", "Subtopic", "Number of responses"]
+        ].to_markdown(index=False)
+        sentiment_text = ""
+        sentiment_columns = ""
+        merged_sentiment_columns = ""
 
     # Format the prompt with candidate topics if available
     if candidate_topics_table:
         formatted_prompt = llm_deduplication_prompt_with_candidates.format(
-            topics_table=topics_table, candidate_topics_table=candidate_topics_table
+            topics_table=topics_table,
+            candidate_topics_table=candidate_topics_table,
+            max_number_of_topics=max_number_of_topics,
+            sentiment_text=sentiment_text,
+            sentiment_columns=sentiment_columns,
+            merged_sentiment_columns=merged_sentiment_columns,
         )
     else:
-        formatted_prompt = llm_deduplication_prompt.format(topics_table=topics_table)
+        formatted_prompt = llm_deduplication_prompt.format(
+            topics_table=topics_table,
+            max_number_of_topics=max_number_of_topics,
+            sentiment_text=sentiment_text,
+            sentiment_columns=sentiment_columns,
+            merged_sentiment_columns=merged_sentiment_columns,
+        )
 
     # Initialise conversation history
     conversation_history = list()
@@ -897,7 +1039,7 @@ def deduplicate_topics_llm(
     )
 
     # Generate debug files if enabled
-    if output_debug_files == "True":
+    if should_output_files == "True":
         try:
             # Create batch file path details for debug files
             batch_file_path_details = (
@@ -948,9 +1090,6 @@ def deduplicate_topics_llm(
         if table_match:
             table_text = table_match.group(0)
 
-            # Convert markdown table to DataFrame
-            from io import StringIO
-
             merge_suggestions_df = pd.read_csv(
                 StringIO(table_text), sep="|", skipinitialspace=True
             )
@@ -964,6 +1103,16 @@ def deduplicate_topics_llm(
             # Remove rows where all values are NaN
             merge_suggestions_df = merge_suggestions_df.dropna(how="all")
 
+            # Convert all columns to string to avoid float/NaN issues when calling .strip()
+            for col in merge_suggestions_df.columns:
+                merge_suggestions_df[col] = (
+                    merge_suggestions_df[col]
+                    .astype(str)
+                    .replace("nan", "")
+                    .replace("NaN", "")
+                    .replace("None", "")
+                )
+
             if not merge_suggestions_df.empty:
                 print(
                     f"LLM identified {len(merge_suggestions_df)} potential topic merges"
@@ -971,40 +1120,79 @@ def deduplicate_topics_llm(
 
                 # Apply the merges to the reference_df
                 for _, row in merge_suggestions_df.iterrows():
-                    original_general = row.get("Original General topic", "").strip()
-                    original_subtopic = row.get("Original Subtopic", "").strip()
-                    original_sentiment = row.get("Original Sentiment", "").strip()
-                    merged_general = row.get("Merged General topic", "").strip()
-                    merged_subtopic = row.get("Merged Subtopic", "").strip()
-                    merged_sentiment = row.get("Merged Sentiment", "").strip()
+                    # Safely extract and convert values to strings, handling NaN/float values
+                    def safe_get_strip(row, key, default=""):
+                        value = row.get(key, default)
+                        if (
+                            pd.isna(value)
+                            or value is None
+                            or str(value).lower() in ["nan", "none", ""]
+                        ):
+                            return default
+                        return str(value).strip()
 
-                    if all(
-                        [
-                            original_general,
-                            original_subtopic,
-                            original_sentiment,
-                            merged_general,
-                            merged_subtopic,
-                            merged_sentiment,
-                        ]
-                    ):
+                    original_general = safe_get_strip(row, "Original General topic", "")
+                    original_subtopic = safe_get_strip(row, "Original Subtopic", "")
+                    merged_general = safe_get_strip(row, "Merged General topic", "")
+                    merged_subtopic = safe_get_strip(row, "Merged Subtopic", "")
 
-                        # Find matching rows in reference_df
-                        mask = (
-                            (reference_df["General topic"] == original_general)
-                            & (reference_df["Subtopic"] == original_subtopic)
-                            & (reference_df["Sentiment"] == original_sentiment)
+                    # Conditionally handle sentiment based on include_sentiment flag
+                    if include_sentiment:
+                        original_sentiment = safe_get_strip(
+                            row, "Original Sentiment", ""
                         )
+                        merged_sentiment = safe_get_strip(row, "Merged Sentiment", "")
 
-                        if mask.any():
-                            # Update the matching rows
-                            reference_df.loc[mask, "General topic"] = merged_general
-                            reference_df.loc[mask, "Subtopic"] = merged_subtopic
-                            reference_df.loc[mask, "Sentiment"] = merged_sentiment
-                            num_merges_applied += 1
-                            print(
-                                f"Merged: {original_general} | {original_subtopic} | {original_sentiment} -> {merged_general} | {merged_subtopic} | {merged_sentiment}"
+                        # Check all required fields including sentiment
+                        if all(
+                            [
+                                original_general,
+                                original_subtopic,
+                                original_sentiment,
+                                merged_general,
+                                merged_subtopic,
+                                merged_sentiment,
+                            ]
+                        ):
+                            # Find matching rows in reference_df (including sentiment)
+                            mask = (
+                                (reference_df["General topic"] == original_general)
+                                & (reference_df["Subtopic"] == original_subtopic)
+                                & (reference_df["Sentiment"] == original_sentiment)
                             )
+
+                            if mask.any():
+                                # Update the matching rows (including sentiment)
+                                reference_df.loc[mask, "General topic"] = merged_general
+                                reference_df.loc[mask, "Subtopic"] = merged_subtopic
+                                reference_df.loc[mask, "Sentiment"] = merged_sentiment
+                                num_merges_applied += 1
+                                print(
+                                    f"Merged: {original_general} | {original_subtopic} | {original_sentiment} -> {merged_general} | {merged_subtopic} | {merged_sentiment}"
+                                )
+                    else:
+                        # Check required fields without sentiment
+                        if all(
+                            [
+                                original_general,
+                                original_subtopic,
+                                merged_general,
+                                merged_subtopic,
+                            ]
+                        ):
+                            # Find matching rows in reference_df (without sentiment)
+                            mask = (
+                                reference_df["General topic"] == original_general
+                            ) & (reference_df["Subtopic"] == original_subtopic)
+
+                            if mask.any():
+                                # Update the matching rows (without sentiment)
+                                reference_df.loc[mask, "General topic"] = merged_general
+                                reference_df.loc[mask, "Subtopic"] = merged_subtopic
+                                num_merges_applied += 1
+                                print(
+                                    f"Merged: {original_general} | {original_subtopic} -> {merged_general} | {merged_subtopic}"
+                                )
             else:
                 print("No merge suggestions found in LLM response")
         else:
@@ -1015,9 +1203,14 @@ def deduplicate_topics_llm(
         print("Continuing with original data...")
 
     # Update reference summary column with all summaries
-    reference_df["Summary"] = reference_df.groupby(
-        ["Response References", "General topic", "Subtopic", "Sentiment"]
-    )["Summary"].transform(" <br> ".join)
+    if include_sentiment:
+        reference_df["Summary"] = reference_df.groupby(
+            ["Response References", "General topic", "Subtopic", "Sentiment"]
+        )["Summary"].transform(" <br> ".join)
+    else:
+        reference_df["Summary"] = reference_df.groupby(
+            ["Response References", "General topic", "Subtopic"]
+        )["Summary"].transform(" <br> ".join)
 
     # Check that we have not inadvertently removed some data during the process
     end_unique_references = len(reference_df["Response References"].unique())
@@ -1028,9 +1221,34 @@ def deduplicate_topics_llm(
         )
 
     # Drop duplicates in the reference table
-    reference_df.drop_duplicates(
-        ["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True
-    )
+    if include_sentiment:
+        reference_df.drop_duplicates(
+            ["Response References", "General topic", "Subtopic", "Sentiment"],
+            inplace=True,
+        )
+    else:
+        reference_df.drop_duplicates(
+            ["Response References", "General topic", "Subtopic"], inplace=True
+        )
+
+    # Before recreating topic_summary_df, check if input had Group information
+    # If input topic_summary_df doesn't have Group or all have same Group, normalize reference_df Group
+    input_has_group = "Group" in topic_summary_df.columns
+    input_unique_groups = topic_summary_df["Group"].nunique() if input_has_group else 0
+
+    # If input didn't have meaningful Group distinction, normalize to single Group
+    if not input_has_group or input_unique_groups <= 1:
+        # Get the most common Group value from reference_df, or use "All" if not present
+        if "Group" in reference_df.columns and not reference_df["Group"].empty:
+            most_common_group = (
+                reference_df["Group"].mode()[0]
+                if len(reference_df["Group"].mode()) > 0
+                else "All"
+            )
+        else:
+            most_common_group = "All"
+        # Normalize all Groups to the most common one to prevent topic count increase
+        reference_df["Group"] = most_common_group
 
     # Remake topic_summary_df based on new reference_df
     topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
@@ -1058,9 +1276,10 @@ def deduplicate_topics_llm(
             + get_file_name_no_ext(reference_table_file_name)
             + "_pivot_dedup.csv"
         )
-        reference_df_pivot.to_csv(
-            reference_pivot_file_path, index=None, encoding="utf-8-sig"
-        )
+        if should_output_files == "True":
+            reference_df_pivot.to_csv(
+                reference_pivot_file_path, index=None, encoding="utf-8-sig"
+            )
         log_output_files.append(reference_pivot_file_path)
 
     # Save analysis results CSV if merge suggestions were found
@@ -1070,11 +1289,12 @@ def deduplicate_topics_llm(
             + get_file_name_no_ext(reference_table_file_name)
             + "_dedup_llm_analysis_results.csv"
         )
-        merge_suggestions_df.to_csv(
-            analysis_results_file_path, index=None, encoding="utf-8-sig"
-        )
-        log_output_files.append(analysis_results_file_path)
-        print(f"Analysis results saved to: {analysis_results_file_path}")
+        if should_output_files == "True":
+            merge_suggestions_df.to_csv(
+                analysis_results_file_path, index=None, encoding="utf-8-sig"
+            )
+            log_output_files.append(analysis_results_file_path)
+            print(f"Analysis results saved to: {analysis_results_file_path}")
 
     # Save output files
     reference_file_out_path = (
@@ -1085,15 +1305,16 @@ def deduplicate_topics_llm(
         + get_file_name_no_ext(unique_topics_table_file_name)
         + "_dedup.csv"
     )
-    reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-        reference_file_out_path, index=None, encoding="utf-8-sig"
-    )
-    topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-        unique_topics_file_out_path, index=None, encoding="utf-8-sig"
-    )
+    if should_output_files == "True":
+        reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_file_out_path, index=None, encoding="utf-8-sig"
+        )
+        topic_summary_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            unique_topics_file_out_path, index=None, encoding="utf-8-sig"
+        )
 
-    output_files.append(reference_file_out_path)
-    output_files.append(unique_topics_file_out_path)
+        output_files.append(reference_file_out_path)
+        output_files.append(unique_topics_file_out_path)
 
     # Outputs for markdown table output
     topic_summary_df_revised_display = topic_summary_df.apply(
@@ -1128,6 +1349,8 @@ def deduplicate_topics_llm(
     estimated_time_taken = (
         total_input_tokens + total_output_tokens
     ) / 1000  # Rough estimate in seconds
+
+    print("LLM deduplication task successfully completed")
 
     return (
         reference_df,

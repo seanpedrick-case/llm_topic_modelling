@@ -501,7 +501,10 @@ def convert_reference_table_to_pivot_table(
 
     df_in = df[["Response References", "General topic", "Subtopic", "Sentiment"]].copy()
 
-    df_in["Response References"] = df_in["Response References"].astype(int)
+    # Convert to numeric first (handles float strings like '1.0'), then to int
+    df_in["Response References"] = pd.to_numeric(
+        df_in["Response References"], errors="coerce"
+    ).astype("Int64")
 
     # Create a combined category column
     df_in["Category"] = (
