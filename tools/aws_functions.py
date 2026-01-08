@@ -381,3 +381,24 @@ def export_outputs_to_s3(
 
     # No GUI outputs to update
     return
+
+
+def download_cost_codes_with_error_handling(bucket, key, local_path):
+    """
+    Wrapper function with error handling for downloading cost codes from S3.
+
+    Args:
+        bucket: S3 bucket name
+        key: S3 object key
+        local_path: Local file path to save the downloaded file
+
+    Returns:
+        bool: True if download successful, False otherwise
+    """
+    try:
+        download_file_from_s3(bucket, key, local_path)
+        return True
+    except Exception as e:
+        print(f"Error downloading cost codes from S3: {e}")
+        print(f"Failed to download s3://{bucket}/{key}")
+        return False

@@ -537,7 +537,7 @@ def validate_topics(
             # Use the accumulated topic summary from previous validation batches (or initial if first batch)
             validation_existing_topic_summary_df = validation_topic_summary_df.copy()
             validation_existing_topic_summary_df["Number of responses"] = ""
-            validation_existing_topic_summary_df.fillna("", inplace=True)
+            # validation_existing_topic_summary_df.fillna("", inplace=True)
             validation_existing_topic_summary_df["General topic"] = (
                 validation_existing_topic_summary_df["General topic"].str.replace(
                     "(?i)^Nan$", "", regex=True
@@ -3567,7 +3567,7 @@ def extract_topics(
                         )
 
                     existing_topic_summary_df["Number of responses"] = ""
-                    existing_topic_summary_df.fillna("", inplace=True)
+                    # existing_topic_summary_df.fillna("", inplace=True)
                     existing_topic_summary_df["General topic"] = (
                         existing_topic_summary_df["General topic"].str.replace(
                             "(?i)^Nan$", "", regex=True
@@ -5989,4 +5989,62 @@ def all_in_one_pipeline(
         overall_summarised_output_markdown,
         summarised_output_df,
         out_logged_content,
+    )
+
+
+# When LLM deduplication button pressed, deduplicate data using LLM
+def deduplicate_topics_llm_wrapper(
+    reference_df,
+    topic_summary_df,
+    reference_table_file_name,
+    unique_topics_table_file_name,
+    model_choice,
+    in_api_key,
+    temperature,
+    in_excel_sheets,
+    merge_sentiment,
+    merge_general_topics,
+    in_data_files,
+    chosen_cols,
+    output_folder,
+    candidate_topics=None,
+    azure_endpoint="",
+    api_url=None,
+    aws_access_key_textbox="",
+    aws_secret_key_textbox="",
+    aws_region_textbox="",
+    azure_api_key_textbox="",
+    sentiment_checkbox="Negative or Positive",
+):
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice)
+    model_source = model_name_map[model_choice]["source"]
+    return deduplicate_topics_llm(
+        reference_df,
+        topic_summary_df,
+        reference_table_file_name,
+        unique_topics_table_file_name,
+        model_choice,
+        in_api_key,
+        temperature,
+        model_source,
+        None,
+        None,
+        None,
+        None,
+        in_excel_sheets,
+        merge_sentiment,
+        merge_general_topics,
+        in_data_files,
+        chosen_cols,
+        output_folder,
+        candidate_topics,
+        azure_endpoint,
+        OUTPUT_DEBUG_FILES,
+        api_url,
+        aws_access_key_textbox,
+        aws_secret_key_textbox,
+        aws_region_textbox,
+        azure_api_key_textbox,
+        sentiment_checkbox=sentiment_checkbox,
     )

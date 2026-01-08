@@ -6,6 +6,7 @@ import pandas as pd
 
 from tools.auth import authenticate_user
 from tools.aws_functions import (
+    download_cost_codes_with_error_handling,
     download_file_from_s3,
     export_outputs_to_s3,
     upload_file_to_s3,
@@ -151,6 +152,7 @@ from tools.helper_functions import (
 )
 from tools.llm_api_call import (
     all_in_one_pipeline,
+    deduplicate_topics_llm_wrapper,
     modify_existing_output_tables,
     validate_topics_wrapper,
     wrapper_extract_topics_per_column_value,
@@ -1836,63 +1838,6 @@ with app:
         api_name="deduplicate_topics",
     )
 
-    # When LLM deduplication button pressed, deduplicate data using LLM
-    def deduplicate_topics_llm_wrapper(
-        reference_df,
-        topic_summary_df,
-        reference_table_file_name,
-        unique_topics_table_file_name,
-        model_choice,
-        in_api_key,
-        temperature,
-        in_excel_sheets,
-        merge_sentiment,
-        merge_general_topics,
-        in_data_files,
-        chosen_cols,
-        output_folder,
-        candidate_topics=None,
-        azure_endpoint="",
-        api_url=None,
-        aws_access_key_textbox="",
-        aws_secret_key_textbox="",
-        aws_region_textbox="",
-        azure_api_key_textbox="",
-        sentiment_checkbox="Negative or Positive",
-    ):
-        # Ensure custom model_choice is registered in model_name_map
-        ensure_model_in_map(model_choice)
-        model_source = model_name_map[model_choice]["source"]
-        return deduplicate_topics_llm(
-            reference_df,
-            topic_summary_df,
-            reference_table_file_name,
-            unique_topics_table_file_name,
-            model_choice,
-            in_api_key,
-            temperature,
-            model_source,
-            None,
-            None,
-            None,
-            None,
-            in_excel_sheets,
-            merge_sentiment,
-            merge_general_topics,
-            in_data_files,
-            chosen_cols,
-            output_folder,
-            candidate_topics,
-            azure_endpoint,
-            OUTPUT_DEBUG_FILES,
-            api_url,
-            aws_access_key_textbox,
-            aws_secret_key_textbox,
-            aws_region_textbox,
-            azure_api_key_textbox,
-            sentiment_checkbox=sentiment_checkbox,
-        )
-
     deduplicate_llm_previous_data_btn.click(
         load_in_previous_data_files,
         inputs=[deduplication_input_files],
@@ -2511,16 +2456,6 @@ with app:
             print(
                 f"Attempting to download from bucket: {S3_LOG_BUCKET}, key: {S3_COST_CODES_PATH}"
             )
-
-            # Create a wrapper function with error handling
-            def download_cost_codes_with_error_handling(bucket, key, local_path):
-                try:
-                    download_file_from_s3(bucket, key, local_path)
-                    return True
-                except Exception as e:
-                    print(f"Error downloading cost codes from S3: {e}")
-                    print(f"Failed to download s3://{bucket}/{key}")
-                    return False
 
             app.load(
                 download_cost_codes_with_error_handling,
