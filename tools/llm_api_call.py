@@ -2418,8 +2418,10 @@ def write_llm_output_and_logs(
     batch_size_number = int(batch_size_number)
 
     # Handle blank Response References: remove rows if batch_size > 1, set to "1" if batch_size == 1
+    # Skip this processing when producing structured summaries, as they don't have Response References column
     if (
-        "Response References" in topic_with_response_df.columns
+        produce_structured_summary_radio != "Yes"
+        and "Response References" in topic_with_response_df.columns
         and not topic_with_response_df.empty
     ):
         # Convert Response References to string and identify blank entries
@@ -2700,7 +2702,7 @@ def write_llm_output_and_logs(
 
     out_topic_summary_df = (
         out_topic_summary_df.drop_duplicates(["General topic", "Subtopic", "Sentiment"])
-        .drop(["Number of responses", "Summary"], axis=1)
+        .drop(["Number of responses", "Summary"], axis=1, errors="ignore")
         .reset_index(drop=True)
     )
 
@@ -4243,9 +4245,16 @@ def extract_topics(
                         )
 
             # The topic table that can be modified does not need the summary column
-            modifiable_topic_summary_df = existing_topic_summary_df.drop(
-                "Summary", axis=1
-            )
+            # Check if DataFrame is not empty and has Summary column before dropping
+            if (
+                not existing_topic_summary_df.empty
+                and "Summary" in existing_topic_summary_df.columns
+            ):
+                modifiable_topic_summary_df = existing_topic_summary_df.drop(
+                    "Summary", axis=1
+                )
+            else:
+                modifiable_topic_summary_df = existing_topic_summary_df.copy()
 
         out_time = f"{final_time:0.1f} seconds."
 
@@ -4470,7 +4479,16 @@ def extract_topics(
         ]
 
         # The topic table that can be modified does not need the summary column
-        modifiable_topic_summary_df = final_out_topic_summary_df.drop("Summary", axis=1)
+        # Check if DataFrame is not empty and has Summary column before dropping
+        if (
+            not final_out_topic_summary_df.empty
+            and "Summary" in final_out_topic_summary_df.columns
+        ):
+            modifiable_topic_summary_df = final_out_topic_summary_df.drop(
+                "Summary", axis=1
+            )
+        else:
+            modifiable_topic_summary_df = final_out_topic_summary_df.copy()
 
         return (
             unique_table_df_display_table_markdown,

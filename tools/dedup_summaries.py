@@ -3444,6 +3444,63 @@ def wrapper_summarise_output_topics_per_group(
     )
 
 
+def convert_markdown_headers_to_excel_format(text: str) -> str:
+    """
+    Convert markdown headers to Excel-friendly format that preserves hierarchy.
+
+    Converts:
+    - # Header (H1) -> === HEADER === (most prominent)
+    - ## Header (H2) -> --- Header --- (medium)
+    - ### Header (H3) -> ── Header ── (less prominent)
+    - #### Header (H4) -> • Header (with bullet)
+    - ##### Header (H5) ->   • Header (indented)
+    - ###### Header (H6) ->     • Header (more indented)
+
+    Args:
+        text (str): Text containing markdown headers
+
+    Returns:
+        str: Text with markdown headers converted to Excel-friendly format
+    """
+    if not text:
+        return text
+
+    lines = text.split("\n")
+    converted_lines = []
+
+    for line in lines:
+        # Match markdown headers (# through ######)
+        header_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if header_match:
+            header_level = len(header_match.group(1))  # Number of # characters
+            header_text = header_match.group(2).strip()
+
+            if header_level == 1:
+                # H1: Most prominent - uppercase with double equals
+                converted_line = f"=== {header_text.upper()} ==="
+            elif header_level == 2:
+                # H2: Medium prominence - title case with dashes
+                converted_line = f"--- {header_text.title()} ---"
+            elif header_level == 3:
+                # H3: Less prominent - title case with single dashes
+                converted_line = f"── {header_text.title()} ──"
+            elif header_level == 4:
+                # H4: Bullet with no indentation
+                converted_line = f"• {header_text}"
+            elif header_level == 5:
+                # H5: Bullet with indentation
+                converted_line = f"  • {header_text}"
+            else:  # header_level == 6
+                # H6: Bullet with more indentation
+                converted_line = f"    • {header_text}"
+
+            converted_lines.append(converted_line)
+        else:
+            converted_lines.append(line)
+
+    return "\n".join(converted_lines)
+
+
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def overall_summary(
     topic_summary_df: pd.DataFrame,
@@ -3765,6 +3822,10 @@ def overall_summary(
             if summarised_output_for_df:
                 summarised_output_for_df = re.sub(
                     r"\n{2,}", "\n", summarised_output_for_df
+                )
+                # Convert markdown headers to Excel-friendly format
+                summarised_output_for_df = convert_markdown_headers_to_excel_format(
+                    summarised_output_for_df
                 )
             if summarised_output:
                 summarised_output = re.sub(r"\n{2,}", "\n", summarised_output)
