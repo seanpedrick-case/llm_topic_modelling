@@ -321,8 +321,8 @@ MAX_GROUPS = int(
 BATCH_SIZE_DEFAULT = int(
     get_or_create_env_var("BATCH_SIZE_DEFAULT", "5")
 )  # Default batch size for LLM calls
-MAXIMUM_ZERO_SHOT_TOPICS = int(
-    get_or_create_env_var("MAXIMUM_ZERO_SHOT_TOPICS", "100")
+MAXIMUM_ALLOWED_TOPICS = int(
+    get_or_create_env_var("MAXIMUM_ALLOWED_TOPICS", "100")
 )  # Maximum number of zero shot topics to process
 MAX_SPACES_GPU_RUN_TIME = int(
     get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "240")

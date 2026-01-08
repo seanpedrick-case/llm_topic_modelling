@@ -1654,6 +1654,9 @@ def send_request(
         else:
             response_text = response
 
+    # Strip <|end|> tags (used by GPT-OSS thinking models to mark end of thinking)
+    response_text = re.sub(r"<\|end\|>", "", response_text)
+
     # Replace multiple spaces with single space
     response_text = re.sub(r" {2,}", " ", response_text)
     response_text = response_text.strip()

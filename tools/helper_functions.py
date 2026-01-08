@@ -15,7 +15,7 @@ from tools.config import (
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
     INPUT_FOLDER,
-    MAXIMUM_ZERO_SHOT_TOPICS,
+    MAXIMUM_ALLOWED_TOPICS,
     OUTPUT_FOLDER,
     SESSION_OUTPUT_FOLDER,
     model_full_names,
@@ -537,7 +537,10 @@ def convert_reference_table_to_pivot_table(
     return pivot_table
 
 
-def create_topic_summary_df_from_reference_table(reference_df: pd.DataFrame):
+def create_topic_summary_df_from_reference_table(
+    reference_df: pd.DataFrame,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
+):
 
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
@@ -548,33 +551,98 @@ def create_topic_summary_df_from_reference_table(reference_df: pd.DataFrame):
             reference_df["Start row of group"], errors="coerce"
         )
 
+    # Determine if sentiment should be included in grouping
+    include_sentiment = sentiment_checkbox != "Do not assess sentiment"
+
+    # Define grouping columns based on whether sentiment is being assessed
+    # When sentiment is assessed: group by General topic, Subtopic, Sentiment, and Group
+    # When sentiment is NOT assessed: group by General topic, Subtopic, and Group
+    # In both cases, duplicate rows with the same combination will be merged:
+    # - Response References will be concatenated into a comma-separated list
+    # - Summaries will be concatenated with "<br>" separators
+    if include_sentiment:
+        groupby_cols = ["General topic", "Subtopic", "Sentiment", "Group"]
+    else:
+        groupby_cols = ["General topic", "Subtopic", "Group"]
+
+    # Helper function to collect and join Response References
+    # This aggregates all unique Response References from rows with the same topic combination
+    def aggregate_response_references(x):
+        # Collect all unique Response References, convert to string, sort numerically
+        refs = set()
+        for ref in x:
+            if pd.notna(ref) and str(ref).strip():
+                # Handle both single numbers and comma-separated lists
+                ref_str = str(ref).strip()
+                # Split by comma if it's a comma-separated list
+                for r in ref_str.split(","):
+                    r = r.strip()
+                    if r and r.isdigit():
+                        refs.add(int(r))
+        # Sort and join with ", "
+        sorted_refs = sorted(refs)
+        return ", ".join(map(str, sorted_refs)) if sorted_refs else ""
+
+    # Helper function to concatenate summaries
+    # This aggregates all unique summaries from rows with the same topic combination
+    def aggregate_summaries(x):
+        # Get unique summaries, sorted by their minimum Start row of group
+        unique_summaries = sorted(
+            set(x),
+            key=lambda summary: (
+                reference_df.loc[
+                    reference_df["Summary"] == summary, "Start row of group"
+                ].min()
+                if "Start row of group" in reference_df.columns
+                and not reference_df.loc[
+                    reference_df["Summary"] == summary, "Start row of group"
+                ].empty
+                else 0
+            ),
+        )
+        return "<br>".join(unique_summaries)
+
     out_topic_summary_df = (
-        reference_df.groupby(["General topic", "Subtopic", "Sentiment", "Group"])
+        reference_df.groupby(groupby_cols)
         .agg(
             {
-                "Response References": "size",  # Count the number of references
-                "Summary": lambda x: "<br>".join(
-                    sorted(
-                        set(x),
-                        key=lambda summary: reference_df.loc[
-                            reference_df["Summary"] == summary, "Start row of group"
-                        ].min(),
-                    )
-                ),
+                "Response References": aggregate_response_references,
+                "Summary": aggregate_summaries,
             }
         )
         .reset_index()
-        # .sort_values('Response References', ascending=False)  # Sort by size, biggest first
     )
 
-    out_topic_summary_df = out_topic_summary_df.rename(
-        columns={"Response References": "Number of responses"}, errors="ignore"
+    # Calculate number of responses from the Response References string
+    # (count comma-separated values)
+    def count_responses(ref_str):
+        if not ref_str or str(ref_str).strip() == "":
+            return 0
+        return len([r for r in str(ref_str).split(",") if r.strip()])
+
+    # Store Response References before potentially renaming
+    response_refs_col = out_topic_summary_df["Response References"].copy()
+
+    # Calculate Number of responses from Response References
+    out_topic_summary_df["Number of responses"] = response_refs_col.apply(
+        count_responses
     )
+
+    # For backward compatibility with code that expects "Number of responses" instead of "Response References",
+    # we keep both columns. The "Response References" column contains the concatenated reference numbers,
+    # and "Number of responses" contains the count.
 
     # Sort the dataframe first
+    sort_cols = ["Group", "Number of responses", "General topic", "Subtopic"]
+    if include_sentiment:
+        sort_cols.append("Sentiment")
     out_topic_summary_df = out_topic_summary_df.sort_values(
-        ["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"],
-        ascending=[True, False, True, True, True],
+        sort_cols,
+        ascending=(
+            [True, False, True, True, True]
+            if include_sentiment
+            else [True, False, True, True]
+        ),
     )
 
     # Then assign Topic number based on the final sorted order
@@ -583,6 +651,10 @@ def create_topic_summary_df_from_reference_table(reference_df: pd.DataFrame):
     )
 
     out_topic_summary_df.rename(columns={"Topic_number": "Topic number"}, inplace=True)
+
+    out_topic_summary_df.drop(
+        ["1", "2", "3", "Response References"], axis=1, errors="ignore", inplace=True
+    )
 
     return out_topic_summary_df
 
@@ -674,6 +746,50 @@ def wrap_text(text: str, max_width=80, max_text_length=None):
     return "<br>".join(wrapped_lines)
 
 
+def normalize_topic_name_for_llm(name):
+    """
+    Normalize topic name for LLM presentation and consistent formatting.
+
+    This function applies consistent cleaning and normalization to topic names
+    across the codebase to ensure uniform formatting. It handles:
+    - Cleaning with initial_clean
+    - Removing newlines and carriage returns
+    - Replacing special characters (/ with " or ", & with " and ")
+    - Normalizing apostrophes to standard apostrophe (')
+    - Normalizing whitespace
+    - Converting to title case for better readability
+
+    Args:
+        name: Topic name to normalize (can be string, NaN, or None)
+
+    Returns:
+        Normalized topic name string, or empty string if input is NaN/None
+    """
+    if pd.isna(name) or name is None:
+        return ""
+    normalized = str(name)
+    normalized = initial_clean(normalized)
+    normalized = normalized.strip()
+    normalized = normalized.replace("\n", " ")
+    normalized = normalized.replace("\r", " ")
+    normalized = normalized.replace("/", " or ")
+    normalized = normalized.replace("&", " and ")
+    normalized = normalized.replace(" s ", "s ")
+    # Normalize different types of apostrophes to standard apostrophe (')
+    # Replace various Unicode apostrophe/quotation mark characters with standard apostrophe
+    normalized = normalized.replace("'", "'")  # U+2019 right single quotation mark
+    normalized = normalized.replace("'", "'")  # U+2018 left single quotation mark
+    normalized = normalized.replace(
+        "`", "'"
+    )  # U+2018 left single quotation mark (backtick style)
+    normalized = normalized.replace("´", "'")  # U+00B4 acute accent
+    normalized = normalized.replace("'", "'")  # U+02BC modifier letter apostrophe
+    normalized = normalized.lower()
+    # Capitalize first letter of each word for better readability
+    normalized = normalized.title()
+    return normalized
+
+
 def initial_clean(text: str):
     #### Some of my cleaning functions
     html_pattern_regex = r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;"
@@ -681,8 +797,31 @@ def initial_clean(text: str):
     non_ascii_pattern = r"[^\x00-\x7F]+"
     multiple_spaces_regex = r"\s{2,}"
 
+    # Markdown formatting patterns - remove formatting but preserve text content
+    # Bold: **text** or __text__
+    markdown_bold_double_asterisk = r"\*\*([^*]+?)\*\*"
+    markdown_bold_double_underscore = r"__([^_]+?)__"
+    # Italic: *text* or _text_ (but be careful not to match asterisks/underscores in words)
+    markdown_italic_asterisk = r"(?<!\w)\*([^*\s]+?)\*(?!\w)"
+    markdown_italic_underscore = r"(?<!\w)_([^_\s]+?)_(?!\w)"
+    # Inline code: `text`
+    markdown_inline_code = r"`([^`]+?)`"
+    # Strikethrough: ~~text~~
+    markdown_strikethrough = r"~~([^~]+?)~~"
+    # Headers: # text or ## text etc. (at start of line)
+    markdown_header = r"^#+\s+"
+
     # Define a list of patterns and their replacements
     patterns = [
+        # Markdown formatting - replace with just the text content (capture group 1)
+        (markdown_strikethrough, r"\1"),  # Remove ~~ but keep text
+        (markdown_bold_double_asterisk, r"\1"),  # Remove ** but keep text
+        (markdown_bold_double_underscore, r"\1"),  # Remove __ but keep text
+        (markdown_italic_asterisk, r"\1"),  # Remove * but keep text
+        (markdown_italic_underscore, r"\1"),  # Remove _ but keep text
+        (markdown_inline_code, r"\1"),  # Remove ` but keep text
+        (markdown_header, ""),  # Remove header markers
+        # HTML and other patterns
         (html_pattern_regex, " "),
         (html_start_pattern_end_dots_regex, " "),
         (non_ascii_pattern, " "),
@@ -691,7 +830,10 @@ def initial_clean(text: str):
 
     # Apply each regex replacement
     for pattern, replacement in patterns:
-        text = re.sub(pattern, replacement, text)
+        text = re.sub(pattern, replacement, text, flags=re.MULTILINE)
+
+    # Clean up any remaining standalone markdown characters
+    text = re.sub(r"(?<!\w)[*_`](?!\w)", "", text)
 
     return text
 
@@ -1056,7 +1198,7 @@ def generate_zero_shot_topics_df(
     zero_shot_topics: pd.DataFrame,
     force_zero_shot_radio: str = "No",
     create_revised_general_topics: bool = False,
-    max_topic_no: int = MAXIMUM_ZERO_SHOT_TOPICS,
+    max_topic_no: int = MAXIMUM_ALLOWED_TOPICS,
 ):
     """
     Preprocesses a DataFrame of zero-shot topics, cleaning and formatting them
@@ -1104,7 +1246,7 @@ def generate_zero_shot_topics_df(
     zero_shot_topics_subtopics_list = list()
     zero_shot_topics_description_list = list()
 
-    # Max 120 topics allowed
+    # Check if input exceeds maximum number of topics allowed
     if zero_shot_topics.shape[0] > max_topic_no:
         out_message = (
             "Maximum "
@@ -1118,18 +1260,8 @@ def generate_zero_shot_topics_df(
     if zero_shot_topics.shape[1] >= 1:  # Check if there is at least one column
         for x in zero_shot_topics.columns:
             if not zero_shot_topics[x].isnull().all():
-                zero_shot_topics[x] = zero_shot_topics[x].apply(initial_clean)
-
-                zero_shot_topics.loc[:, x] = (
-                    zero_shot_topics.loc[:, x]
-                    .str.strip()
-                    .str.replace("\n", " ")
-                    .str.replace("\r", " ")
-                    .str.replace("/", " or ")
-                    .str.replace("&", " and ")
-                    .str.replace(" s ", "s ")
-                    .str.lower()
-                    .str.capitalize()
+                zero_shot_topics[x] = zero_shot_topics[x].apply(
+                    normalize_topic_name_for_llm
                 )
 
         zero_shot_topics.columns = zero_shot_topics.columns.str.lower()

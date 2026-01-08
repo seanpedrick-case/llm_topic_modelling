@@ -25,7 +25,7 @@ from tools.config import (
     MAX_GROUPS,
     MAX_SPACES_GPU_RUN_TIME,
     MAX_TIME_FOR_LOOP,
-    MAXIMUM_ZERO_SHOT_TOPICS,
+    MAXIMUM_ALLOWED_TOPICS,
     NUMBER_OF_RETRY_ATTEMPTS,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
@@ -43,7 +43,9 @@ from tools.helper_functions import (
     generate_zero_shot_topics_df,
     get_basic_response_data,
     get_file_name_no_ext,
+    initial_clean,
     load_in_data_file,
+    normalize_topic_name_for_llm,
     read_file,
     wrap_text,
 )
@@ -82,7 +84,7 @@ reasoning_suffix = REASONING_SUFFIX
 output_debug_files = OUTPUT_DEBUG_FILES
 default_number_of_sampled_summaries = DEFAULT_SAMPLED_SUMMARIES
 max_text_length = 500
-max_number_of_topics = MAXIMUM_ZERO_SHOT_TOPICS
+max_number_of_topics = MAXIMUM_ALLOWED_TOPICS
 
 
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
@@ -216,6 +218,7 @@ def deduplicate_topics(
     output_files: str = "True",
     total_number_of_batches: int = None,
     data_file_names_textbox: str = None,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ):
     """
     Deduplicate topics based on a reference and unique topics table, merging similar topics.
@@ -263,6 +266,17 @@ def deduplicate_topics(
         else:
             # If empty, create empty column - it will be populated when DataFrame is recreated
             topic_summary_df["Topic number"] = pd.Series(dtype="int64")
+
+    if "Response References" in reference_df.columns:
+        # Convert float or str to int
+        reference_df["Response References"] = (
+            reference_df["Response References"].astype(float).astype(int)
+        )
+    if "Start row of group" in reference_df.columns:
+        # Convert float or str to int
+        reference_df["Start row of group"] = (
+            reference_df["Start row of group"].astype(float).astype(int)
+        )
 
     if (len(reference_df["Response References"].unique()) == 1) | (
         len(topic_summary_df["Topic number"].unique()) == 1
@@ -318,7 +332,9 @@ def deduplicate_topics(
     initial_unique_references = len(reference_df["Response References"].unique())
 
     if topic_summary_df.empty:
-        topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
+        topic_summary_df = create_topic_summary_df_from_reference_table(
+            reference_df, sentiment_checkbox=sentiment_checkbox
+        )
 
         # Then merge the topic numbers back to the original dataframe
         reference_df = reference_df.merge(
@@ -582,7 +598,6 @@ def deduplicate_topics(
                     "Group",
                 ]
             ]
-            # reference_df.drop(['old_category', 'deduplicated_category', "Subtopic_old", "Sentiment_old"], axis=1, inplace=True, errors="ignore")
 
         # Update reference summary column with all summaries
         reference_df["Summary"] = reference_df.groupby(
@@ -610,10 +625,16 @@ def deduplicate_topics(
             topic_summary_df["Group"].nunique() if input_has_group else 0
         )
 
+        # Check reference_df Group values before normalization
+        ref_df_has_group = "Group" in reference_df.columns
+        ref_df_unique_groups_before = (
+            reference_df["Group"].nunique() if ref_df_has_group else 0
+        )
+
         # If input didn't have meaningful Group distinction, normalize to single Group
         if not input_has_group or input_unique_groups <= 1:
             # Get the most common Group value from reference_df, or use "All" if not present
-            if "Group" in reference_df.columns and not reference_df["Group"].empty:
+            if ref_df_has_group and not reference_df["Group"].empty:
                 most_common_group = (
                     reference_df["Group"].mode()[0]
                     if len(reference_df["Group"].mode()) > 0
@@ -624,17 +645,51 @@ def deduplicate_topics(
             # Normalize all Groups to the most common one to prevent topic count increase
             reference_df["Group"] = most_common_group
 
+            # Verify normalization worked
+            ref_df_unique_groups_after = reference_df["Group"].nunique()
+            if ref_df_unique_groups_before > 1 and ref_df_unique_groups_after > 1:
+                print(
+                    f"Warning: Group normalization may have failed. "
+                    f"reference_df had {ref_df_unique_groups_before} unique Groups before normalization, "
+                    f"and {ref_df_unique_groups_after} after. Forcing all to '{most_common_group}'."
+                )
+                reference_df["Group"] = most_common_group
+
         # Remake topic_summary_df based on new reference_df
-        topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
+        # Rebuild topic_summary_df from updated reference_df to ensure consistency
+        # This ensures the topic count reflects the actual merged state
+        if not reference_df.empty:
+            # Check if Response References are present and not all empty
+            if "Response References" in reference_df.columns:
+                non_empty_refs = reference_df["Response References"].notna() & (
+                    reference_df["Response References"].astype(str).str.strip() != ""
+                )
+                if not non_empty_refs.any():
+                    print(
+                        "Warning: All Response References are empty in reference_df. "
+                        "Number of responses will be 0 for all topics."
+                    )
+            topic_summary_df = create_topic_summary_df_from_reference_table(
+                reference_df, sentiment_checkbox=sentiment_checkbox
+            )
+        else:
+            print(
+                "Warning: reference_df is empty after deduplication. "
+                "Cannot recreate topic_summary_df. Number of responses will be 0 for all topics."
+            )
+            # Create an empty topic_summary_df with the expected structure
+            topic_summary_df = pd.DataFrame()
 
         # Then merge the topic numbers back to the original dataframe
-        reference_df = reference_df.merge(
-            topic_summary_df[
-                ["General topic", "Subtopic", "Sentiment", "Group", "Topic number"]
-            ],
-            on=["General topic", "Subtopic", "Sentiment", "Group"],
-            how="left",
-        )
+        # Only merge if both dataframes are not empty
+        if not reference_df.empty and not topic_summary_df.empty:
+            reference_df = reference_df.merge(
+                topic_summary_df[
+                    ["General topic", "Subtopic", "Sentiment", "Group", "Topic number"]
+                ],
+                on=["General topic", "Subtopic", "Sentiment", "Group"],
+                how="left",
+            )
 
     else:
         print("Topics have not beeen deduplicated")
@@ -768,6 +823,17 @@ def deduplicate_topics_llm(
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
 
+    if "Response References" in reference_df.columns:
+        # Convert float or str to int
+        reference_df["Response References"] = (
+            reference_df["Response References"].astype(float).astype(int)
+        )
+    if "Start row of group" in reference_df.columns:
+        # Convert float or str to int
+        reference_df["Start row of group"] = (
+            reference_df["Start row of group"].astype(float).astype(int)
+        )
+
     # Check if data is too short for deduplication
     if (len(reference_df["Response References"].unique()) == 1) | (
         len(topic_summary_df["Topic number"].unique()) == 1
@@ -812,6 +878,20 @@ def deduplicate_topics_llm(
             topic_summary_df_revised_display.to_markdown(index=False)
         )
 
+        # Compare input vs output for early return case
+        if not topic_summary_df.empty:
+            input_unique_topics = topic_summary_df.drop_duplicates(
+                subset=["General topic", "Subtopic"]
+            ).shape[0]
+            output_unique_topics = topic_summary_df.drop_duplicates(
+                subset=["General topic", "Subtopic"]
+            ).shape[0]
+            print(
+                f"Topic count comparison (early return): Input had {input_unique_topics} unique 'General topic' | 'Subtopic' combinations, "
+                f"Output has {output_unique_topics} unique 'General topic' | 'Subtopic' combinations. "
+                f"No deduplication performed (data too short)."
+            )
+
         # Return with token counts set to 0 for early return
         return (
             reference_df,
@@ -828,9 +908,28 @@ def deduplicate_topics_llm(
     # For checking that data is not lost during the process
     initial_unique_references = len(reference_df["Response References"].unique())
 
+    # Capture input topic count for comparison
+    if not topic_summary_df.empty:
+        input_unique_topics = topic_summary_df.drop_duplicates(
+            subset=["General topic", "Subtopic"]
+        ).shape[0]
+    else:
+        input_unique_topics = 0
+
     # Create topic summary if it doesn't exist
     if topic_summary_df.empty:
         topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
+        # Update input count if we just created the topic summary
+        input_unique_topics = topic_summary_df.drop_duplicates(
+            subset=["General topic", "Subtopic"]
+        ).shape[0]
+
+        topic_summary_df.drop(
+            ["1", "2", "3", "Response References"],
+            axis=1,
+            errors="ignore",
+            inplace=True,
+        )
 
         if "Topic number" not in reference_df.columns:
             # Merge topic numbers back to the original dataframe
@@ -841,6 +940,16 @@ def deduplicate_topics_llm(
                 on=["General topic", "Subtopic", "Sentiment"],
                 how="left",
             )
+
+    orig_unique_topics_file_out_path = (
+        output_folder
+        + get_file_name_no_ext(unique_topics_table_file_name)
+        + "_orig_pre_dedup.csv"
+    )
+    if should_output_files == "True":
+        topic_summary_df.drop(
+            ["1", "2", "3", "Response References"], axis=1, errors="ignore"
+        ).to_csv(orig_unique_topics_file_out_path, index=None, encoding="utf-8-sig")
 
     # Load data files if provided
     # Check if in_data_files is not empty (handles both DataFrame and list)
@@ -916,16 +1025,40 @@ def deduplicate_topics_llm(
     # Determine if sentiment should be included based on sentiment_checkbox
     include_sentiment = sentiment_checkbox != "Do not assess sentiment"
 
+    # Normalize topic names for LLM comparison to avoid capitalization-only "merges"
+    # Create a copy of topic_summary_df with normalized topic names for the LLM
+    # This prevents the LLM from seeing capitalization differences as different topics
+    # Use the shared normalize_topic_name_for_llm function from helper_functions
+    # Create normalized version for LLM (but keep original for mapping back)
+    topics_for_llm = topic_summary_df.copy()
+    topics_for_llm["General topic"] = topics_for_llm["General topic"].apply(
+        normalize_topic_name_for_llm
+    )
+    topics_for_llm["Subtopic"] = topics_for_llm["Subtopic"].apply(
+        normalize_topic_name_for_llm
+    )
+
+    # Remove duplicates after normalization (these are the same topic with different capitalization)
+    # This prevents the LLM from seeing them as separate topics
+    if include_sentiment:
+        topics_for_llm = topics_for_llm.drop_duplicates(
+            subset=["General topic", "Subtopic", "Sentiment"]
+        )
+    else:
+        topics_for_llm = topics_for_llm.drop_duplicates(
+            subset=["General topic", "Subtopic"]
+        )
+
     # Prepare topics table for LLM analysis (conditionally include sentiment)
     if include_sentiment:
-        topics_table = topic_summary_df[
+        topics_table = topics_for_llm[
             ["General topic", "Subtopic", "Sentiment", "Number of responses"]
         ].to_markdown(index=False)
         sentiment_text = ", and Sentiment classifications"
         sentiment_columns = "\n3. 'Original Sentiment' - The current sentiment"
         merged_sentiment_columns = "\n4. 'Merged Sentiment' - The consolidated sentiment (use 'Mixed' if sentiments differ)"
     else:
-        topics_table = topic_summary_df[
+        topics_table = topics_for_llm[
             ["General topic", "Subtopic", "Number of responses"]
         ].to_markdown(index=False)
         sentiment_text = ""
@@ -1081,6 +1214,10 @@ def deduplicate_topics_llm(
         pd.DataFrame()
     )  # Initialize empty DataFrame for analysis results
     num_merges_applied = 0
+    # Track unique topic combinations being removed and added
+    # This helps explain the discrepancy between merge operations and actual topic reductions
+    unique_original_combinations = set()
+    unique_merged_combinations = set()
 
     try:
         # Extract the markdown table from the response
@@ -1095,10 +1232,74 @@ def deduplicate_topics_llm(
             )
 
             # Clean up the DataFrame
+            # Remove empty columns (created from leading/trailing pipes in markdown)
             merge_suggestions_df = merge_suggestions_df.dropna(
                 axis=1, how="all"
             )  # Remove empty columns
             merge_suggestions_df.columns = merge_suggestions_df.columns.str.strip()
+
+            # Remove columns that are empty strings or just whitespace (from markdown table parsing)
+            # This fixes issues where leading/trailing pipes create empty column names
+            # Also remove columns with invalid names like 'end', '>' that can appear from parsing errors
+            expected_column_keywords = [
+                "Original General topic",
+                "Original Subtopic",
+                "Merged General topic",
+                "Merged Subtopic",
+                "Merge Reason",
+                "Original Sentiment",
+                "Merged Sentiment",
+            ]
+
+            valid_columns = []
+            found_expected_column = False
+            for col in merge_suggestions_df.columns:
+                col_stripped = str(col).strip()
+                # Check if this column matches an expected column name
+                is_expected = any(
+                    keyword.lower() in col_stripped.lower()
+                    for keyword in expected_column_keywords
+                )
+
+                if is_expected:
+                    found_expected_column = True
+                    valid_columns.append(col)
+                elif found_expected_column:
+                    # Once we've found expected columns, keep subsequent columns too
+                    # (in case there are additional valid columns)
+                    if col_stripped and col_stripped not in ["", "nan", "None"]:
+                        valid_columns.append(col)
+                elif not found_expected_column:
+                    # Before finding expected columns, filter out obvious artifacts
+                    # Exclude single character columns and common parsing artifacts
+                    if (
+                        col_stripped
+                        and col_stripped not in ["", "nan", "None", "end", ">"]
+                        and len(col_stripped) > 1
+                    ):
+                        valid_columns.append(col)
+
+            # If we found expected columns, use only valid columns; otherwise keep all non-empty
+            if found_expected_column and valid_columns:
+                merge_suggestions_df = merge_suggestions_df[valid_columns]
+            elif not found_expected_column:
+                # If no expected columns found, filter out obvious artifacts
+                valid_columns = [
+                    col
+                    for col in merge_suggestions_df.columns
+                    if str(col).strip() not in ["", "nan", "None", "end", ">"]
+                    and len(str(col).strip()) > 1
+                ]
+                if valid_columns:
+                    merge_suggestions_df = merge_suggestions_df[valid_columns]
+
+            # Also remove any columns where all values are empty strings after stripping
+            cols_to_drop = []
+            for col in merge_suggestions_df.columns:
+                if merge_suggestions_df[col].astype(str).str.strip().eq("").all():
+                    cols_to_drop.append(col)
+            if cols_to_drop:
+                merge_suggestions_df = merge_suggestions_df.drop(columns=cols_to_drop)
 
             # Remove rows where all values are NaN
             merge_suggestions_df = merge_suggestions_df.dropna(how="all")
@@ -1113,12 +1314,201 @@ def deduplicate_topics_llm(
                     .replace("None", "")
                 )
 
+            # Filter out markdown table divider rows (rows that are primarily dashes/hyphens)
+            # These are false positives from parsing the markdown table structure
+            def is_divider_row(row):
+                """Check if a row is a markdown table divider (contains mostly dashes/hyphens)."""
+                row_str = " ".join(str(val) for val in row.values if pd.notna(val))
+                # Remove whitespace and check if it's mostly dashes/hyphens
+                row_clean = row_str.replace(" ", "").replace("|", "").strip()
+                # If the row is empty or consists mostly of dashes/hyphens, it's a divider
+                if not row_clean or len(row_clean) == 0:
+                    return True
+                # Check if more than 80% of characters are dashes/hyphens
+                dash_count = sum(1 for c in row_clean if c in ["-", "_", "="])
+                return dash_count > 0.8 * len(row_clean) if len(row_clean) > 0 else True
+
+            # Remove divider rows
+            merge_suggestions_df = merge_suggestions_df[
+                ~merge_suggestions_df.apply(is_divider_row, axis=1)
+            ]
+
             if not merge_suggestions_df.empty:
                 print(
                     f"LLM identified {len(merge_suggestions_df)} potential topic merges"
                 )
 
+                # Deduplicate merge suggestions to avoid processing the same merge multiple times
+                # Normalize the original topic names for deduplication
+                def normalize_for_dedup(name):
+                    """Normalize topic name for deduplication comparison."""
+                    if pd.isna(name) or name is None:
+                        return ""
+                    normalized = str(name)
+                    normalized = initial_clean(normalized)
+                    normalized = normalized.strip()
+                    normalized = normalized.replace("\n", " ")
+                    normalized = normalized.replace("\r", " ")
+                    normalized = normalized.replace("/", " or ")
+                    normalized = normalized.replace("&", " and ")
+                    normalized = normalized.replace(" s ", "s ")
+                    normalized = normalized.lower()
+                    return normalized
+
+                # Create normalized columns for deduplication
+                if "Original General topic" in merge_suggestions_df.columns:
+                    merge_suggestions_df["_orig_gen_norm"] = merge_suggestions_df[
+                        "Original General topic"
+                    ].apply(normalize_for_dedup)
+                else:
+                    merge_suggestions_df["_orig_gen_norm"] = ""
+
+                if "Original Subtopic" in merge_suggestions_df.columns:
+                    merge_suggestions_df["_orig_sub_norm"] = merge_suggestions_df[
+                        "Original Subtopic"
+                    ].apply(normalize_for_dedup)
+                else:
+                    merge_suggestions_df["_orig_sub_norm"] = ""
+
+                if include_sentiment:
+                    # Deduplicate based on normalized original topics and sentiment
+                    if "Original Sentiment" in merge_suggestions_df.columns:
+                        merge_suggestions_df["_orig_sent"] = merge_suggestions_df[
+                            "Original Sentiment"
+                        ].astype(str)
+                    else:
+                        merge_suggestions_df["_orig_sent"] = ""
+                    initial_count = len(merge_suggestions_df)
+                    merge_suggestions_df = merge_suggestions_df.drop_duplicates(
+                        subset=["_orig_gen_norm", "_orig_sub_norm", "_orig_sent"],
+                        keep="first",
+                    )
+                else:
+                    # Deduplicate based on normalized original topics only
+                    initial_count = len(merge_suggestions_df)
+                    merge_suggestions_df = merge_suggestions_df.drop_duplicates(
+                        subset=["_orig_gen_norm", "_orig_sub_norm"], keep="first"
+                    )
+
+                # Remove the temporary normalization columns
+                merge_suggestions_df = merge_suggestions_df.drop(
+                    columns=["_orig_gen_norm", "_orig_sub_norm", "_orig_sent"],
+                    errors="ignore",
+                )
+
+                genuine_merges_count = len(merge_suggestions_df)
+                duplicates_removed = initial_count - genuine_merges_count
+
+                if duplicates_removed > 0:
+                    print(
+                        f"Removed {duplicates_removed} duplicate merge suggestion(s). "
+                        f"Processing {genuine_merges_count} genuine merge(s)."
+                    )
+                else:
+                    print(f"Processing {genuine_merges_count} genuine merge(s).")
+
                 # Apply the merges to the reference_df
+                # Helper function to normalize topic names for comparison
+                # Uses the same transformations applied to topic names in reference_df
+                def normalize_topic_name(name):
+                    """Normalize topic name using the same transformations as reference_df topics for comparison."""
+                    if pd.isna(name) or name is None:
+                        return ""
+                    # Apply the same cleaning and transformations used in llm_api_call.py
+                    normalized = str(name)
+                    normalized = initial_clean(normalized)
+                    normalized = normalized.strip()
+                    normalized = normalized.replace("\n", " ")
+                    normalized = normalized.replace("\r", " ")
+                    normalized = normalized.replace("/", " or ")
+                    normalized = normalized.replace("&", " and ")
+                    normalized = normalized.replace(" s ", "s ")
+                    normalized = normalized.lower()
+                    return normalized
+
+                # OPTIMIZATION: Pre-compute normalized topic mappings for efficient lookup
+                # Instead of normalizing every row for every merge suggestion, normalize unique combinations once
+                # Create a mapping from (actual_general, actual_subtopic, sentiment) -> normalized_general, normalized_subtopic
+                # This allows us to quickly find matching rows without repeated normalization
+
+                # Get unique topic combinations from reference_df
+                if include_sentiment:
+                    unique_topics = reference_df[
+                        ["General topic", "Subtopic", "Sentiment"]
+                    ].drop_duplicates()
+                    # Create normalized lookup dictionaries
+                    # Map: (actual_general, actual_subtopic, sentiment) -> (normalized_general, normalized_subtopic)
+                    topic_normalization_map = {}
+                    for _, row in unique_topics.iterrows():
+                        key = (
+                            str(row["General topic"]),
+                            str(row["Subtopic"]),
+                            str(row["Sentiment"]),
+                        )
+                        topic_normalization_map[key] = (
+                            normalize_topic_name(row["General topic"]),
+                            normalize_topic_name(row["Subtopic"]),
+                        )
+
+                    # Create reverse lookup: (normalized_general, normalized_subtopic, sentiment) -> set of (actual_general, actual_subtopic, sentiment)
+                    normalized_to_actual_map = {}
+                    for key, (norm_gen, norm_sub) in topic_normalization_map.items():
+                        norm_key = (
+                            norm_gen,
+                            norm_sub,
+                            key[2],
+                        )  # (normalized_gen, normalized_sub, sentiment)
+                        if norm_key not in normalized_to_actual_map:
+                            normalized_to_actual_map[norm_key] = set()
+                        normalized_to_actual_map[norm_key].add(key)
+
+                    # Create a mask lookup: for each row index, store its normalized topic combination
+                    # This allows us to quickly find all rows matching a normalized topic
+                    row_normalized_map = {}
+                    for idx, row in reference_df.iterrows():
+                        key = (
+                            str(row["General topic"]),
+                            str(row["Subtopic"]),
+                            str(row["Sentiment"]),
+                        )
+                        if key in topic_normalization_map:
+                            norm_gen, norm_sub = topic_normalization_map[key]
+                            norm_key = (norm_gen, norm_sub, key[2])
+                            if norm_key not in row_normalized_map:
+                                row_normalized_map[norm_key] = []
+                            row_normalized_map[norm_key].append(idx)
+                else:
+                    unique_topics = reference_df[
+                        ["General topic", "Subtopic"]
+                    ].drop_duplicates()
+                    # Create normalized lookup dictionaries
+                    topic_normalization_map = {}
+                    for _, row in unique_topics.iterrows():
+                        key = (str(row["General topic"]), str(row["Subtopic"]))
+                        topic_normalization_map[key] = (
+                            normalize_topic_name(row["General topic"]),
+                            normalize_topic_name(row["Subtopic"]),
+                        )
+
+                    # Create reverse lookup: (normalized_general, normalized_subtopic) -> set of (actual_general, actual_subtopic)
+                    normalized_to_actual_map = {}
+                    for key, (norm_gen, norm_sub) in topic_normalization_map.items():
+                        norm_key = (norm_gen, norm_sub)
+                        if norm_key not in normalized_to_actual_map:
+                            normalized_to_actual_map[norm_key] = set()
+                        normalized_to_actual_map[norm_key].add(key)
+
+                    # Create a mask lookup: for each normalized topic, store list of row indices
+                    row_normalized_map = {}
+                    for idx, row in reference_df.iterrows():
+                        key = (str(row["General topic"]), str(row["Subtopic"]))
+                        if key in topic_normalization_map:
+                            norm_gen, norm_sub = topic_normalization_map[key]
+                            norm_key = (norm_gen, norm_sub)
+                            if norm_key not in row_normalized_map:
+                                row_normalized_map[norm_key] = []
+                            row_normalized_map[norm_key].append(idx)
+
                 for _, row in merge_suggestions_df.iterrows():
                     # Safely extract and convert values to strings, handling NaN/float values
                     def safe_get_strip(row, key, default=""):
@@ -1154,22 +1544,126 @@ def deduplicate_topics_llm(
                                 merged_sentiment,
                             ]
                         ):
-                            # Find matching rows in reference_df (including sentiment)
-                            mask = (
-                                (reference_df["General topic"] == original_general)
-                                & (reference_df["Subtopic"] == original_subtopic)
-                                & (reference_df["Sentiment"] == original_sentiment)
+                            # Find matching rows using pre-computed normalized lookup
+                            normalized_orig_gen = normalize_topic_name(original_general)
+                            normalized_orig_sub = normalize_topic_name(
+                                original_subtopic
+                            )
+                            lookup_key = (
+                                normalized_orig_gen,
+                                normalized_orig_sub,
+                                original_sentiment,
                             )
 
+                            # Get row indices that match this normalized topic combination
+                            matching_indices = row_normalized_map.get(lookup_key, [])
+                            # Create boolean mask using index.isin for efficiency
+                            mask = reference_df.index.isin(matching_indices)
+
                             if mask.any():
+                                # Normalize merged topics (original topics already normalized above)
+                                normalized_merged_gen = normalize_topic_name(
+                                    merged_general
+                                )
+                                normalized_merged_sub = normalize_topic_name(
+                                    merged_subtopic
+                                )
+
+                                # Skip if normalized versions are identical (only capitalization changed)
+                                if (
+                                    normalized_orig_gen == normalized_merged_gen
+                                    and normalized_orig_sub == normalized_merged_sub
+                                ):
+                                    # This is just a capitalization change or self-merge, skip it
+                                    print(
+                                        f"Skipped self-merge: '{original_general}' | '{original_subtopic}' | '{original_sentiment}' -> "
+                                        f"'{merged_general}' | '{merged_subtopic}' | '{merged_sentiment}' "
+                                        f"(normalized versions are identical)"
+                                    )
+                                    continue
+
+                                # Check if the merged combination already exists in reference_df (before applying the merge)
+                                # This indicates a real merge (consolidation) vs just a rename
+                                # Use pre-computed lookup for efficiency
+                                merged_lookup_key = (
+                                    normalized_merged_gen,
+                                    normalized_merged_sub,
+                                    merged_sentiment,
+                                )
+                                merged_exists_before = (
+                                    merged_lookup_key in row_normalized_map
+                                    and len(row_normalized_map[merged_lookup_key]) > 0
+                                )
+
+                                # Check if the merged combo is different from the original (not just renaming to itself)
+                                is_different_combo = (
+                                    normalized_orig_gen != normalized_merged_gen
+                                    or normalized_orig_sub != normalized_merged_sub
+                                    or original_sentiment != merged_sentiment
+                                )
+
+                                # It's a real consolidation if the merged combo already exists and is different from original
+                                is_real_merge = (
+                                    merged_exists_before and is_different_combo
+                                )
+
                                 # Update the matching rows (including sentiment)
+                                # Use merged values which already have whitespace stripped and preserve original case
                                 reference_df.loc[mask, "General topic"] = merged_general
                                 reference_df.loc[mask, "Subtopic"] = merged_subtopic
                                 reference_df.loc[mask, "Sentiment"] = merged_sentiment
                                 num_merges_applied += 1
-                                print(
-                                    f"Merged: {original_general} | {original_subtopic} | {original_sentiment} -> {merged_general} | {merged_subtopic} | {merged_sentiment}"
+
+                                # Track unique combinations for reporting
+                                orig_combo = (
+                                    normalized_orig_gen,
+                                    normalized_orig_sub,
+                                    original_sentiment,
                                 )
+                                merged_combo = (
+                                    normalized_merged_gen,
+                                    normalized_merged_sub,
+                                    merged_sentiment,
+                                )
+                                unique_original_combinations.add(orig_combo)
+                                unique_merged_combinations.add(merged_combo)
+
+                                merge_type = (
+                                    "consolidated" if is_real_merge else "renamed"
+                                )
+                                print(
+                                    f"Merged ({merge_type}): {original_general} | {original_subtopic} | {original_sentiment} -> {merged_general} | {merged_subtopic} | {merged_sentiment}"
+                                )
+                            else:
+                                # Debug: show why merge failed
+                                # Use pre-computed normalized topics from lookup
+                                # Get available topics from pre-computed map for debugging
+                                available_gen_topics = {
+                                    norm_gen
+                                    for (
+                                        norm_gen,
+                                        norm_sub,
+                                        _,
+                                    ) in row_normalized_map.keys()
+                                }
+                                available_sub_topics = {
+                                    norm_sub
+                                    for (
+                                        norm_gen,
+                                        norm_sub,
+                                        _,
+                                    ) in row_normalized_map.keys()
+                                }
+                                # Check if the normalized general topic exists
+                                gen_exists = normalized_orig_gen in available_gen_topics
+                                sub_exists = normalized_orig_sub in available_sub_topics
+                                print(
+                                    f"Failed to merge: '{original_general}' | '{original_subtopic}' | '{original_sentiment}' "
+                                    f"(normalized: '{normalized_orig_gen}' | '{normalized_orig_sub}'). "
+                                    f"General topic exists: {gen_exists}, Subtopic exists: {sub_exists}. "
+                                    f"No matching rows found in reference_df."
+                                )
+
                     else:
                         # Check required fields without sentiment
                         if all(
@@ -1180,23 +1674,130 @@ def deduplicate_topics_llm(
                                 merged_subtopic,
                             ]
                         ):
-                            # Find matching rows in reference_df (without sentiment)
-                            mask = (
-                                reference_df["General topic"] == original_general
-                            ) & (reference_df["Subtopic"] == original_subtopic)
+                            # Find matching rows using pre-computed normalized lookup
+                            normalized_orig_gen = normalize_topic_name(original_general)
+                            normalized_orig_sub = normalize_topic_name(
+                                original_subtopic
+                            )
+                            lookup_key = (normalized_orig_gen, normalized_orig_sub)
+
+                            # Get row indices that match this normalized topic combination
+                            matching_indices = row_normalized_map.get(lookup_key, [])
+                            # Create boolean mask using index.isin for efficiency
+                            mask = reference_df.index.isin(matching_indices)
 
                             if mask.any():
+                                # Normalize merged topics (original topics already normalized above)
+                                normalized_merged_gen = normalize_topic_name(
+                                    merged_general
+                                )
+                                normalized_merged_sub = normalize_topic_name(
+                                    merged_subtopic
+                                )
+
+                                # Skip if normalized versions are identical (only capitalization changed)
+                                if (
+                                    normalized_orig_gen == normalized_merged_gen
+                                    and normalized_orig_sub == normalized_merged_sub
+                                ):
+                                    # This is just a capitalization change or self-merge, skip it
+                                    print(
+                                        f"Skipped self-merge: '{original_general}' | '{original_subtopic}' -> "
+                                        f"'{merged_general}' | '{merged_subtopic}' "
+                                        f"(normalized versions are identical)"
+                                    )
+                                    continue
+
+                                # Check if the merged combination already exists in reference_df (before applying the merge)
+                                # This indicates a real merge (consolidation) vs just a rename
+                                # Use pre-computed lookup for efficiency
+                                merged_lookup_key = (
+                                    normalized_merged_gen,
+                                    normalized_merged_sub,
+                                )
+                                merged_exists_before = (
+                                    merged_lookup_key in row_normalized_map
+                                    and len(row_normalized_map[merged_lookup_key]) > 0
+                                )
+
+                                # Check if the merged combo is different from the original (not just renaming to itself)
+                                is_different_combo = (
+                                    normalized_orig_gen != normalized_merged_gen
+                                    or normalized_orig_sub != normalized_merged_sub
+                                )
+
+                                # It's a real consolidation if the merged combo already exists and is different from original
+                                is_real_merge = (
+                                    merged_exists_before and is_different_combo
+                                )
+
                                 # Update the matching rows (without sentiment)
+                                # Use merged values which already have whitespace stripped and preserve original case
                                 reference_df.loc[mask, "General topic"] = merged_general
                                 reference_df.loc[mask, "Subtopic"] = merged_subtopic
                                 num_merges_applied += 1
+
+                                # Track unique combinations for reporting
+                                orig_combo = (normalized_orig_gen, normalized_orig_sub)
+                                merged_combo = (
+                                    normalized_merged_gen,
+                                    normalized_merged_sub,
+                                )
+                                unique_original_combinations.add(orig_combo)
+                                unique_merged_combinations.add(merged_combo)
+
+                                merge_type = (
+                                    "consolidated" if is_real_merge else "renamed"
+                                )
                                 print(
-                                    f"Merged: {original_general} | {original_subtopic} -> {merged_general} | {merged_subtopic}"
+                                    f"Merged ({merge_type}): {original_general} | {original_subtopic} -> {merged_general} | {merged_subtopic}"
+                                )
+                            else:
+                                # Debug: show why merge failed
+                                # Use pre-computed normalized topics from lookup
+                                # Get available topics from pre-computed map for debugging
+                                available_gen_topics = {
+                                    norm_gen
+                                    for (
+                                        norm_gen,
+                                        norm_sub,
+                                    ) in row_normalized_map.keys()
+                                }
+                                available_sub_topics = {
+                                    norm_sub
+                                    for (
+                                        norm_gen,
+                                        norm_sub,
+                                    ) in row_normalized_map.keys()
+                                }
+                                # Check if the normalized general topic exists
+                                gen_exists = normalized_orig_gen in available_gen_topics
+                                sub_exists = normalized_orig_sub in available_sub_topics
+                                print(
+                                    f"Failed to merge: '{original_general}' | '{original_subtopic}' "
+                                    f"(normalized: '{normalized_orig_gen}' | '{normalized_orig_sub}'). "
+                                    f"General topic exists: {gen_exists}, Subtopic exists: {sub_exists}. "
+                                    f"No matching rows found in reference_df."
                                 )
             else:
                 print("No merge suggestions found in LLM response")
         else:
             print("No markdown table found in LLM response")
+
+        if num_merges_applied == 0:
+            print("No duplicate topics found to merge")
+        else:
+            # Report on unique topic combinations affected
+            unique_originals_count = len(unique_original_combinations)
+            unique_merged_count = len(unique_merged_combinations)
+            unique_reduction = unique_originals_count - unique_merged_count
+
+            print(
+                f"Merge summary: {num_merges_applied} merge operation(s) processed, "
+                f"affecting {unique_originals_count} unique original topic combination(s), "
+                f"resulting in {unique_merged_count} unique merged topic combination(s). "
+                f"Net reduction: {unique_reduction} unique topic combination(s)."
+            )
 
     except Exception as e:
         print(f"Error parsing LLM response: {e}")
@@ -1251,7 +1852,31 @@ def deduplicate_topics_llm(
         reference_df["Group"] = most_common_group
 
     # Remake topic_summary_df based on new reference_df
-    topic_summary_df = create_topic_summary_df_from_reference_table(reference_df)
+    topic_summary_df = create_topic_summary_df_from_reference_table(
+        reference_df, sentiment_checkbox=sentiment_checkbox
+    )
+
+    # Normalize topic names in both dataframes to ensure consistent formatting
+    # Use the same normalization function as defined earlier in this function
+    # Apply normalization to topic_summary_df
+    if "General topic" in topic_summary_df.columns:
+        topic_summary_df["General topic"] = topic_summary_df["General topic"].apply(
+            normalize_topic_name_for_llm
+        )
+    if "Subtopic" in topic_summary_df.columns:
+        topic_summary_df["Subtopic"] = topic_summary_df["Subtopic"].apply(
+            normalize_topic_name_for_llm
+        )
+
+    # Apply normalization to reference_df
+    if "General topic" in reference_df.columns:
+        reference_df["General topic"] = reference_df["General topic"].apply(
+            normalize_topic_name_for_llm
+        )
+    if "Subtopic" in reference_df.columns:
+        reference_df["Subtopic"] = reference_df["Subtopic"].apply(
+            normalize_topic_name_for_llm
+        )
 
     if "Topic number" not in reference_df.columns:
 
@@ -1351,6 +1976,22 @@ def deduplicate_topics_llm(
     ) / 1000  # Rough estimate in seconds
 
     print("LLM deduplication task successfully completed")
+
+    # Compare input vs output unique topic combinations
+    if not topic_summary_df.empty:
+        output_unique_topics = topic_summary_df.drop_duplicates(
+            subset=["General topic", "Subtopic"]
+        ).shape[0]
+        print(
+            f"Topic count comparison: Input had {input_unique_topics} unique 'General topic' | 'Subtopic' combinations, "
+            f"Output has {output_unique_topics} unique 'General topic' | 'Subtopic' combinations. "
+            f"Reduction: {input_unique_topics - output_unique_topics} topics merged."
+        )
+    else:
+        print(
+            f"Topic count comparison: Input had {input_unique_topics} unique 'General topic' | 'Subtopic' combinations, "
+            f"Output has 0 unique 'General topic' | 'Subtopic' combinations."
+        )
 
     return (
         reference_df,
@@ -2031,7 +2672,24 @@ def summarise_output_topics(
                 )
             )
 
-            if "Local" in model_source and reasoning_suffix:
+            # Apply reasoning suffix for GPT-OSS models (Local, inference-server, or AWS)
+            is_gpt_oss_model = (
+                "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower()
+            )
+
+            if is_gpt_oss_model:
+                # Use default reasoning suffix if not set
+                effective_reasoning_suffix = (
+                    reasoning_suffix if reasoning_suffix else "Reasoning: low"
+                )
+                if effective_reasoning_suffix:
+                    formatted_summarise_topic_descriptions_system_prompt = (
+                        formatted_summarise_topic_descriptions_system_prompt
+                        + "\n"
+                        + effective_reasoning_suffix
+                    )
+            elif "Local" in model_source and reasoning_suffix:
+                # For other local models, use reasoning_suffix if provided
                 formatted_summarise_topic_descriptions_system_prompt = (
                     formatted_summarise_topic_descriptions_system_prompt
                     + "\n"
@@ -2974,7 +3632,24 @@ def overall_summary(
                 )
             )
 
-            if "Local" in model_source and reasoning_suffix:
+            # Apply reasoning suffix for GPT-OSS models (Local, inference-server, or AWS)
+            is_gpt_oss_model = (
+                "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower()
+            )
+
+            if is_gpt_oss_model:
+                # Use default reasoning suffix if not set
+                effective_reasoning_suffix = (
+                    reasoning_suffix if reasoning_suffix else "Reasoning: low"
+                )
+                if effective_reasoning_suffix:
+                    formatted_summarise_everything_system_prompt = (
+                        formatted_summarise_everything_system_prompt
+                        + "\n"
+                        + effective_reasoning_suffix
+                    )
+            elif "Local" in model_source and reasoning_suffix:
+                # For other local models, use reasoning_suffix if provided
                 formatted_summarise_everything_system_prompt = (
                     formatted_summarise_everything_system_prompt
                     + "\n"

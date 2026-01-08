@@ -923,6 +923,7 @@ with app:
 
         with gr.Accordion("Response sentiment analysis", open=False):
             sentiment_checkbox = gr.Radio(
+                label="Should the model assess the sentiment of responses?",
                 value="Negative or Positive",
                 choices=[
                     "Negative or Positive",
