@@ -586,21 +586,61 @@ def create_topic_summary_df_from_reference_table(
     # Helper function to concatenate summaries
     # This aggregates all unique summaries from rows with the same topic combination
     def aggregate_summaries(x):
-        # Get unique summaries, sorted by their minimum Start row of group
-        unique_summaries = sorted(
-            set(x),
-            key=lambda summary: (
-                reference_df.loc[
-                    reference_df["Summary"] == summary, "Start row of group"
-                ].min()
-                if "Start row of group" in reference_df.columns
-                and not reference_df.loc[
-                    reference_df["Summary"] == summary, "Start row of group"
-                ].empty
-                else 0
-            ),
-        )
-        return "<br>".join(unique_summaries)
+        # First, collect all summary segments (handling both single summaries and already-aggregated summaries)
+        all_segments = []
+
+        for summary in x:
+            if pd.notna(summary):
+                summary_str = str(summary).strip()
+                if summary_str:
+                    # If summary already contains <br> separators, split it into segments
+                    if "<br>" in summary_str or " <br> " in summary_str:
+                        segments = re.split(r"<br>| <br> ", summary_str)
+                        segments = [seg.strip() for seg in segments if seg.strip()]
+                        all_segments.extend(segments)
+                    else:
+                        # Single summary
+                        all_segments.append(summary_str)
+
+        # Remove duplicate segments while preserving order
+        unique_segments = []
+        seen_segments = set()
+        for segment in all_segments:
+            if segment and segment not in seen_segments:
+                seen_segments.add(segment)
+                unique_segments.append(segment)
+
+        # Sort by minimum Start row of group if available (try to match segments to original summaries)
+        if "Start row of group" in reference_df.columns and unique_segments:
+            try:
+                # Create a mapping of segments to their minimum start row
+                segment_to_start_row = {}
+                for segment in unique_segments:
+                    # Find rows where Summary contains this segment
+                    matching_rows = reference_df[
+                        reference_df["Summary"].str.contains(
+                            segment, na=False, regex=False
+                        )
+                    ]
+                    if (
+                        not matching_rows.empty
+                        and "Start row of group" in matching_rows.columns
+                    ):
+                        min_start_row = matching_rows["Start row of group"].min()
+                        segment_to_start_row[segment] = min_start_row
+                    else:
+                        segment_to_start_row[segment] = float("inf")
+
+                # Sort by minimum start row
+                unique_segments = sorted(
+                    unique_segments,
+                    key=lambda seg: segment_to_start_row.get(seg, float("inf")),
+                )
+            except Exception:
+                # If sorting fails, just use the order we have
+                pass
+
+        return "<br>".join(unique_segments) if unique_segments else ""
 
     out_topic_summary_df = (
         reference_df.groupby(groupby_cols)

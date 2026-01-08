@@ -333,8 +333,8 @@ DEDUPLICATION_THRESHOLD = int(
 )  # Deduplication threshold for topic summary tables
 
 ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
-    get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "False")
-)  # Whether to deduplicate topics after each batch during extraction
+    get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "True")
+)  # Whether to deduplicate topics after each batch during extraction. Will use basic deduplication to check for typos in effectively duplicate topic names, and if candidate topics are not provided, will use LLM deduplication to merge similar topics if the current number of topics exceeds the maximum allowed number of topics (MAXIMUM_ALLOWED_TOPICS, or defined in GUI by user)
 
 ###
 # Model options

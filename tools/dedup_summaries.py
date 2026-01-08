@@ -816,6 +816,8 @@ def deduplicate_topics_llm(
         output_files (str, optional): Whether to output files ("True" or "False"). Defaults to "True".
     """
 
+    tic = time.perf_counter()
+
     # Save the parameter value before it gets overwritten
     should_output_files = output_files
     output_files = list()  # This is now the list of output file paths
@@ -1970,13 +1972,6 @@ def deduplicate_topics_llm(
                 except (ValueError, IndexError):
                     pass
 
-    # Calculate estimated time taken (rough estimate based on token usage)
-    estimated_time_taken = (
-        total_input_tokens + total_output_tokens
-    ) / 1000  # Rough estimate in seconds
-
-    print("LLM deduplication task successfully completed")
-
     # Compare input vs output unique topic combinations
     if not topic_summary_df.empty:
         output_unique_topics = topic_summary_df.drop_duplicates(
@@ -1992,6 +1987,12 @@ def deduplicate_topics_llm(
             f"Topic count comparison: Input had {input_unique_topics} unique 'General topic' | 'Subtopic' combinations, "
             f"Output has 0 unique 'General topic' | 'Subtopic' combinations."
         )
+
+    # Calculate estimated time taken (rough estimate based on token usage)
+    toc = time.perf_counter()
+    estimated_time_taken = toc - tic
+
+    print("LLM deduplication task successfully completed")
 
     return (
         reference_df,
@@ -2071,7 +2072,27 @@ def sample_reference_table_summaries(
                 sampled_reference_table_df["Sentiment"] != "Not Mentioned"
             ]
         else:
-            # FIXED: Preserve Group column in aggregation to maintain group-specific summaries
+            # Deduplicate summaries within each group before joining to prevent repeated summaries
+            def join_unique_summaries(x):
+                """Join unique summaries, handling both formats with and without ': ' prefix."""
+                unique_summaries = []
+                seen = set()
+                for s in x:
+                    if pd.notna(s):  # Skip NaN values
+                        # Convert to string and strip whitespace
+                        s_str = str(s).strip()
+                        if s_str:  # Skip empty strings
+                            # Handle summaries with ": " prefix
+                            if ": " in s_str:
+                                summary_text = s_str.split(": ", 1)[1].strip()
+                            else:
+                                summary_text = s_str
+                            # Only add if we haven't seen this exact summary text before
+                            if summary_text and summary_text not in seen:
+                                unique_summaries.append(summary_text)
+                                seen.add(summary_text)
+                return "\n".join(unique_summaries)
+
             sampled_reference_table_df = (
                 all_summaries.groupby(
                     ["General topic", "Subtopic", "Sentiment", "Group"]
@@ -2079,9 +2100,7 @@ def sample_reference_table_summaries(
                 .agg(
                     {
                         "Response References": "size",  # Count the number of references
-                        "Summary": lambda x: "\n".join(
-                            [s.split(": ", 1)[1] for s in x if ": " in s]
-                        ),  # Join substrings after ': '
+                        "Summary": join_unique_summaries,  # Join unique summaries only
                     }
                 )
                 .reset_index()
@@ -2128,6 +2147,58 @@ def count_tokens_in_text(text: str, tokenizer=None, model_source: str = "Local")
         # Fallback: rough estimation using word count
         word_count = len(text.split())
         return int(word_count * 1.3)
+
+
+def clean_markdown_table_whitespace(markdown_text: str) -> str:
+    """
+    Remove extraneous whitespace from markdown table cells.
+
+    This function normalizes whitespace within table cells by:
+    - Trimming leading/trailing whitespace from each cell
+    - Replacing multiple consecutive spaces with a single space
+    - Preserving the table structure (pipes, dashes, alignment)
+
+    Args:
+        markdown_text (str): The markdown table text to clean
+
+    Returns:
+        str: The cleaned markdown table with normalized whitespace in cells
+    """
+    if not markdown_text:
+        return markdown_text
+
+    lines = markdown_text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        # Skip separator lines (lines with dashes and pipes)
+        if re.match(r"^\s*\|[\s\-:]+", line):
+            cleaned_lines.append(line)
+            continue
+
+        # Process data rows
+        if "|" in line:
+            # Split by pipe, but preserve the structure
+            parts = line.split("|")
+            cleaned_parts = []
+
+            for i, part in enumerate(parts):
+                # First and last parts are usually empty (before/after outer pipes)
+                if i == 0 or i == len(parts) - 1:
+                    cleaned_parts.append(part)
+                else:
+                    # Clean the cell content: trim and normalize whitespace
+                    cleaned = part.strip()
+                    # Replace multiple spaces with single space
+                    cleaned = re.sub(r"\s+", " ", cleaned)
+                    cleaned_parts.append(cleaned)
+
+            cleaned_lines.append("|".join(cleaned_parts))
+        else:
+            # Non-table lines pass through unchanged
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
 
 
 def summarise_output_topics_query(
@@ -2221,7 +2292,7 @@ def summarise_output_topics_query(
         response_text,
     ) = process_requests(
         formatted_summary_prompt,
-        system_prompt,
+        summarise_topic_descriptions_system_prompt,
         conversation_history,
         whole_conversation,
         whole_conversation_metadata,
@@ -2810,13 +2881,35 @@ def summarise_output_topics(
             if pd.isna(text):
                 return text
             # Remove "Rows X to Y:" prefix if present (both at start and after <br> tags)
-            import re
-
             # First remove from the beginning
             cleaned = re.sub(r"^Rows\s+\d+\s+to\s+\d+:\s*", "", str(text))
             # Then remove from after <br> tags
             cleaned = re.sub(r"<br>\s*Rows\s+\d+\s+to\s+\d+:\s*", "<br>", cleaned)
             return cleaned
+
+        def deduplicate_summary_text(text):
+            """Remove duplicate summary segments separated by <br> or newlines."""
+            if pd.isna(text):
+                return text
+            text_str = str(text)
+            # Split by <br> tags and newlines
+            segments = re.split(r"<br>|\n", text_str)
+            # Remove empty segments and strip whitespace
+            segments = [s.strip() for s in segments if s.strip()]
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_segments = []
+            for segment in segments:
+                if segment not in seen:
+                    seen.add(segment)
+                    unique_segments.append(segment)
+            # Join back with <br> (preserving original format)
+            return "<br>".join(unique_segments) if unique_segments else text_str
+
+        # Deduplicate the original Summary before using combine_first
+        topic_summary_df_revised["Summary"] = topic_summary_df_revised["Summary"].apply(
+            deduplicate_summary_text
+        )
 
         topic_summary_df_revised["Revised summary"] = topic_summary_df_revised[
             "Revised summary"
@@ -2870,6 +2963,11 @@ def summarise_output_topics(
                     on=["General topic", "Subtopic", "Sentiment", "Group"],
                     how="left",
                 )
+
+        # Deduplicate the original Summary before using combine_first to prevent repeated summaries
+        reference_table_df_revised["Summary"] = reference_table_df_revised[
+            "Summary"
+        ].apply(deduplicate_summary_text)
 
         reference_table_df_revised["Revised summary"] = reference_table_df_revised[
             "Revised summary"
@@ -3739,6 +3837,9 @@ def overall_summary(
             if len(group_df) > 0:
                 # Start with all rows and check if they fit
                 current_summary_text = group_df.to_markdown(index=False)
+                current_summary_text = clean_markdown_table_whitespace(
+                    current_summary_text
+                )
                 current_token_count = count_tokens_in_text(
                     current_summary_text, tokenizer, model_source
                 )
@@ -3762,6 +3863,7 @@ def overall_summary(
                         mid_rows = (min_rows + max_rows + 1) // 2
                         test_df = group_df.iloc[:mid_rows]
                         test_summary = test_df.to_markdown(index=False)
+                        test_summary = clean_markdown_table_whitespace(test_summary)
                         test_token_count = count_tokens_in_text(
                             test_summary, tokenizer, model_source
                         )
@@ -3781,6 +3883,8 @@ def overall_summary(
 
             # Create summary_text from (possibly truncated) DataFrame
             summary_text = group_df.to_markdown(index=False)
+            # Clean extraneous whitespace from markdown table cells
+            summary_text = clean_markdown_table_whitespace(summary_text)
 
             formatted_summary_prompt = [
                 summarise_everything_prompt.format(

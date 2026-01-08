@@ -320,6 +320,7 @@ def validate_topics(
     aws_secret_key_textbox: str = "",
     aws_region_textbox: str = "",
     api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -951,13 +952,13 @@ def validate_topics(
                     f"Warning: Deduplication failed after validation batch {validation_latest_batch_completed}: {str(e)}. Continuing with original topics."
                 )
 
-            # Check if number of topics exceeds MAXIMUM_ALLOWED_TOPICS and use LLM deduplication if needed
+            # Check if number of topics exceeds max_topics_number and use LLM deduplication if needed
             topics_after_dedup = validation_topic_summary_df.drop_duplicates(
                 subset=["General topic", "Subtopic"]
             ).shape[0]
-            if topics_after_dedup > MAXIMUM_ALLOWED_TOPICS:
+            if topics_after_dedup > max_topics_number:
                 print(
-                    f"Number of topics ({topics_after_dedup}) exceeds MAXIMUM_ALLOWED_TOPICS ({MAXIMUM_ALLOWED_TOPICS}). "
+                    f"Number of topics ({topics_after_dedup}) exceeds max_topics_number ({max_topics_number}). "
                     f"Using LLM-based deduplication after validation batch {validation_latest_batch_completed}..."
                 )
                 try:
@@ -1165,6 +1166,7 @@ def validate_topics_wrapper(
     aws_secret_key_textbox: str = "",
     aws_region_textbox: str = "",
     api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -1365,6 +1367,7 @@ def validate_topics_wrapper(
                 aws_secret_key_textbox=aws_secret_key_textbox,
                 aws_region_textbox=aws_region_textbox,
                 api_url=api_url,
+                max_topics_number=max_topics_number,
             )
 
             # Accumulate results
@@ -2709,12 +2712,39 @@ def write_llm_output_and_logs(
     # Get count of rows that refer to particular topics
     # Only do this if out_reference_df is not empty and has the required columns
     if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+        # Helper function to join unique summaries, preventing duplicates
+        def join_unique_summaries(x):
+            """Join unique summaries, handling both formats with and without '<br>' separators."""
+            unique_summaries = []
+            seen = set()
+            for s in x:
+                if pd.notna(s):  # Skip NaN values
+                    # Convert to string and strip whitespace
+                    s_str = str(s).strip()
+                    if s_str:  # Skip empty strings
+                        # If summary already contains <br> separators, split and deduplicate segments
+                        if "<br>" in s_str or " <br> " in s_str:
+                            # Split by <br> tags
+                            segments = re.split(r"<br>| <br> ", s_str)
+                            segments = [seg.strip() for seg in segments if seg.strip()]
+                            # Add unique segments
+                            for segment in segments:
+                                if segment and segment not in seen:
+                                    seen.add(segment)
+                                    unique_summaries.append(segment)
+                        else:
+                            # Single summary, add if not seen
+                            if s_str not in seen:
+                                seen.add(s_str)
+                                unique_summaries.append(s_str)
+            return " <br> ".join(unique_summaries) if unique_summaries else ""
+
         reference_counts = (
             out_reference_df.groupby(["General topic", "Subtopic", "Sentiment"])
             .agg(
                 {
                     "Response References": "size",  # Count the number of references
-                    "Summary": " <br> ".join,
+                    "Summary": join_unique_summaries,  # Join unique summaries only
                 }
             )
             .reset_index()
@@ -3142,6 +3172,7 @@ def extract_topics(
     additional_instructions_summary_format: str = "",
     additional_validation_issues_provided: str = "",
     api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -3547,6 +3578,7 @@ def extract_topics(
                             zero_shot_topics,
                             force_zero_shot_radio,
                             create_revised_general_topics,
+                            max_topic_no=max_topics_number,
                         )
 
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
@@ -4142,13 +4174,13 @@ def extract_topics(
                         f"Warning: Deduplication failed after batch {latest_batch_completed}: {str(e)}. Continuing with original topics."
                     )
 
-                # Check if number of topics exceeds MAXIMUM_ALLOWED_TOPICS and use LLM deduplication if needed
+                # Check if number of topics exceeds max_topics_number and use LLM deduplication if needed
                 topics_after_dedup = existing_topic_summary_df.drop_duplicates(
                     subset=["General topic", "Subtopic"]
                 ).shape[0]
-                if topics_after_dedup > MAXIMUM_ALLOWED_TOPICS:
+                if topics_after_dedup > max_topics_number:
                     print(
-                        f"Number of topics ({topics_after_dedup}) exceeds MAXIMUM_ALLOWED_TOPICS ({MAXIMUM_ALLOWED_TOPICS}). "
+                        f"Number of topics ({topics_after_dedup}) exceeds max_topics_number ({max_topics_number}). "
                         f"Using LLM-based deduplication after batch {latest_batch_completed}..."
                     )
                     try:
@@ -4330,6 +4362,7 @@ def extract_topics(
                 sentiment_checkbox=sentiment_checkbox,
                 logged_content=group_combined_logged_content,
                 api_url=api_url,
+                max_topics_number=max_topics_number,
             )
 
             # Add validation conversation metadata to the main conversation metadata
@@ -4590,6 +4623,7 @@ def wrapper_extract_topics_per_column_value(
     tokenizer: object = None,
     assistant_model: object = None,
     max_rows: int = max_rows,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=Progress(track_tqdm=True),  # type: ignore
 ) -> Tuple:  # Mimicking the return tuple structure of extract_topics
     """
@@ -4855,6 +4889,7 @@ def wrapper_extract_topics_per_column_value(
                 additional_instructions_summary_format=additional_instructions_summary_format,
                 additional_validation_issues_provided=additional_validation_issues_provided,
                 api_url=api_url,
+                max_topics_number=max_topics_number,
                 progress=progress,
             )
 
@@ -5449,6 +5484,7 @@ def all_in_one_pipeline(
     tokenizer: object = None,
     assistant_model: object = None,
     max_rows: int = max_rows,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -5619,6 +5655,7 @@ def all_in_one_pipeline(
         additional_validation_issues_provided=additional_validation_issues_provided,
         show_previous_table=show_previous_table,
         api_url=api_url,
+        max_topics_number=max_topics_number,
     )
 
     total_input_tokens += out_input_tokens

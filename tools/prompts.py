@@ -21,7 +21,7 @@ initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
 In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty.
 {sentiment_choices}{response_reference_format}
-In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
+In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Response table: 
@@ -46,7 +46,7 @@ force_single_topic_prompt = """ Assign each response to one single topic only.""
 add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
 {sentiment_choices}{response_reference_format}
-In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
+In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Choose from among the following topic names to assign to the responses, only if they are directly relevant to responses from the response table below: 
@@ -132,9 +132,9 @@ summary_assistant_prefill = ""
 summarise_topic_descriptions_system_prompt = system_prompt
 
 summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}
+Return only the summary and no other text. Do not mention specific response numbers in the summary.
 
-Return only the summary and no other text:
-
+Text to summarise:
 {summaries}
 
 Summary:"""
@@ -149,11 +149,11 @@ two_para_summary_format_prompt = "Return a summary up to two paragraphs long tha
 
 summarise_everything_system_prompt = system_prompt
 
-summarise_everything_prompt = """Below is a table that gives an overview of the main topics from a dataset of open text responses along with a description of each topic, and the number of responses that mentioned each topic:
+summarise_everything_prompt = """Below is a table that gives an overview of the main topics from a dataset of open text responses along with a summary of each topic, and the number of responses that mentioned each topic:
 
-'{topic_summary_table}'
+{topic_summary_table}
 
-Your task is to summarise the above table. {summary_format}. Return only the summary and no other text.
+Your task is to summarise the above table. {summary_format} Return only the summary and no other text.
 
 Summary:"""
 

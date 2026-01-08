@@ -1638,19 +1638,46 @@ def send_request(
     if isinstance(response, ResponseObject):
         response_text = response.text
     elif "choices" in response:  # LLama.cpp model response or inference-server response
-        if "gpt-oss" in model_choice:
-            response_text = response["choices"][0]["message"]["content"].split(
-                "<|start|>assistant<|channel|>final<|message|>"
-            )[1]
+        # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
+        if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
+            content = response["choices"][0]["message"]["content"]
+            # Split on the final channel marker to extract only the final output (not thinking tokens)
+            parts = content.split("<|start|>assistant<|channel|>final<|message|>")
+            if len(parts) > 1:
+                response_text = parts[1]
+            # Following format may be from llama.cpp inference-server response
+            elif len(parts) == 1:
+                parts = content.split("<|end|>")
+                if len(parts) > 1:
+                    response_text = parts[1]
+                else:
+                    print(
+                        "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
+                    )
+                    response_text = content
+            else:
+                # Fallback: if marker not found, use the full content (may include thinking tokens)
+                print(
+                    "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
+                )
+                response_text = content
         else:
             response_text = response["choices"][0]["message"]["content"]
     elif model_source == "Gemini":
         response_text = response.text
     else:  # Assume transformers model response
-        if "gpt-oss" in model_choice:
-            response_text = response.split(
-                "<|start|>assistant<|channel|>final<|message|>"
-            )[1]
+        # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
+        if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
+            # Split on the final channel marker to extract only the final output (not thinking tokens)
+            parts = response.split("<|start|>assistant<|channel|>final<|message|>")
+            if len(parts) > 1:
+                response_text = parts[1]
+            else:
+                # Fallback: if marker not found, use the full content (may include thinking tokens)
+                print(
+                    "Warning: Could not find final channel marker in GPT-OSS response. Using full content."
+                )
+                response_text = response
         else:
             response_text = response
 

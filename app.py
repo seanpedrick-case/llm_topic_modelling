@@ -7,7 +7,6 @@ import pandas as pd
 from tools.auth import authenticate_user
 from tools.aws_functions import (
     download_cost_codes_with_error_handling,
-    download_file_from_s3,
     export_outputs_to_s3,
     upload_file_to_s3,
 )
@@ -84,6 +83,7 @@ from tools.config import (
     LOG_FILE_NAME,
     MAX_FILE_SIZE,
     MAX_QUEUE_SIZE,
+    MAXIMUM_ALLOWED_TOPICS,
     MPLCONFIGDIR,
     OUTPUT_COST_CODES_PATH,
     OUTPUT_DEBUG_FILES,
@@ -120,7 +120,6 @@ from tools.config import (
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.dedup_summaries import (
     deduplicate_topics,
-    deduplicate_topics_llm,
     overall_summary,
     wrapper_summarise_output_topics_per_group,
 )
@@ -136,7 +135,6 @@ from tools.helper_functions import (
     empty_output_vars_extract_topics,
     empty_output_vars_summarise,
     enforce_cost_codes,
-    ensure_model_in_map,
     get_connection_params,
     join_cols_onto_reference_df,
     load_in_data_file,
@@ -1271,7 +1269,15 @@ with app:
                     precision=1,
                     step=0.1,
                 )
+            with gr.Row(equal_height=True):
                 batch_size_number.render()
+                max_topics_number = gr.Number(
+                    value=MAXIMUM_ALLOWED_TOPICS,
+                    label="Maximum number of topics allowed. If exceeded, the LLM will make efforts to deduplicate topics after every batch until the total number of topics is below this number (not foolproof).",
+                    precision=0,
+                    minimum=1,
+                    maximum=1000,
+                )
             random_seed = gr.Number(
                 value=LLM_SEED, label="Random seed for LLM generation", visible="hidden"
             )
@@ -1536,6 +1542,7 @@ with app:
             additional_validation_issues_textbox,
             show_previous_table_radio,
             api_url_textbox,
+            max_topics_number,
         ],
         outputs=[
             display_topic_table_markdown,
@@ -1679,6 +1686,7 @@ with app:
             aws_secret_key_textbox,
             aws_region_textbox,
             api_url_textbox,
+            max_topics_number,
         ],
         outputs=[
             display_topic_table_markdown,
