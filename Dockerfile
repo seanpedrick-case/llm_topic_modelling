@@ -77,7 +77,7 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     SYSTEM=spaces
 
 # Copy Python packages from the builder stage
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Copy your application code and entrypoint
