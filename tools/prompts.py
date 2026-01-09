@@ -21,7 +21,7 @@ initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
 In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty.
 {sentiment_choices}{response_reference_format}
-In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
+In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Response table: 
@@ -46,7 +46,7 @@ force_single_topic_prompt = """ Assign each response to one single topic only.""
 add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
 {sentiment_choices}{response_reference_format}
-In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear. {add_existing_topics_summary_format}
+In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
 Choose from among the following topic names to assign to the responses, only if they are directly relevant to responses from the response table below: 
@@ -132,9 +132,9 @@ summary_assistant_prefill = ""
 summarise_topic_descriptions_system_prompt = system_prompt
 
 summarise_topic_descriptions_prompt = """Your task is to make a consolidated summary of the text below. {summary_format}
+Return only the summary and no other text. Do not mention specific response numbers in the summary.
 
-Return only the summary and no other text:
-
+Text to summarise:
 {summaries}
 
 Summary:"""
@@ -149,11 +149,11 @@ two_para_summary_format_prompt = "Return a summary up to two paragraphs long tha
 
 summarise_everything_system_prompt = system_prompt
 
-summarise_everything_prompt = """Below is a table that gives an overview of the main topics from a dataset of open text responses along with a description of each topic, and the number of responses that mentioned each topic:
+summarise_everything_prompt = """Below is a table that gives an overview of the main topics from a dataset of open text responses along with a summary of each topic, and the number of responses that mentioned each topic:
 
-'{topic_summary_table}'
+{topic_summary_table}
 
-Your task is to summarise the above table. {summary_format}. Return only the summary and no other text.
+Your task is to summarise the above table. {summary_format} Return only the summary and no other text.
 
 Summary:"""
 
@@ -172,46 +172,58 @@ excel_plain_text_format_prompt = "Return a comprehensive summary that covers all
 
 llm_deduplication_system_prompt = """You are an expert at analysing and consolidating topic categories. Your task is to identify semantically similar topics that should be merged together, even if they use different wording or synonyms."""
 
-llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and should be merged together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}.
+llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and CONSOLIDATE multiple different topics into the SAME merged topic names. The goal is to REDUCE the total number of unique topics by merging similar ones together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}.
 
-Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
-- "Transportation issues" and "Public transport problems" 
-- "Housing costs" and "Rent prices"
-- "Environmental concerns" and "Green issues"
+IMPORTANT: You must CONSOLIDATE multiple different topics into the same merged topic names. For example, if you have:
+- "Transportation issues" 
+- "Public transport problems"
+- "Bus and train delays"
+
+These should ALL be merged to the SAME merged topic (e.g., "Transportation | Public Transport Issues"), not just renamed individually. The goal is to reduce the number of unique topics by grouping similar ones together.
+
+Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. When you find similar topics, merge ALL of them to the SAME merged topic name. For example:
+- Multiple topics like "Housing costs", "Rent prices", and "Accommodation expenses" should all merge to the SAME merged topic (e.g., "Housing | Costs")
+- Multiple topics like "Environmental concerns" and "Green issues" should merge to the SAME merged topic (e.g., "Environment | Concerns")
 
 Create a markdown table with the following columns:
 1. 'Original General topic' - The current general topic name
 2. 'Original Subtopic' - The current subtopic name{sentiment_columns}
-3. 'Merged General topic' - The consolidated general topic name (use the most descriptive)
-4. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive){merged_sentiment_columns}
+3. 'Merged General topic' - The consolidated general topic name (use the most descriptive, and ensure multiple similar topics map to the SAME merged name)
+4. 'Merged Subtopic' - The consolidated subtopic name (use the most descriptive, and ensure multiple similar topics map to the SAME merged name){merged_sentiment_columns}
 5. 'Merge Reason' - Brief explanation of why these topics should be merged
 
-Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
+CRITICAL: Multiple different original topics that are similar should map to the SAME merged topic combination. Do not just rename topics individually - consolidate them. Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
 
 Topics to analyse:
 {topics_table}
 
 Merged topics table:"""
 
-llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and should be merged together, even if they use different wording.
+llm_deduplication_prompt_with_candidates = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and CONSOLIDATE multiple different topics into the SAME merged topic names. The goal is to REDUCE the total number of unique topics by merging similar ones together, even if they use different wording.
 
 Additionally, you have been provided with a list of candidate topics that represent preferred topic categories. When merging topics, prioritise fitting similar topics into these existing candidate categories rather than creating new ones. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}.
 
-Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. For example:
-- "Transportation issues" and "Public transport problems" 
-- "Housing costs" and "Rent prices"
-- "Environmental concerns" and "Green issues"
+IMPORTANT: You must CONSOLIDATE multiple different topics into the same merged topic names. For example, if you have:
+- "Transportation issues" 
+- "Public transport problems"
+- "Bus and train delays"
 
-When merging topics, consider the candidate topics provided below and try to map similar topics to these preferred categories when possible.
+These should ALL be merged to the SAME merged topic (preferably matching a candidate topic if available), not just renamed individually. The goal is to reduce the number of unique topics by grouping similar ones together.
+
+Analyse the following topics table and identify groups of topics that describe essentially the same concept but may use different words or phrases. When you find similar topics, merge ALL of them to the SAME merged topic name. For example:
+- Multiple topics like "Housing costs", "Rent prices", and "Accommodation expenses" should all merge to the SAME merged topic (preferably matching a candidate topic)
+- Multiple topics like "Environmental concerns" and "Green issues" should merge to the SAME merged topic (preferably matching a candidate topic)
+
+When merging topics, consider the candidate topics provided below and try to map similar topics to these preferred categories when possible. Multiple similar original topics should map to the SAME candidate topic.
 
 Create a markdown table with the following columns:
 1. 'Original General topic' - The current general topic name
 2. 'Original Subtopic' - The current subtopic name{sentiment_columns}
-3. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar)
-4. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar){merged_sentiment_columns}
+3. 'Merged General topic' - The consolidated general topic name (prefer candidate topics when similar, and ensure multiple similar topics map to the SAME merged name)
+4. 'Merged Subtopic' - The consolidated subtopic name (prefer candidate topics when similar, and ensure multiple similar topics map to the SAME merged name){merged_sentiment_columns}
 5. 'Merge Reason' - Brief explanation of why these topics should be merged
 
-Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
+CRITICAL: Multiple different original topics that are similar should map to the SAME merged topic combination. Do not just rename topics individually - consolidate them. Only include rows where topics should actually be merged. If a topic has no semantic duplicates, do not include it in the table. Produce only a markdown table in the format described above. Do not add any other text to your response.
 
 Topics to analyse:
 {topics_table}

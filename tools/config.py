@@ -321,8 +321,8 @@ MAX_GROUPS = int(
 BATCH_SIZE_DEFAULT = int(
     get_or_create_env_var("BATCH_SIZE_DEFAULT", "5")
 )  # Default batch size for LLM calls
-MAXIMUM_ZERO_SHOT_TOPICS = int(
-    get_or_create_env_var("MAXIMUM_ZERO_SHOT_TOPICS", "100")
+MAXIMUM_ALLOWED_TOPICS = int(
+    get_or_create_env_var("MAXIMUM_ALLOWED_TOPICS", "100")
 )  # Maximum number of zero shot topics to process
 MAX_SPACES_GPU_RUN_TIME = int(
     get_or_create_env_var("MAX_SPACES_GPU_RUN_TIME", "240")
@@ -333,8 +333,8 @@ DEDUPLICATION_THRESHOLD = int(
 )  # Deduplication threshold for topic summary tables
 
 ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
-    get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "False")
-)  # Whether to deduplicate topics after each batch during extraction
+    get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "True")
+)  # Whether to deduplicate topics after each batch during extraction. Will use basic deduplication to check for typos in effectively duplicate topic names, and if candidate topics are not provided, will use LLM deduplication to merge similar topics if the current number of topics exceeds the maximum allowed number of topics (MAXIMUM_ALLOWED_TOPICS, or defined in GUI by user)
 
 ###
 # Model options

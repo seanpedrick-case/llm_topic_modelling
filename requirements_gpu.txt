@@ -1,4 +1,4 @@
-gradio==6.2.0
+gradio==6.0.2
 transformers==4.57.2
 spaces==0.42.1
 boto3>=1.42.1

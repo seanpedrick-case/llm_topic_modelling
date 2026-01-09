@@ -30,7 +30,7 @@ from tools.config import (
     MAX_ROWS,
     MAX_SPACES_GPU_RUN_TIME,
     MAX_TIME_FOR_LOOP,
-    MAXIMUM_ZERO_SHOT_TOPICS,
+    MAXIMUM_ALLOWED_TOPICS,
     NUMBER_OF_RETRY_ATTEMPTS,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
@@ -55,6 +55,7 @@ from tools.helper_functions import (
     get_basic_response_data,
     load_in_data_file,
     load_in_previous_data_files,
+    normalize_topic_name_for_llm,
     put_columns_in_df,
     read_file,
     wrap_text,
@@ -101,7 +102,7 @@ max_comment_character_length = MAX_COMMENT_CHARS
 random_seed = LLM_SEED
 reasoning_suffix = REASONING_SUFFIX
 max_rows = MAX_ROWS
-maximum_zero_shot_topics = MAXIMUM_ZERO_SHOT_TOPICS
+maximum_allowed_topics = MAXIMUM_ALLOWED_TOPICS
 output_debug_files = OUTPUT_DEBUG_FILES
 
 max_text_length = 500
@@ -319,6 +320,7 @@ def validate_topics(
     aws_secret_key_textbox: str = "",
     aws_region_textbox: str = "",
     api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -426,6 +428,23 @@ def validate_topics(
     validation_reference_df = reference_df.copy()
     validation_topic_summary_df = topic_summary_df.copy()
 
+    # Clean topic names in initial dataframes to ensure consistent formatting throughout processing
+    for col_name in ["General topic", "Subtopic"]:
+        if (
+            col_name in validation_reference_df.columns
+            and not validation_reference_df[col_name].isnull().all()
+        ):
+            validation_reference_df[col_name] = validation_reference_df[col_name].apply(
+                normalize_topic_name_for_llm
+            )
+        if (
+            col_name in validation_topic_summary_df.columns
+            and not validation_topic_summary_df[col_name].isnull().all()
+        ):
+            validation_topic_summary_df[col_name] = validation_topic_summary_df[
+                col_name
+            ].apply(normalize_topic_name_for_llm)
+
     sentiment_prefix = "In the next column named 'Sentiment', "
     sentiment_suffix = "."
     if sentiment_checkbox == "Negative, Neutral, or Positive":
@@ -519,7 +538,7 @@ def validate_topics(
             # Use the accumulated topic summary from previous validation batches (or initial if first batch)
             validation_existing_topic_summary_df = validation_topic_summary_df.copy()
             validation_existing_topic_summary_df["Number of responses"] = ""
-            validation_existing_topic_summary_df.fillna("", inplace=True)
+            # validation_existing_topic_summary_df.fillna("", inplace=True)
             validation_existing_topic_summary_df["General topic"] = (
                 validation_existing_topic_summary_df["General topic"].str.replace(
                     "(?i)^Nan$", "", regex=True
@@ -577,6 +596,32 @@ def validate_topics(
                             columns={"Subtopic": "Subheading"}
                         )
                     )
+
+            # Clean topic names before converting to markdown to ensure consistent formatting
+            if "General topic" in validation_topics_df_for_markdown.columns:
+                validation_topics_df_for_markdown["General topic"] = (
+                    validation_topics_df_for_markdown["General topic"].apply(
+                        normalize_topic_name_for_llm
+                    )
+                )
+            if "Subtopic" in validation_topics_df_for_markdown.columns:
+                validation_topics_df_for_markdown["Subtopic"] = (
+                    validation_topics_df_for_markdown["Subtopic"].apply(
+                        normalize_topic_name_for_llm
+                    )
+                )
+            if "Main heading" in validation_topics_df_for_markdown.columns:
+                validation_topics_df_for_markdown["Main heading"] = (
+                    validation_topics_df_for_markdown["Main heading"].apply(
+                        normalize_topic_name_for_llm
+                    )
+                )
+            if "Subheading" in validation_topics_df_for_markdown.columns:
+                validation_topics_df_for_markdown["Subheading"] = (
+                    validation_topics_df_for_markdown["Subheading"].apply(
+                        normalize_topic_name_for_llm
+                    )
+                )
 
             validation_unique_topics_markdown = (
                 validation_topics_df_for_markdown.to_markdown(index=False)
@@ -768,25 +813,14 @@ def validate_topics(
                         [validation_reference_df, validation_new_reference_df]
                     ).dropna(how="all")
 
-            # For topic summary, we need to merge/concatenate carefully to avoid duplicates
-            if not validation_new_topic_summary_df.empty:
-                # Check if the new topic_summary_df is the same as the existing one (indicating "no change" response)
-                if validation_new_topic_summary_df.equals(validation_topic_summary_df):
-                    print(
-                        "Validation new topic summary df is identical to existing df (no change response), skipping concatenation"
+            # Rebuild topic_summary_df from accumulated reference_df to ensure consistency
+            # This properly aggregates response counts and handles all dimensions (General topic, Subtopic, Sentiment, Group)
+            if not validation_reference_df.empty:
+                validation_topic_summary_df = (
+                    create_topic_summary_df_from_reference_table(
+                        validation_reference_df, sentiment_checkbox=sentiment_checkbox
                     )
-                else:
-                    # Remove duplicates and concatenate
-                    validation_topic_summary_df = (
-                        pd.concat(
-                            [
-                                validation_topic_summary_df,
-                                validation_new_topic_summary_df,
-                            ]
-                        )
-                        .drop_duplicates(["General topic", "Subtopic", "Sentiment"])
-                        .dropna(how="all")
-                    )
+                )
 
         else:
             print(
@@ -837,10 +871,27 @@ def validate_topics(
                 validation_num_batches = (len(file_data) + batch_size - 1) // batch_size
                 validation_data_file_names_textbox = file_name
 
+            # Clean General topic and Subtopic columns using the same process as zero-shot topics
+            for col_name in ["General topic", "Subtopic"]:
+                for df in [validation_reference_df, validation_topic_summary_df]:
+                    if col_name in df.columns and not df[col_name].isnull().all():
+                        df[col_name] = df[col_name].apply(normalize_topic_name_for_llm)
+
             try:
                 topics_before = validation_topic_summary_df.drop_duplicates(
                     subset=["General topic", "Subtopic"]
                 ).shape[0]
+                # Check Group values before deduplication for better diagnostics
+                input_groups_before = (
+                    validation_topic_summary_df["Group"].nunique()
+                    if "Group" in validation_topic_summary_df.columns
+                    else 0
+                )
+                input_ref_groups_before = (
+                    validation_reference_df["Group"].nunique()
+                    if "Group" in validation_reference_df.columns
+                    else 0
+                )
                 # Call deduplicate_topics function
                 (
                     validation_reference_df,
@@ -855,8 +906,8 @@ def validate_topics(
                     unique_topics_table_file_name=unique_topics_table_file_name,
                     in_excel_sheets="",  # in_excel_sheets not available in validate_topics
                     merge_sentiment="No",
-                    merge_general_topics="Yes",
-                    score_threshold=DEDUPLICATION_THRESHOLD,
+                    merge_general_topics="No",
+                    score_threshold=95,
                     in_data_files=in_data_files_for_dedup,
                     chosen_cols=(
                         chosen_cols
@@ -872,6 +923,17 @@ def validate_topics(
                 topics_after = validation_topic_summary_df.drop_duplicates(
                     subset=["General topic", "Subtopic"]
                 ).shape[0]
+                # Check Group values after deduplication
+                output_groups_after = (
+                    validation_topic_summary_df["Group"].nunique()
+                    if "Group" in validation_topic_summary_df.columns
+                    else 0
+                )
+                output_ref_groups_after = (
+                    validation_reference_df["Group"].nunique()
+                    if "Group" in validation_reference_df.columns
+                    else 0
+                )
                 print(
                     f"Topics deduplicated successfully after validation batch {validation_latest_batch_completed}. "
                     f"Topics before: {topics_before}, Topics after: {topics_after}"
@@ -879,21 +941,24 @@ def validate_topics(
                 if topics_after > topics_before:
                     print(
                         f"WARNING: Number of topics increased from {topics_before} to {topics_after}. "
-                        f"This may be due to Group column differences. "
-                        f"Input had {validation_topic_summary_df['Group'].nunique() if 'Group' in validation_topic_summary_df.columns else 0} unique Group values."
+                        f"This may be due to Group column differences or new topic combinations created during deduplication. "
+                        f"Input topic_summary_df had {input_groups_before} unique Group values, "
+                        f"Input reference_df had {input_ref_groups_before} unique Group values. "
+                        f"Output topic_summary_df has {output_groups_after} unique Group values, "
+                        f"Output reference_df has {output_ref_groups_after} unique Group values."
                     )
             except Exception as e:
                 print(
                     f"Warning: Deduplication failed after validation batch {validation_latest_batch_completed}: {str(e)}. Continuing with original topics."
                 )
 
-            # Check if number of topics exceeds MAXIMUM_ZERO_SHOT_TOPICS and use LLM deduplication if needed
+            # Check if number of topics exceeds max_topics_number and use LLM deduplication if needed
             topics_after_dedup = validation_topic_summary_df.drop_duplicates(
                 subset=["General topic", "Subtopic"]
             ).shape[0]
-            if topics_after_dedup > MAXIMUM_ZERO_SHOT_TOPICS:
+            if topics_after_dedup > max_topics_number:
                 print(
-                    f"Number of topics ({topics_after_dedup}) exceeds MAXIMUM_ZERO_SHOT_TOPICS ({MAXIMUM_ZERO_SHOT_TOPICS}). "
+                    f"Number of topics ({topics_after_dedup}) exceeds max_topics_number ({max_topics_number}). "
                     f"Using LLM-based deduplication after validation batch {validation_latest_batch_completed}..."
                 )
                 try:
@@ -960,6 +1025,16 @@ def validate_topics(
                         output_files="False",
                         sentiment_checkbox=sentiment_checkbox,
                     )
+                    # Rebuild topic_summary_df from updated reference_df to ensure consistency
+                    # This ensures the topic count reflects the actual merged state
+                    if not validation_reference_df.empty:
+                        validation_topic_summary_df = (
+                            create_topic_summary_df_from_reference_table(
+                                validation_reference_df,
+                                sentiment_checkbox=sentiment_checkbox,
+                            )
+                        )
+
                     topics_after_llm_dedup = (
                         validation_topic_summary_df.drop_duplicates(
                             subset=["General topic", "Subtopic"]
@@ -1010,7 +1085,7 @@ def validate_topics(
     # Ensure consistent Topic number assignment by recreating topic_summary_df from reference_df
     if not validation_reference_df.empty:
         validation_topic_summary_df = create_topic_summary_df_from_reference_table(
-            validation_reference_df
+            validation_reference_df, sentiment_checkbox=sentiment_checkbox
         )
 
     # Sort output dataframes
@@ -1091,6 +1166,7 @@ def validate_topics_wrapper(
     aws_secret_key_textbox: str = "",
     aws_region_textbox: str = "",
     api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -1291,6 +1367,7 @@ def validate_topics_wrapper(
                 aws_secret_key_textbox=aws_secret_key_textbox,
                 aws_region_textbox=aws_region_textbox,
                 api_url=api_url,
+                max_topics_number=max_topics_number,
             )
 
             # Accumulate results
@@ -1350,7 +1427,15 @@ def validate_topics_wrapper(
     # Need to join "Topic number" onto acc_reference_df
     # If any blanks, there is an issue somewhere, drop and redo
     if "Topic number" in acc_reference_df.columns:
-        if acc_reference_df["Topic number"].isnull().any():
+        try:
+            # Convert to numeric first to avoid dtype issues with object arrays
+            topic_num_series = pd.to_numeric(
+                acc_reference_df["Topic number"], errors="coerce"
+            )
+            if topic_num_series.isnull().any():
+                acc_reference_df = acc_reference_df.drop("Topic number", axis=1)
+        except (TypeError, ValueError):
+            # If conversion fails, drop the column to be safe
             acc_reference_df = acc_reference_df.drop("Topic number", axis=1)
 
     if "Topic number" not in acc_reference_df.columns:
@@ -2112,6 +2197,7 @@ def write_llm_output_and_logs(
             out_topic_summary_df,
             batch_file_path_details,
             is_error,
+            False,  # has_incomplete_output
         )
 
     # Convert response text to a markdown table
@@ -2131,7 +2217,16 @@ def write_llm_output_and_logs(
             out_topic_summary_df,
             batch_file_path_details,
             is_error,
+            False,  # has_incomplete_output
         )
+
+    # Check if the parsed dataframe has less than 3 columns (incomplete output)
+    # This will be used to trigger a retry
+    has_incomplete_output = False
+    if not is_error and not topic_with_response_df.empty:
+        # Check if dataframe has less than 3 columns (incomplete output format)
+        if topic_with_response_df.shape[1] < 3:
+            has_incomplete_output = True
 
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
@@ -2145,7 +2240,24 @@ def write_llm_output_and_logs(
         }
 
         topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
-
+    elif topic_with_response_df.shape[1] == 4:
+        # Handle 4-column case (missing Sentiment column)
+        # Rename all 4 columns first
+        new_column_names = {
+            topic_with_response_df.columns[0]: "General topic",
+            topic_with_response_df.columns[1]: "Subtopic",
+            topic_with_response_df.columns[2]: "Response References",
+            topic_with_response_df.columns[3]: "Summary",
+        }
+        topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
+        # Add missing Sentiment column
+        topic_with_response_df["Sentiment"] = pd.Series(
+            ["Not assessed"] * len(topic_with_response_df), dtype=str
+        )
+        # Reorder columns to match expected format
+        topic_with_response_df = topic_with_response_df[
+            ["General topic", "Subtopic", "Sentiment", "Response References", "Summary"]
+        ]
     else:
         # Something went wrong with the table output, so add empty columns
         print("Table output has wrong number of columns, adding with blank values")
@@ -2308,6 +2420,55 @@ def write_llm_output_and_logs(
     )
     batch_size_number = int(batch_size_number)
 
+    # Handle blank Response References: remove rows if batch_size > 1, set to "1" if batch_size == 1
+    # Skip this processing when producing structured summaries, as they don't have Response References column
+    if (
+        produce_structured_summary_radio != "Yes"
+        and "Response References" in topic_with_response_df.columns
+        and not topic_with_response_df.empty
+    ):
+        # Convert Response References to string and identify blank entries
+        topic_with_response_df["Response References"] = topic_with_response_df[
+            "Response References"
+        ].astype(str)
+
+        # Identify rows with invalid Response References
+        # For batch_size > 1: blank, "nan", contains no digits, or contains "0"
+        # For batch_size == 1: only blank or "nan" (will be set to "1")
+        blank_or_invalid_mask = (
+            topic_with_response_df["Response References"].str.strip() == ""
+        ) | (topic_with_response_df["Response References"].str.lower() == "nan")
+
+        if batch_size_number > 1:
+            # Also check for non-numeric characters (no digits) or "0" when batch_size > 1
+            no_digits_mask = ~topic_with_response_df[
+                "Response References"
+            ].str.contains(r"\d", regex=True, na=False)
+            contains_zero_mask = topic_with_response_df[
+                "Response References"
+            ].str.contains(r"\b0\b", regex=True, na=False)
+
+            # Combine all invalid conditions for batch_size > 1
+            invalid_mask = blank_or_invalid_mask | no_digits_mask | contains_zero_mask
+
+            if invalid_mask.any():
+                rows_removed = invalid_mask.sum()
+                print(
+                    f"Removing {rows_removed} row(s) with invalid Response References "
+                    f"(blank, non-numeric, or '0' when batch_size > 1)"
+                )
+                topic_with_response_df = topic_with_response_df[~invalid_mask].copy()
+        else:
+            # For batch_size == 1, only handle blank/nan (set to "1")
+            if blank_or_invalid_mask.any():
+                rows_updated = blank_or_invalid_mask.sum()
+                print(
+                    f"Setting {rows_updated} blank Response Reference(s) to '1' (batch_size == 1)"
+                )
+                topic_with_response_df.loc[
+                    blank_or_invalid_mask, "Response References"
+                ] = "1"
+
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
         references_raw = str(row.iloc[3]) if pd.notna(row.iloc[3]) else ""
@@ -2462,12 +2623,19 @@ def write_llm_output_and_logs(
                 out_reference_df[col] = ""
 
     # Remove duplicate Response References for the same topic
-    out_reference_df.drop_duplicates(
-        ["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True
-    )
+    # Only if out_reference_df is not empty and has the required columns
+    if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+        out_reference_df.drop_duplicates(
+            ["Response References", "General topic", "Subtopic", "Sentiment"],
+            inplace=True,
+        )
 
     # Try converting response references column to int, keep as string if fails
-    if existing_reference_numbers is True:
+    if (
+        existing_reference_numbers is True
+        and not out_reference_df.empty
+        and "Response References" in out_reference_df.columns
+    ):
         try:
             out_reference_df["Response References"] = (
                 out_reference_df["Response References"].astype(float).astype(int)
@@ -2475,16 +2643,18 @@ def write_llm_output_and_logs(
         except Exception as e:
             print("Could not convert Response References column to integer due to", e)
 
-    out_reference_df.sort_values(
-        [
-            "Start row of group",
-            "Response References",
-            "General topic",
-            "Subtopic",
-            "Sentiment",
-        ],
-        inplace=True,
-    )
+    # Only sort if out_reference_df is not empty and has the required columns
+    if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+        out_reference_df.sort_values(
+            [
+                "Start row of group",
+                "Response References",
+                "General topic",
+                "Subtopic",
+                "Sentiment",
+            ],
+            inplace=True,
+        )
 
     # Each topic should only be associated with each individual response once
     out_reference_df.drop_duplicates(
@@ -2506,13 +2676,13 @@ def write_llm_output_and_logs(
         ["General topic", "Subtopic", "Sentiment"]
     ]
 
-    new_topic_summary_df = new_topic_summary_df.rename(
-        columns={
-            new_topic_summary_df.columns[0]: "General topic",
-            new_topic_summary_df.columns[1]: "Subtopic",
-            new_topic_summary_df.columns[2]: "Sentiment",
-        }
-    )
+    # new_topic_summary_df = new_topic_summary_df.rename(
+    #     columns={
+    #         new_topic_summary_df.columns[0]: "General topic",
+    #         new_topic_summary_df.columns[1]: "Subtopic",
+    #         new_topic_summary_df.columns[2]: "Sentiment",
+    #     }
+    # )
 
     # Join existing and new unique topics
     # Reset index to avoid reindexing errors with duplicate indices
@@ -2540,25 +2710,77 @@ def write_llm_output_and_logs(
     )
 
     # Get count of rows that refer to particular topics
-    reference_counts = (
-        out_reference_df.groupby(["General topic", "Subtopic", "Sentiment"])
-        .agg(
-            {
-                "Response References": "size",  # Count the number of references
-                "Summary": " <br> ".join,
-            }
+    # Only do this if out_reference_df is not empty and has the required columns
+    if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+        # Helper function to join unique summaries, preventing duplicates
+        def join_unique_summaries(x):
+            """Join unique summaries, handling both formats with and without '<br>' separators."""
+            unique_summaries = []
+            seen = set()
+            for s in x:
+                if pd.notna(s):  # Skip NaN values
+                    # Convert to string and strip whitespace
+                    s_str = str(s).strip()
+                    if s_str:  # Skip empty strings
+                        # If summary already contains <br> separators, split and deduplicate segments
+                        if "<br>" in s_str or " <br> " in s_str:
+                            # Split by <br> tags
+                            segments = re.split(r"<br>| <br> ", s_str)
+                            segments = [seg.strip() for seg in segments if seg.strip()]
+                            # Add unique segments
+                            for segment in segments:
+                                if segment and segment not in seen:
+                                    seen.add(segment)
+                                    unique_summaries.append(segment)
+                        else:
+                            # Single summary, add if not seen
+                            if s_str not in seen:
+                                seen.add(s_str)
+                                unique_summaries.append(s_str)
+            return " <br> ".join(unique_summaries) if unique_summaries else ""
+
+        reference_counts = (
+            out_reference_df.groupby(["General topic", "Subtopic", "Sentiment"])
+            .agg(
+                {
+                    "Response References": "size",  # Count the number of references
+                    "Summary": join_unique_summaries,  # Join unique summaries only
+                }
+            )
+            .reset_index()
         )
-        .reset_index()
-    )
+        # Rename the aggregated column to avoid merge conflicts
+        reference_counts = reference_counts.rename(
+            columns={"Response References": "Number of responses"}
+        )
 
-    # Join the counts to existing_topic_summary_df
-    out_topic_summary_df = out_topic_summary_df.merge(
-        reference_counts, how="left", on=["General topic", "Subtopic", "Sentiment"]
-    ).sort_values("Response References", ascending=False)
+        # Drop any existing "Response References" or "Number of responses" columns from out_topic_summary_df
+        # to avoid duplicate columns after merge
+        out_topic_summary_df = out_topic_summary_df.drop(
+            ["Response References", "Number of responses"], axis=1, errors="ignore"
+        )
 
-    out_topic_summary_df = out_topic_summary_df.rename(
-        columns={"Response References": "Number of responses"}, errors="ignore"
-    )
+        # Join the counts to existing_topic_summary_df
+        out_topic_summary_df = out_topic_summary_df.merge(
+            reference_counts, how="left", on=["General topic", "Subtopic", "Sentiment"]
+        )
+
+        # Fill NaN values with 0 for Number of responses
+        if "Number of responses" in out_topic_summary_df.columns:
+            out_topic_summary_df["Number of responses"] = (
+                out_topic_summary_df["Number of responses"].fillna(0).astype(int)
+            )
+            out_topic_summary_df = out_topic_summary_df.sort_values(
+                "Number of responses", ascending=False
+            )
+        else:
+            # If merge didn't add the column, add it with default values
+            out_topic_summary_df["Number of responses"] = 0
+    else:
+        # If out_reference_df is empty or missing Response References, add default column
+        out_topic_summary_df["Number of responses"] = 0
+        if "Summary" not in out_topic_summary_df.columns:
+            out_topic_summary_df["Summary"] = ""
 
     out_topic_summary_df["Group"] = group_name
 
@@ -2579,6 +2801,7 @@ def write_llm_output_and_logs(
         out_topic_summary_df,
         batch_file_path_details,
         is_error,
+        has_incomplete_output,
     )
 
 
@@ -2705,7 +2928,22 @@ def process_batch_with_llm(
 
     batch_prompts = [formatted_prompt]
 
-    if "Local" in model_source and reasoning_suffix:
+    # Apply reasoning suffix for GPT-OSS models (Local, inference-server, or AWS)
+    is_gpt_oss_model = (
+        "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower()
+    )
+
+    if is_gpt_oss_model:
+        # Use default reasoning suffix if not set
+        effective_reasoning_suffix = (
+            reasoning_suffix if reasoning_suffix else "Reasoning: low"
+        )
+        if effective_reasoning_suffix:
+            formatted_system_prompt = (
+                formatted_system_prompt + "\n" + effective_reasoning_suffix
+            )
+    elif "Local" in model_source and reasoning_suffix:
+        # For other local models, use reasoning_suffix if provided
         formatted_system_prompt = formatted_system_prompt + "\n" + reasoning_suffix
 
     # Combine system prompt and user prompt for token counting
@@ -2727,63 +2965,109 @@ def process_batch_with_llm(
     conversation_history = list()
     whole_conversation = list()
 
-    # Process requests to large language model
-    (
-        responses,
-        conversation_history,
-        whole_conversation,
-        all_metadata_content,
-        response_text,
-    ) = call_llm_with_markdown_table_checks(
-        batch_prompts,
-        formatted_system_prompt,
-        conversation_history,
-        whole_conversation,
-        all_metadata_content,
-        client,
-        client_config,
-        model_choice,
-        temperature,
-        reported_batch_no,
-        local_model,
-        tokenizer,
-        bedrock_runtime,
-        model_source,
-        MAX_OUTPUT_VALIDATION_ATTEMPTS,
-        assistant_prefill=assistant_prefill,
-        master=not is_first_batch,
-        api_url=api_url,
-    )
+    # Process requests to large language model with retry logic for incomplete outputs
+    max_retries = 3
+    retry_count = 0
+    retry_needed = True
+    original_temperature = temperature
+    current_temperature = temperature
 
-    # print("Response text:", response_text)
+    while retry_needed and retry_count < max_retries:
+        # Increase temperature by 0.1 on each retry (not on first attempt)
+        if retry_count > 0:
+            current_temperature = original_temperature + (retry_count * 0.1)
+            print(
+                f"Increasing temperature to {current_temperature:.1f} for retry attempt {retry_count + 1}"
+            )
 
-    # Return output tables
-    (
-        topic_table_out_path,
-        reference_table_out_path,
-        topic_summary_df_out_path,
-        new_topic_df,
-        new_reference_df,
-        new_topic_summary_df,
-        batch_file_path_details,
-        is_error,
-    ) = write_llm_output_and_logs(
-        response_text,
-        whole_conversation,
-        all_metadata_content,
-        batch_file_path_details,
-        start_row,
-        end_row,
-        model_choice_clean,
-        log_files_output_paths,
-        existing_reference_df,
-        existing_topic_summary_df,
-        batch_size,
-        batch_basic_response_df,
-        group_name,
-        produce_structured_summary_radio,
-        output_folder=output_folder,
-    )
+            # Recreate client with updated temperature if using Gemini
+            if "Gemini" in model_source:
+                client, client_config = construct_gemini_generative_model(
+                    in_api_key=in_api_key,
+                    temperature=current_temperature,
+                    model_choice=model_choice,
+                    system_prompt=formatted_system_prompt,
+                    max_tokens=max_tokens,
+                )
+
+        (
+            responses,
+            conversation_history,
+            whole_conversation,
+            all_metadata_content,
+            response_text,
+        ) = call_llm_with_markdown_table_checks(
+            batch_prompts,
+            formatted_system_prompt,
+            conversation_history,
+            whole_conversation,
+            all_metadata_content,
+            client,
+            client_config,
+            model_choice,
+            current_temperature,
+            reported_batch_no,
+            local_model,
+            tokenizer,
+            bedrock_runtime,
+            model_source,
+            MAX_OUTPUT_VALIDATION_ATTEMPTS,
+            assistant_prefill=assistant_prefill,
+            master=not is_first_batch,
+            api_url=api_url,
+        )
+
+        # print("Response text:", response_text)
+
+        # Return output tables
+        (
+            topic_table_out_path,
+            reference_table_out_path,
+            topic_summary_df_out_path,
+            new_topic_df,
+            new_reference_df,
+            new_topic_summary_df,
+            batch_file_path_details,
+            is_error,
+            has_incomplete_output,
+        ) = write_llm_output_and_logs(
+            response_text,
+            whole_conversation,
+            all_metadata_content,
+            batch_file_path_details,
+            start_row,
+            end_row,
+            model_choice_clean,
+            log_files_output_paths,
+            existing_reference_df,
+            existing_topic_summary_df,
+            batch_size,
+            batch_basic_response_df,
+            group_name,
+            produce_structured_summary_radio,
+            output_folder=output_folder,
+        )
+
+        # Check if output has less than 3 columns (incomplete output format)
+        # This indicates the LLM didn't follow the format properly
+        if has_incomplete_output:
+            retry_count += 1
+            if retry_count < max_retries:
+                next_temperature = original_temperature + (retry_count * 0.1)
+                print(
+                    f"LLM output table has less than 3 columns (incomplete format). "
+                    f"Retrying LLM call with increased temperature {next_temperature:.1f} "
+                    f"(attempt {retry_count + 1}/{max_retries})..."
+                )
+                retry_needed = True
+                continue
+            else:
+                print(
+                    f"LLM output still incomplete after {max_retries} attempts. Proceeding with incomplete data."
+                )
+                retry_needed = False
+        else:
+            retry_needed = False
 
     # If error in table parsing, leave function
     if is_error is True:
@@ -2888,6 +3172,7 @@ def extract_topics(
     additional_instructions_summary_format: str = "",
     additional_validation_issues_provided: str = "",
     api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -3007,6 +3292,36 @@ def extract_topics(
                 "Summary",
             ]
         )
+
+    # Clean topic names in initial dataframes to ensure consistent formatting throughout processing
+    if not existing_reference_df.empty:
+        for col_name in ["General topic", "Subtopic"]:
+            if (
+                col_name in existing_reference_df.columns
+                and not existing_reference_df[col_name].isnull().all()
+            ):
+                existing_reference_df[col_name] = existing_reference_df[col_name].apply(
+                    normalize_topic_name_for_llm
+                )
+    if not existing_topic_summary_df.empty:
+        for col_name in ["General topic", "Subtopic"]:
+            if (
+                col_name in existing_topic_summary_df.columns
+                and not existing_topic_summary_df[col_name].isnull().all()
+            ):
+                existing_topic_summary_df[col_name] = existing_topic_summary_df[
+                    col_name
+                ].apply(normalize_topic_name_for_llm)
+    if not existing_topics_table.empty:
+        for col_name in ["General topic", "Subtopic"]:
+            if (
+                col_name in existing_topics_table.columns
+                and not existing_topics_table[col_name].isnull().all()
+            ):
+                existing_topics_table[col_name] = existing_topics_table[col_name].apply(
+                    normalize_topic_name_for_llm
+                )
+
     new_topic_df = pd.DataFrame(
         columns=[
             "General topic",
@@ -3263,6 +3578,7 @@ def extract_topics(
                             zero_shot_topics,
                             force_zero_shot_radio,
                             create_revised_general_topics,
+                            max_topic_no=max_topics_number,
                         )
 
                         # This part concatenates all zero shot and new topics together, so that for the next prompt the LLM will have the full list available
@@ -3283,7 +3599,7 @@ def extract_topics(
                         )
 
                     existing_topic_summary_df["Number of responses"] = ""
-                    existing_topic_summary_df.fillna("", inplace=True)
+                    # existing_topic_summary_df.fillna("", inplace=True)
                     existing_topic_summary_df["General topic"] = (
                         existing_topic_summary_df["General topic"].str.replace(
                             "(?i)^Nan$", "", regex=True
@@ -3378,6 +3694,26 @@ def extract_topics(
                         )
 
                     print("Number of topics:", topics_df_for_markdown.shape[0])
+
+                    # Clean topic names before converting to markdown to ensure consistent formatting
+                    if "General topic" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown["General topic"] = (
+                            topics_df_for_markdown["General topic"].apply(
+                                normalize_topic_name_for_llm
+                            )
+                        )
+                    if "Subtopic" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown["Subtopic"] = topics_df_for_markdown[
+                            "Subtopic"
+                        ].apply(normalize_topic_name_for_llm)
+                    if "Main heading" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown["Main heading"] = topics_df_for_markdown[
+                            "Main heading"
+                        ].apply(normalize_topic_name_for_llm)
+                    if "Subheading" in topics_df_for_markdown.columns:
+                        topics_df_for_markdown["Subheading"] = topics_df_for_markdown[
+                            "Subheading"
+                        ].apply(normalize_topic_name_for_llm)
 
                     unique_topics_markdown = topics_df_for_markdown.to_markdown(
                         index=False
@@ -3703,8 +4039,22 @@ def extract_topics(
 
             # Overwrite 'existing' elements to add new tables
             existing_reference_df = new_reference_df.dropna(how="all")
-            existing_topic_summary_df = new_topic_summary_df.dropna(how="all")
+            # Rebuild topic_summary_df from accumulated reference_df to ensure consistency
+            # This properly aggregates response counts and handles all dimensions (General topic, Subtopic, Sentiment, Group)
+            existing_topic_summary_df = create_topic_summary_df_from_reference_table(
+                existing_reference_df, sentiment_checkbox=sentiment_checkbox
+            )
             existing_topics_table = new_topic_df.dropna(how="all")
+
+            # Clean General topic and Subtopic columns using the same process as zero-shot topics
+            for col_name in ["General topic", "Subtopic"]:
+                for df in [
+                    existing_reference_df,
+                    existing_topic_summary_df,
+                    existing_topics_table,
+                ]:
+                    if col_name in df.columns and not df[col_name].isnull().all():
+                        df[col_name] = df[col_name].apply(normalize_topic_name_for_llm)
 
             # Deduplicate topics after each batch if enabled and conditions are met
             if (
@@ -3734,9 +4084,21 @@ def extract_topics(
                     extract_data_file_names_textbox = file_name
 
                 try:
+                    original_topic_summary_df = existing_topic_summary_df.copy()
                     topics_before = existing_topic_summary_df.drop_duplicates(
                         subset=["General topic", "Subtopic"]
                     ).shape[0]
+                    # Check Group values before deduplication for better diagnostics
+                    input_groups_before = (
+                        existing_topic_summary_df["Group"].nunique()
+                        if "Group" in existing_topic_summary_df.columns
+                        else 0
+                    )
+                    input_ref_groups_before = (
+                        existing_reference_df["Group"].nunique()
+                        if "Group" in existing_reference_df.columns
+                        else 0
+                    )
                     # Call deduplicate_topics function
                     (
                         existing_reference_df,
@@ -3755,8 +4117,8 @@ def extract_topics(
                             else in_excel_sheets
                         ),
                         merge_sentiment="No",
-                        merge_general_topics="Yes",
-                        score_threshold=DEDUPLICATION_THRESHOLD,
+                        merge_general_topics="No",
+                        score_threshold=95,
                         in_data_files=in_data_files_for_dedup,
                         chosen_cols=(
                             chosen_cols
@@ -3772,28 +4134,53 @@ def extract_topics(
                     topics_after = existing_topic_summary_df.drop_duplicates(
                         subset=["General topic", "Subtopic"]
                     ).shape[0]
-                    print(
-                        f"Topics deduplicated successfully after batch {latest_batch_completed}. "
-                        f"Topics before: {topics_before}, Topics after: {topics_after}"
+                    # Check Group values after deduplication
+                    output_groups_after = (
+                        existing_topic_summary_df["Group"].nunique()
+                        if "Group" in existing_topic_summary_df.columns
+                        else 0
                     )
+                    output_ref_groups_after = (
+                        existing_reference_df["Group"].nunique()
+                        if "Group" in existing_reference_df.columns
+                        else 0
+                    )
+                    if topics_after < topics_before:
+                        print(
+                            f"Topics deduplicated successfully after batch {latest_batch_completed}. "
+                            f"Topics before: {topics_before}, Topics after: {topics_after}"
+                        )
                     if topics_after > topics_before:
                         print(
                             f"WARNING: Number of topics increased from {topics_before} to {topics_after}. "
-                            f"This may be due to Group column differences. "
-                            f"Input had {existing_topic_summary_df['Group'].nunique() if 'Group' in existing_topic_summary_df.columns else 0} unique Group values."
+                            f"This may be due to Group column differences or new topic combinations created during deduplication. "
+                            f"Input topic_summary_df had {input_groups_before} unique Group values, "
+                            f"Input reference_df had {input_ref_groups_before} unique Group values. "
+                            f"Output topic_summary_df has {output_groups_after} unique Group values, "
+                            f"Output reference_df has {output_ref_groups_after} unique Group values."
+                        )
+                        original_topic_summary_df.to_csv(
+                            f"{output_folder}{file_name_clean}_batch_{latest_batch_completed}_original_topic_summary_df.csv",
+                            index=None,
+                            encoding="utf-8-sig",
+                        )
+                        existing_topic_summary_df.to_csv(
+                            f"{output_folder}{file_name_clean}_batch_{latest_batch_completed}_deduplicated_topic_summary_df.csv",
+                            index=None,
+                            encoding="utf-8-sig",
                         )
                 except Exception as e:
                     print(
                         f"Warning: Deduplication failed after batch {latest_batch_completed}: {str(e)}. Continuing with original topics."
                     )
 
-                # Check if number of topics exceeds MAXIMUM_ZERO_SHOT_TOPICS and use LLM deduplication if needed
+                # Check if number of topics exceeds max_topics_number and use LLM deduplication if needed
                 topics_after_dedup = existing_topic_summary_df.drop_duplicates(
                     subset=["General topic", "Subtopic"]
                 ).shape[0]
-                if topics_after_dedup > MAXIMUM_ZERO_SHOT_TOPICS:
+                if topics_after_dedup > max_topics_number:
                     print(
-                        f"Number of topics ({topics_after_dedup}) exceeds MAXIMUM_ZERO_SHOT_TOPICS ({MAXIMUM_ZERO_SHOT_TOPICS}). "
+                        f"Number of topics ({topics_after_dedup}) exceeds max_topics_number ({max_topics_number}). "
                         f"Using LLM-based deduplication after batch {latest_batch_completed}..."
                     )
                     try:
@@ -3864,6 +4251,16 @@ def extract_topics(
                             output_files="False",
                             sentiment_checkbox=sentiment_checkbox,
                         )
+                        # Rebuild topic_summary_df from updated reference_df to ensure consistency
+                        # This ensures the topic count reflects the actual merged state
+                        if not existing_reference_df.empty:
+                            existing_topic_summary_df = (
+                                create_topic_summary_df_from_reference_table(
+                                    existing_reference_df,
+                                    sentiment_checkbox=sentiment_checkbox,
+                                )
+                            )
+
                         topics_after_llm_dedup = (
                             existing_topic_summary_df.drop_duplicates(
                                 subset=["General topic", "Subtopic"]
@@ -3880,9 +4277,16 @@ def extract_topics(
                         )
 
             # The topic table that can be modified does not need the summary column
-            modifiable_topic_summary_df = existing_topic_summary_df.drop(
-                "Summary", axis=1
-            )
+            # Check if DataFrame is not empty and has Summary column before dropping
+            if (
+                not existing_topic_summary_df.empty
+                and "Summary" in existing_topic_summary_df.columns
+            ):
+                modifiable_topic_summary_df = existing_topic_summary_df.drop(
+                    "Summary", axis=1
+                )
+            else:
+                modifiable_topic_summary_df = existing_topic_summary_df.copy()
 
         out_time = f"{final_time:0.1f} seconds."
 
@@ -3958,6 +4362,7 @@ def extract_topics(
                 sentiment_checkbox=sentiment_checkbox,
                 logged_content=group_combined_logged_content,
                 api_url=api_url,
+                max_topics_number=max_topics_number,
             )
 
             # Add validation conversation metadata to the main conversation metadata
@@ -4037,7 +4442,7 @@ def extract_topics(
 
         # Create final unique topics table from reference table to ensure consistent numbers
         final_out_topic_summary_df = create_topic_summary_df_from_reference_table(
-            existing_reference_df
+            existing_reference_df, sentiment_checkbox=sentiment_checkbox
         )
         final_out_topic_summary_df["Group"] = group_name
 
@@ -4107,7 +4512,16 @@ def extract_topics(
         ]
 
         # The topic table that can be modified does not need the summary column
-        modifiable_topic_summary_df = final_out_topic_summary_df.drop("Summary", axis=1)
+        # Check if DataFrame is not empty and has Summary column before dropping
+        if (
+            not final_out_topic_summary_df.empty
+            and "Summary" in final_out_topic_summary_df.columns
+        ):
+            modifiable_topic_summary_df = final_out_topic_summary_df.drop(
+                "Summary", axis=1
+            )
+        else:
+            modifiable_topic_summary_df = final_out_topic_summary_df.copy()
 
         return (
             unique_table_df_display_table_markdown,
@@ -4209,6 +4623,7 @@ def wrapper_extract_topics_per_column_value(
     tokenizer: object = None,
     assistant_model: object = None,
     max_rows: int = max_rows,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=Progress(track_tqdm=True),  # type: ignore
 ) -> Tuple:  # Mimicking the return tuple structure of extract_topics
     """
@@ -4474,6 +4889,7 @@ def wrapper_extract_topics_per_column_value(
                 additional_instructions_summary_format=additional_instructions_summary_format,
                 additional_validation_issues_provided=additional_validation_issues_provided,
                 api_url=api_url,
+                max_topics_number=max_topics_number,
                 progress=progress,
             )
 
@@ -4555,7 +4971,15 @@ def wrapper_extract_topics_per_column_value(
     # Need to join "Topic number" onto acc_reference_df
     # If any blanks, there is an issue somewhere, drop and redo
     if "Topic number" in acc_reference_df.columns:
-        if acc_reference_df["Topic number"].isnull().any():
+        try:
+            # Convert to numeric first to avoid dtype issues with object arrays
+            topic_num_series = pd.to_numeric(
+                acc_reference_df["Topic number"], errors="coerce"
+            )
+            if topic_num_series.isnull().any():
+                acc_reference_df = acc_reference_df.drop("Topic number", axis=1)
+        except (TypeError, ValueError):
+            # If conversion fails, drop the column to be safe
             acc_reference_df = acc_reference_df.drop("Topic number", axis=1)
 
     if "Topic number" not in acc_reference_df.columns:
@@ -5060,6 +5484,7 @@ def all_in_one_pipeline(
     tokenizer: object = None,
     assistant_model: object = None,
     max_rows: int = max_rows,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
     progress=Progress(track_tqdm=True),
 ):
     """
@@ -5148,7 +5573,7 @@ def all_in_one_pipeline(
 
     print(
         "Analysing file: ",
-        in_data_files,
+        original_file_name,
         "column(s): ",
         chosen_cols,
         "with model: ",
@@ -5230,6 +5655,7 @@ def all_in_one_pipeline(
         additional_validation_issues_provided=additional_validation_issues_provided,
         show_previous_table=show_previous_table,
         api_url=api_url,
+        max_topics_number=max_topics_number,
     )
 
     total_input_tokens += out_input_tokens
@@ -5339,10 +5765,9 @@ def all_in_one_pipeline(
         in_data_files=in_data_files,
         chosen_cols=chosen_cols,
         output_folder=output_folder,
+        sentiment_checkbox=sentiment_choice,
     )
 
-    print("force_zero_shot_choice:", force_zero_shot_choice)
-    print("ALL_IN_ONE_USE_LLM_DEDUP:", ALL_IN_ONE_USE_LLM_DEDUP)
     # LLM-based deduplication if enabled
     if force_zero_shot_choice == "No" and ALL_IN_ONE_USE_LLM_DEDUP:
         # Set up model source and bedrock runtime if needed
@@ -5601,4 +6026,62 @@ def all_in_one_pipeline(
         overall_summarised_output_markdown,
         summarised_output_df,
         out_logged_content,
+    )
+
+
+# When LLM deduplication button pressed, deduplicate data using LLM
+def deduplicate_topics_llm_wrapper(
+    reference_df,
+    topic_summary_df,
+    reference_table_file_name,
+    unique_topics_table_file_name,
+    model_choice,
+    in_api_key,
+    temperature,
+    in_excel_sheets,
+    merge_sentiment,
+    merge_general_topics,
+    in_data_files,
+    chosen_cols,
+    output_folder,
+    candidate_topics=None,
+    azure_endpoint="",
+    api_url=None,
+    aws_access_key_textbox="",
+    aws_secret_key_textbox="",
+    aws_region_textbox="",
+    azure_api_key_textbox="",
+    sentiment_checkbox="Negative or Positive",
+):
+    # Ensure custom model_choice is registered in model_name_map
+    ensure_model_in_map(model_choice)
+    model_source = model_name_map[model_choice]["source"]
+    return deduplicate_topics_llm(
+        reference_df,
+        topic_summary_df,
+        reference_table_file_name,
+        unique_topics_table_file_name,
+        model_choice,
+        in_api_key,
+        temperature,
+        model_source,
+        None,
+        None,
+        None,
+        None,
+        in_excel_sheets,
+        merge_sentiment,
+        merge_general_topics,
+        in_data_files,
+        chosen_cols,
+        output_folder,
+        candidate_topics,
+        azure_endpoint,
+        OUTPUT_DEBUG_FILES,
+        api_url,
+        aws_access_key_textbox,
+        aws_secret_key_textbox,
+        aws_region_textbox,
+        azure_api_key_textbox,
+        sentiment_checkbox=sentiment_checkbox,
     )

@@ -37,7 +37,7 @@ from tools.config import (
     LLM_SEED,
     LLM_TEMPERATURE,
     MAX_TIME_FOR_LOOP,
-    MAXIMUM_ZERO_SHOT_TOPICS,
+    MAXIMUM_ALLOWED_TOPICS,
     OUTPUT_DEBUG_FILES,
     OUTPUT_FOLDER,
     RUN_AWS_FUNCTIONS,
@@ -833,10 +833,10 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         help=f"Enable deduplication after each batch during topic extraction (True/False). Default: {ENABLE_BATCH_DEDUPLICATION}",
     )
     extract_group.add_argument(
-        "--maximum_zero_shot_topics",
+        "--maximum_allowed_topics",
         type=int,
-        default=MAXIMUM_ZERO_SHOT_TOPICS,
-        help=f"Maximum number of topics before triggering LLM-based deduplication. Default: {MAXIMUM_ZERO_SHOT_TOPICS}",
+        default=MAXIMUM_ALLOWED_TOPICS,
+        help=f"Maximum number of topics before triggering LLM-based deduplication. Default: {MAXIMUM_ALLOWED_TOPICS}",
     )
 
     # --- Validation Arguments ---
@@ -1061,8 +1061,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
 
     if hasattr(args, "enable_batch_deduplication"):
         config_module.ENABLE_BATCH_DEDUPLICATION = args.enable_batch_deduplication
-    if hasattr(args, "maximum_zero_shot_topics"):
-        config_module.MAXIMUM_ZERO_SHOT_TOPICS = args.maximum_zero_shot_topics
+    if hasattr(args, "maximum_allowed_topics"):
+        config_module.MAXIMUM_ALLOWED_TOPICS = args.maximum_allowed_topics
 
     # Get username and folders
     (

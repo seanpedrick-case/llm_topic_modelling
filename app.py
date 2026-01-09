@@ -6,7 +6,7 @@ import pandas as pd
 
 from tools.auth import authenticate_user
 from tools.aws_functions import (
-    download_file_from_s3,
+    download_cost_codes_with_error_handling,
     export_outputs_to_s3,
     upload_file_to_s3,
 )
@@ -83,6 +83,7 @@ from tools.config import (
     LOG_FILE_NAME,
     MAX_FILE_SIZE,
     MAX_QUEUE_SIZE,
+    MAXIMUM_ALLOWED_TOPICS,
     MPLCONFIGDIR,
     OUTPUT_COST_CODES_PATH,
     OUTPUT_DEBUG_FILES,
@@ -119,7 +120,6 @@ from tools.config import (
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.dedup_summaries import (
     deduplicate_topics,
-    deduplicate_topics_llm,
     overall_summary,
     wrapper_summarise_output_topics_per_group,
 )
@@ -135,7 +135,6 @@ from tools.helper_functions import (
     empty_output_vars_extract_topics,
     empty_output_vars_summarise,
     enforce_cost_codes,
-    ensure_model_in_map,
     get_connection_params,
     join_cols_onto_reference_df,
     load_in_data_file,
@@ -151,6 +150,7 @@ from tools.helper_functions import (
 )
 from tools.llm_api_call import (
     all_in_one_pipeline,
+    deduplicate_topics_llm_wrapper,
     modify_existing_output_tables,
     validate_topics_wrapper,
     wrapper_extract_topics_per_column_value,
@@ -923,6 +923,7 @@ with app:
 
         with gr.Accordion("Response sentiment analysis", open=False):
             sentiment_checkbox = gr.Radio(
+                label="Should the model assess the sentiment of responses?",
                 value="Negative or Positive",
                 choices=[
                     "Negative or Positive",
@@ -1268,7 +1269,15 @@ with app:
                     precision=1,
                     step=0.1,
                 )
+            with gr.Row(equal_height=True):
                 batch_size_number.render()
+                max_topics_number = gr.Number(
+                    value=MAXIMUM_ALLOWED_TOPICS,
+                    label="Maximum number of topics allowed. If exceeded, the LLM will make efforts to deduplicate topics after every batch until the total number of topics is below this number (not foolproof).",
+                    precision=0,
+                    minimum=1,
+                    maximum=1000,
+                )
             random_seed = gr.Number(
                 value=LLM_SEED, label="Random seed for LLM generation", visible="hidden"
             )
@@ -1533,6 +1542,7 @@ with app:
             additional_validation_issues_textbox,
             show_previous_table_radio,
             api_url_textbox,
+            max_topics_number,
         ],
         outputs=[
             display_topic_table_markdown,
@@ -1676,6 +1686,7 @@ with app:
             aws_secret_key_textbox,
             aws_region_textbox,
             api_url_textbox,
+            max_topics_number,
         ],
         outputs=[
             display_topic_table_markdown,
@@ -1834,63 +1845,6 @@ with app:
         scroll_to_output=True,
         api_name="deduplicate_topics",
     )
-
-    # When LLM deduplication button pressed, deduplicate data using LLM
-    def deduplicate_topics_llm_wrapper(
-        reference_df,
-        topic_summary_df,
-        reference_table_file_name,
-        unique_topics_table_file_name,
-        model_choice,
-        in_api_key,
-        temperature,
-        in_excel_sheets,
-        merge_sentiment,
-        merge_general_topics,
-        in_data_files,
-        chosen_cols,
-        output_folder,
-        candidate_topics=None,
-        azure_endpoint="",
-        api_url=None,
-        aws_access_key_textbox="",
-        aws_secret_key_textbox="",
-        aws_region_textbox="",
-        azure_api_key_textbox="",
-        sentiment_checkbox="Negative or Positive",
-    ):
-        # Ensure custom model_choice is registered in model_name_map
-        ensure_model_in_map(model_choice)
-        model_source = model_name_map[model_choice]["source"]
-        return deduplicate_topics_llm(
-            reference_df,
-            topic_summary_df,
-            reference_table_file_name,
-            unique_topics_table_file_name,
-            model_choice,
-            in_api_key,
-            temperature,
-            model_source,
-            None,
-            None,
-            None,
-            None,
-            in_excel_sheets,
-            merge_sentiment,
-            merge_general_topics,
-            in_data_files,
-            chosen_cols,
-            output_folder,
-            candidate_topics,
-            azure_endpoint,
-            OUTPUT_DEBUG_FILES,
-            api_url,
-            aws_access_key_textbox,
-            aws_secret_key_textbox,
-            aws_region_textbox,
-            azure_api_key_textbox,
-            sentiment_checkbox=sentiment_checkbox,
-        )
 
     deduplicate_llm_previous_data_btn.click(
         load_in_previous_data_files,
@@ -2510,16 +2464,6 @@ with app:
             print(
                 f"Attempting to download from bucket: {S3_LOG_BUCKET}, key: {S3_COST_CODES_PATH}"
             )
-
-            # Create a wrapper function with error handling
-            def download_cost_codes_with_error_handling(bucket, key, local_path):
-                try:
-                    download_file_from_s3(bucket, key, local_path)
-                    return True
-                except Exception as e:
-                    print(f"Error downloading cost codes from S3: {e}")
-                    print(f"Failed to download s3://{bucket}/{key}")
-                    return False
 
             app.load(
                 download_cost_codes_with_error_handling,
