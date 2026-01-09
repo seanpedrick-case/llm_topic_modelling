@@ -2150,53 +2150,52 @@ def count_tokens_in_text(text: str, tokenizer=None, model_source: str = "Local")
 
 
 def clean_markdown_table_whitespace(markdown_text: str) -> str:
-    """
-    Remove extraneous whitespace from markdown table cells.
-
-    This function normalizes whitespace within table cells by:
-    - Trimming leading/trailing whitespace from each cell
-    - Replacing multiple consecutive spaces with a single space
-    - Preserving the table structure (pipes, dashes, alignment)
-
-    Args:
-        markdown_text (str): The markdown table text to clean
-
-    Returns:
-        str: The cleaned markdown table with normalized whitespace in cells
-    """
     if not markdown_text:
         return markdown_text
 
-    lines = markdown_text.split("\n")
+    lines = markdown_text.splitlines()
     cleaned_lines = []
 
     for line in lines:
-        # Skip separator lines (lines with dashes and pipes)
-        if re.match(r"^\s*\|[\s\-:]+", line):
-            cleaned_lines.append(line)
+        # 1. Clean all types of whitespace (including non-breaking spaces \u00A0)
+        # This turns every cell into a single-spaced string
+        cells = [re.sub(r"[\s\u00A0]+", " ", cell.strip()) for cell in line.split("|")]
+
+        # 2. Check if the row is effectively empty (only pipes or whitespace)
+        # We join the content; if nothing is left, it's a "ghost" row.
+        if not "".join(cells).strip():
             continue
 
-        # Process data rows
-        if "|" in line:
-            # Split by pipe, but preserve the structure
-            parts = line.split("|")
-            cleaned_parts = []
-
-            for i, part in enumerate(parts):
-                # First and last parts are usually empty (before/after outer pipes)
-                if i == 0 or i == len(parts) - 1:
-                    cleaned_parts.append(part)
+        # 3. Handle the separator row specifically (e.g., |:---|---:|)
+        # We reset these to a small fixed width so they don't stretch the table.
+        if re.match(r"^[|\s\-:]+$", line):
+            new_separator = []
+            for cell in cells:
+                if not cell:  # Outer pipes
+                    new_separator.append("")
+                elif ":" in cell:  # Alignment markers
+                    left = ":" if cell.startswith(":") else "-"
+                    right = ":" if cell.endswith(":") else "-"
+                    new_separator.append(f"{left}---{right}")
                 else:
-                    # Clean the cell content: trim and normalize whitespace
-                    cleaned = part.strip()
-                    # Replace multiple spaces with single space
-                    cleaned = re.sub(r"\s+", " ", cleaned)
-                    cleaned_parts.append(cleaned)
+                    new_separator.append("---")
+            cleaned_lines.append("|".join(new_separator))
+            continue
 
-            cleaned_lines.append("|".join(cleaned_parts))
-        else:
-            # Non-table lines pass through unchanged
-            cleaned_lines.append(line)
+        # 4. Standard data row: Rejoin with single padding
+        # We filter out empty outer parts caused by leading/trailing pipes
+        formatted_row = (
+            "| "
+            + " | ".join(
+                c for c in cells if c or cells.index(c) not in [0, len(cells) - 1]
+            )
+            + " |"
+        )
+
+        # Simple fallback if the logic above is too aggressive for your specific table style:
+        # formatted_row = "|".join(f" {c} " if c else "" for c in cells)
+
+        cleaned_lines.append(formatted_row)
 
     return "\n".join(cleaned_lines)
 
