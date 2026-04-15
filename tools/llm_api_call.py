@@ -16,11 +16,13 @@ from tqdm import tqdm
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
+    BATCH_DEDUPLICATION_EVERY_N_BATCHES,
     BATCH_SIZE_DEFAULT,
     CHOSEN_LOCAL_MODEL_TYPE,
     DEDUPLICATION_THRESHOLD,
     ENABLE_BATCH_DEDUPLICATION,
     ENABLE_VALIDATION,
+    LLM_CONTEXT_HEADROOM_FRACTION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
     LLM_SEED,
@@ -286,6 +288,51 @@ def reconstruct_markdown_table_from_reference_df(
         markdown_table += f"| {general_topic} | {subtopic} | {sentiment} | {response_refs} | {summary} |\n"
 
     return markdown_table, cleaned_df
+
+
+def _assess_sentiment(sentiment_checkbox: str) -> bool:
+    return sentiment_checkbox != "Do not assess sentiment"
+
+
+def _topic_summary_dedup_columns(
+    sentiment_checkbox: str, topic_summary_df: pd.DataFrame
+) -> List[str]:
+    cols = ["General topic", "Subtopic"]
+    if (
+        _assess_sentiment(sentiment_checkbox)
+        and "Sentiment" in topic_summary_df.columns
+    ):
+        cols.append("Sentiment")
+    if "Group" in topic_summary_df.columns:
+        cols.append("Group")
+    return cols
+
+
+def _merge_topic_number_keys(
+    sentiment_checkbox: str,
+    reference_df: pd.DataFrame,
+    topic_summary_df: pd.DataFrame,
+) -> Tuple[List[str], List[str]]:
+    """Return (on_cols, right_table_cols) to join Topic number onto reference_df."""
+    on_cols = ["General topic", "Subtopic"]
+    if (
+        _assess_sentiment(sentiment_checkbox)
+        and "Sentiment" in reference_df.columns
+        and "Sentiment" in topic_summary_df.columns
+    ):
+        on_cols.append("Sentiment")
+    if "Group" in reference_df.columns and "Group" in topic_summary_df.columns:
+        on_cols.append("Group")
+    on_cols = [
+        c
+        for c in on_cols
+        if c in reference_df.columns and c in topic_summary_df.columns
+    ]
+    summary_cols = list(on_cols)
+    if "Topic number" in topic_summary_df.columns:
+        summary_cols.append("Topic number")
+    summary_cols = [c for c in summary_cols if c in topic_summary_df.columns]
+    return on_cols, summary_cols
 
 
 def validate_topics(
@@ -769,7 +816,7 @@ def validate_topics(
             validation_all_task_type_content.append("Validation")
             validation_all_file_names_content.append(original_full_file_name)
 
-            print("Appended to logs")
+            # print("Appended to logs")
 
             # Update validation dataframes with validation results
             # For validation, we need to accumulate results from each batch, not overwrite them
@@ -853,6 +900,8 @@ def validate_topics(
             and produce_structured_summary_radio == "No"
             and not validation_reference_df.empty
             and not validation_topic_summary_df.empty
+            and validation_latest_batch_completed % BATCH_DEDUPLICATION_EVERY_N_BATCHES
+            == 0
         ):
             print(
                 f"Deduplicating topics after validation batch {validation_latest_batch_completed}..."
@@ -1114,11 +1163,25 @@ def validate_topics(
         "Number of responses"
     ].astype(int)
     validation_topic_summary_df.drop_duplicates(
-        ["General topic", "Subtopic", "Sentiment"], inplace=True
+        _topic_summary_dedup_columns(sentiment_checkbox, validation_topic_summary_df),
+        inplace=True,
     )
+    topic_sort_cols = [
+        "Group",
+        "Number of responses",
+        "General topic",
+        "Subtopic",
+    ]
+    topic_sort_asc = [True, False, True, True]
+    if (
+        _assess_sentiment(sentiment_checkbox)
+        and "Sentiment" in validation_topic_summary_df.columns
+    ):
+        topic_sort_cols.append("Sentiment")
+        topic_sort_asc.append(True)
     validation_topic_summary_df.sort_values(
-        ["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"],
-        ascending=[True, False, True, True, True],
+        topic_sort_cols,
+        ascending=topic_sort_asc,
         inplace=True,
     )
 
@@ -1385,7 +1448,10 @@ def validate_topics_wrapper(
                     ignore_index=True,
                 )
                 acc_topic_summary_df.drop_duplicates(
-                    ["General topic", "Subtopic", "Sentiment"], inplace=True
+                    _topic_summary_dedup_columns(
+                        sentiment_checkbox, acc_topic_summary_df
+                    ),
+                    inplace=True,
                 )
 
             acc_logged_content.extend(updated_logged_content)
@@ -1441,13 +1507,15 @@ def validate_topics_wrapper(
     if "Topic number" not in acc_reference_df.columns:
         if "Topic number" in acc_topic_summary_df.columns:
             if "General topic" in acc_topic_summary_df.columns:
-                acc_reference_df = acc_reference_df.merge(
-                    acc_topic_summary_df[
-                        ["General topic", "Subtopic", "Sentiment", "Topic number"]
-                    ],
-                    on=["General topic", "Subtopic", "Sentiment"],
-                    how="left",
+                on_cols, summary_cols = _merge_topic_number_keys(
+                    sentiment_checkbox, acc_reference_df, acc_topic_summary_df
                 )
+                if on_cols and summary_cols:
+                    acc_reference_df = acc_reference_df.merge(
+                        acc_topic_summary_df[summary_cols],
+                        on=on_cols,
+                        how="left",
+                    )
                 # Sort output dataframes
                 acc_reference_df["Response References"] = (
                     acc_reference_df["Response References"].astype(float).astype(int)
@@ -1455,17 +1523,19 @@ def validate_topics_wrapper(
                 acc_reference_df["Start row of group"] = acc_reference_df[
                     "Start row of group"
                 ].astype(int)
-                acc_reference_df.sort_values(
-                    [
-                        "Group",
-                        "Start row of group",
-                        "Response References",
-                        "General topic",
-                        "Subtopic",
-                        "Sentiment",
-                    ],
-                    inplace=True,
-                )
+                ref_sort_cols = [
+                    "Group",
+                    "Start row of group",
+                    "Response References",
+                    "General topic",
+                    "Subtopic",
+                ]
+                if (
+                    _assess_sentiment(sentiment_checkbox)
+                    and "Sentiment" in acc_reference_df.columns
+                ):
+                    ref_sort_cols.append("Sentiment")
+                acc_reference_df.sort_values(ref_sort_cols, inplace=True)
             elif "Main heading" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(
                     acc_topic_summary_df[
@@ -1497,9 +1567,22 @@ def validate_topics_wrapper(
         acc_topic_summary_df["Number of responses"] = acc_topic_summary_df[
             "Number of responses"
         ].astype(int)
+        v_topic_sort_cols = [
+            "Group",
+            "Number of responses",
+            "General topic",
+            "Subtopic",
+        ]
+        v_topic_sort_asc = [True, False, True, True]
+        if (
+            _assess_sentiment(sentiment_checkbox)
+            and "Sentiment" in acc_topic_summary_df.columns
+        ):
+            v_topic_sort_cols.append("Sentiment")
+            v_topic_sort_asc.append(True)
         acc_topic_summary_df.sort_values(
-            ["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"],
-            ascending=[True, False, True, True, True],
+            v_topic_sort_cols,
+            ascending=v_topic_sort_asc,
             inplace=True,
         )
     elif "Main heading" in acc_topic_summary_df.columns:
@@ -2950,17 +3033,49 @@ def process_batch_with_llm(
     full_input_text = formatted_system_prompt + "\n" + formatted_prompt
 
     # Count tokens in the input text
-    from tools.dedup_summaries import count_tokens_in_text
+    from tools.dedup_summaries import (
+        _inference_server_prompt_token_count,
+        count_tokens_in_text,
+    )
 
-    input_token_count = count_tokens_in_text(full_input_text, tokenizer, model_source)
+    if "inference-server" in str(model_source).lower() and api_url:
+        messages = [
+            {"role": "system", "content": formatted_system_prompt},
+            {"role": "user", "content": formatted_prompt},
+        ]
+        input_token_count = _inference_server_prompt_token_count(api_url, messages)
+        if input_token_count is None:
+            input_token_count = count_tokens_in_text(
+                full_input_text, tokenizer, model_source
+            )
+            print(
+                "Warning: Using approximate token count for inference-server; "
+                "server-side tokenization endpoint not available."
+            )
+    else:
+        input_token_count = count_tokens_in_text(
+            full_input_text, tokenizer, model_source
+        )
 
-    # Check if input exceeds context length
-    if input_token_count > LLM_CONTEXT_LENGTH:
-        error_message = f"Input text exceeds LLM context length. Input tokens: {input_token_count}, Max context length: {LLM_CONTEXT_LENGTH}. Please reduce the input text size."
+    # Apply context headroom to reduce risk of server-side tokenization mismatch
+    try:
+        _headroom = float(LLM_CONTEXT_HEADROOM_FRACTION)
+    except Exception:
+        _headroom = 0.05
+    _headroom = min(max(_headroom, 0.0), 0.5)
+    effective_limit = max(1, int(LLM_CONTEXT_LENGTH * (1.0 - _headroom)))
+
+    # Check if input exceeds context length (with headroom)
+    if input_token_count > effective_limit:
+        error_message = (
+            f"Input text exceeds LLM context length (with headroom). "
+            f"Input tokens: {input_token_count}, Max (effective): {effective_limit} "
+            f"(raw max: {LLM_CONTEXT_LENGTH}). Please reduce the input text size."
+        )
         print(error_message)
         raise ValueError(error_message)
 
-    print(f"Input token count: {input_token_count} (Max: {LLM_CONTEXT_LENGTH})")
+    print(f"Input token count: {input_token_count} (Max effective: {effective_limit})")
 
     conversation_history = list()
     whole_conversation = list()
@@ -3098,7 +3213,7 @@ def process_batch_with_llm(
         task_type=task_type,
     )
 
-    print("Finished processing batch with LLM")
+    # print("Finished processing batch with LLM")
 
     return (
         new_topic_df,
@@ -4063,6 +4178,7 @@ def extract_topics(
                 and produce_structured_summary_radio == "No"
                 and not existing_reference_df.empty
                 and not existing_topic_summary_df.empty
+                and latest_batch_completed % BATCH_DEDUPLICATION_EVERY_N_BATCHES == 0
             ):
                 print(f"Deduplicating topics after batch {latest_batch_completed}...")
                 # Create temporary file names for deduplication
@@ -4434,6 +4550,12 @@ def extract_topics(
         )
 
         ## Reference table mapping response numbers to topics
+        # Ensure Group is present for grouped pipelines and downstream concatenation
+        if "Group" not in existing_reference_df.columns:
+            existing_reference_df["Group"] = group_name
+        else:
+            existing_reference_df["Group"] = group_name
+
         existing_reference_df.to_csv(
             reference_table_out_path, index=None, encoding="utf-8-sig"
         )
@@ -4466,15 +4588,19 @@ def extract_topics(
                 inplace=True,
             )
         else:
-            unique_table_df_display_table = unique_table_df_display_table[
-                [
-                    "General topic",
-                    "Subtopic",
-                    "Sentiment",
-                    "Number of responses",
-                    "Summary",
-                ]
+            # create_topic_summary_df_from_reference_table omits Sentiment when
+            # sentiment_checkbox is "Do not assess sentiment"
+            display_cols = ["General topic", "Subtopic"]
+            if (
+                _assess_sentiment(sentiment_checkbox)
+                and "Sentiment" in unique_table_df_display_table.columns
+            ):
+                display_cols.append("Sentiment")
+            display_cols.extend(["Number of responses", "Summary"])
+            display_cols = [
+                c for c in display_cols if c in unique_table_df_display_table.columns
             ]
+            unique_table_df_display_table = unique_table_df_display_table[display_cols]
 
         unique_table_df_display_table_markdown = (
             unique_table_df_display_table.to_markdown(index=False)
@@ -4522,6 +4648,10 @@ def extract_topics(
             )
         else:
             modifiable_topic_summary_df = final_out_topic_summary_df.copy()
+
+        # Ensure Group column is present on the returned reference_df for wrapper aggregation
+        if "Group" not in existing_reference_df.columns:
+            existing_reference_df["Group"] = group_name
 
         return (
             unique_table_df_display_table_markdown,
@@ -4985,13 +5115,15 @@ def wrapper_extract_topics_per_column_value(
     if "Topic number" not in acc_reference_df.columns:
         if "Topic number" in acc_topic_summary_df.columns:
             if "General topic" in acc_topic_summary_df.columns:
-                acc_reference_df = acc_reference_df.merge(
-                    acc_topic_summary_df[
-                        ["General topic", "Subtopic", "Sentiment", "Topic number"]
-                    ],
-                    on=["General topic", "Subtopic", "Sentiment"],
-                    how="left",
+                on_cols, summary_cols = _merge_topic_number_keys(
+                    sentiment_checkbox, acc_reference_df, acc_topic_summary_df
                 )
+                if on_cols and summary_cols:
+                    acc_reference_df = acc_reference_df.merge(
+                        acc_topic_summary_df[summary_cols],
+                        on=on_cols,
+                        how="left",
+                    )
                 # Sort output dataframes
                 acc_reference_df["Response References"] = (
                     acc_reference_df["Response References"].astype(float).astype(int)
@@ -4999,17 +5131,19 @@ def wrapper_extract_topics_per_column_value(
                 acc_reference_df["Start row of group"] = acc_reference_df[
                     "Start row of group"
                 ].astype(int)
-                acc_reference_df.sort_values(
-                    [
-                        "Group",
-                        "Start row of group",
-                        "Response References",
-                        "General topic",
-                        "Subtopic",
-                        "Sentiment",
-                    ],
-                    inplace=True,
-                )
+                grp_ref_sort_cols = [
+                    "Group",
+                    "Start row of group",
+                    "Response References",
+                    "General topic",
+                    "Subtopic",
+                ]
+                if (
+                    _assess_sentiment(sentiment_checkbox)
+                    and "Sentiment" in acc_reference_df.columns
+                ):
+                    grp_ref_sort_cols.append("Sentiment")
+                acc_reference_df.sort_values(grp_ref_sort_cols, inplace=True)
             elif "Main heading" in acc_topic_summary_df.columns:
                 acc_reference_df = acc_reference_df.merge(
                     acc_topic_summary_df[
@@ -5041,9 +5175,22 @@ def wrapper_extract_topics_per_column_value(
         acc_topic_summary_df["Number of responses"] = acc_topic_summary_df[
             "Number of responses"
         ].astype(int)
+        grp_topic_sort_cols = [
+            "Group",
+            "Number of responses",
+            "General topic",
+            "Subtopic",
+        ]
+        grp_topic_sort_asc = [True, False, True, True]
+        if (
+            _assess_sentiment(sentiment_checkbox)
+            and "Sentiment" in acc_topic_summary_df.columns
+        ):
+            grp_topic_sort_cols.append("Sentiment")
+            grp_topic_sort_asc.append(True)
         acc_topic_summary_df.sort_values(
-            ["Group", "Number of responses", "General topic", "Subtopic", "Sentiment"],
-            ascending=[True, False, True, True, True],
+            grp_topic_sort_cols,
+            ascending=grp_topic_sort_asc,
             inplace=True,
         )
     elif "Main heading" in acc_topic_summary_df.columns:
@@ -5162,15 +5309,21 @@ def wrapper_extract_topics_per_column_value(
             )
             acc_markdown_output = unique_table_df_display_table.to_markdown(index=False)
         else:
+            display_cols = [
+                "General topic",
+                "Subtopic",
+                "Number of responses",
+                "Summary",
+                "Group",
+            ]
+            if (
+                _assess_sentiment(sentiment_checkbox)
+                and "Sentiment" in unique_table_df_display_table.columns
+            ):
+                display_cols.insert(2, "Sentiment")
+
             acc_markdown_output = unique_table_df_display_table[
-                [
-                    "General topic",
-                    "Subtopic",
-                    "Sentiment",
-                    "Number of responses",
-                    "Summary",
-                    "Group",
-                ]
+                display_cols
             ].to_markdown(index=False)
 
     acc_input_tokens, acc_output_tokens, acc_number_of_calls = (

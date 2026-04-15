@@ -244,6 +244,26 @@ def csvs_to_excel(
     # Remove default sheet
     wb.remove(wb.active)
 
+    def _read_csv_with_fallback_encodings(path: str) -> pd.DataFrame:
+        encodings_to_try = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
+        last_err = None
+        for enc in encodings_to_try:
+            try:
+                return pd.read_csv(path, encoding=enc)
+            except UnicodeDecodeError as e:
+                last_err = e
+                continue
+            except Exception:
+                raise
+
+        # Final fallback: replacement characters so XLSX generation can proceed
+        try:
+            return pd.read_csv(path, encoding="utf-8", encoding_errors="replace")
+        except Exception:
+            if last_err is not None:
+                raise last_err
+            raise
+
     for idx, csv_path in enumerate(csv_files):
         # Use provided sheet name or derive from file name
         sheet_name = (
@@ -251,7 +271,7 @@ def csvs_to_excel(
             if sheet_names and idx < len(sheet_names)
             else os.path.splitext(os.path.basename(csv_path))[0]
         )
-        df = pd.read_csv(csv_path)
+        df = _read_csv_with_fallback_encodings(csv_path)
 
         if sheet_name == "Original data":
             try:

@@ -336,6 +336,12 @@ ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "True")
 )  # Whether to deduplicate topics after each batch during extraction. Will use basic deduplication to check for typos in effectively duplicate topic names, and if candidate topics are not provided, will use LLM deduplication to merge similar topics if the current number of topics exceeds the maximum allowed number of topics (MAXIMUM_ALLOWED_TOPICS, or defined in GUI by user)
 
+# Run batch deduplication only when the number of completed batches is a multiple of this value (1 = every batch; e.g. 5 = after batches 5, 10, 15, ...). Values below 1 are treated as 1.
+BATCH_DEDUPLICATION_EVERY_N_BATCHES = max(
+    1,
+    int(get_or_create_env_var("BATCH_DEDUPLICATION_EVERY_N_BATCHES", "5")),
+)
+
 ###
 # Model options
 ###
@@ -373,6 +379,19 @@ AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var(
 RUN_INFERENCE_SERVER = get_or_create_env_var("RUN_INFERENCE_SERVER", "0")
 API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
 
+# Inference-server HTTP settings
+# The server can take a while to start responding while it pre-processes a prompt,
+# so this should often be higher than the general retry sleep.
+INFERENCE_SERVER_READ_TIMEOUT_SECONDS = int(
+    get_or_create_env_var("INFERENCE_SERVER_READ_TIMEOUT_SECONDS", "120")
+)
+
+# When we cannot do server-side token counting for inference-server, our local estimates can be low.
+# Apply an additional safety multiplier to sampler token budgets in that case.
+INFERENCE_SERVER_SAMPLER_TOKEN_BUDGET_FRACTION = float(
+    get_or_create_env_var("INFERENCE_SERVER_SAMPLER_TOKEN_BUDGET_FRACTION", "0.9")
+)
+
 RUN_MCP_SERVER = convert_string_to_boolean(
     get_or_create_env_var("RUN_MCP_SERVER", "False")
 )
@@ -392,6 +411,11 @@ if USE_LLAMA_SWAP == "True":
 else:
     USE_LLAMA_SWAP = False
 
+# Qwen3 / Qwen3.5 on vLLM: set enable_thinking=False in chat completions (see llm_funcs.call_inference_server_api)
+INFERENCE_SERVER_DISABLE_THINKING = convert_string_to_boolean(
+    get_or_create_env_var("INFERENCE_SERVER_DISABLE_THINKING", "True")
+)
+
 if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_full_names.append(CHOSEN_LOCAL_MODEL_TYPE)
     model_short_names.append(CHOSEN_LOCAL_MODEL_TYPE)
@@ -399,6 +423,7 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
 
 if RUN_AWS_BEDROCK_MODELS == "1":
     amazon_models = [
+        "google.gemma-3-12b-it",
         "anthropic.claude-3-haiku-20240307-v1:0",
         "anthropic.claude-3-7-sonnet-20250219-v1:0",
         "anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -408,12 +433,12 @@ if RUN_AWS_BEDROCK_MODELS == "1":
         "deepseek.v3-v1:0",
         "openai.gpt-oss-20b-1:0",
         "openai.gpt-oss-120b-1:0",
-        "google.gemma-3-12b-it",
         "mistral.ministral-3-14b-instruct",
     ]
     model_full_names.extend(amazon_models)
     model_short_names.extend(
         [
+            "gemma_3_12b_it",
             "haiku",
             "sonnet_3_7",
             "sonnet_4_5",
@@ -423,7 +448,6 @@ if RUN_AWS_BEDROCK_MODELS == "1":
             "deepseek_v3",
             "gpt_oss_20b_aws",
             "gpt_oss_120b_aws",
-            "gemma_3_12b_it",
             "ministral_3_14b_instruct",
         ]
     )
@@ -456,6 +480,10 @@ if RUN_INFERENCE_SERVER == "1":
         "gpt_oss_20b",
         "gemma_3_12b",
         "ministral_3_14b_it",
+        "Qwen 3.5 27b",
+        "Qwen 3.5 35b a3b",
+        "Gemma 4 26b a4b",
+        "Gemma 4 31b",
     ]
     model_full_names.extend(inference_server_models)
     model_short_names.extend(inference_server_models)
@@ -736,6 +764,11 @@ LLM_STREAM = get_or_create_env_var("LLM_STREAM", "True")
 LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
 LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
 LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "24576"))
+# Keep some headroom so we don't hit hard context errors if token counting differs
+# slightly between client-side estimates and server-side tokenization/templates.
+LLM_CONTEXT_HEADROOM_FRACTION = float(
+    get_or_create_env_var("LLM_CONTEXT_HEADROOM_FRACTION", "0.05")
+)
 LLM_SAMPLE = get_or_create_env_var("LLM_SAMPLE", "True")
 LLM_STOP_STRINGS = get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")
 
