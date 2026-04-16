@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.9.1"
+version = "0.10.0"
 description = "Generate thematic summaries from open text in tabular data files with a large language model."
 requires-python = ">=3.10"
 readme = "README.md"
@@ -51,22 +51,22 @@ classifiers = [
 ]
 
 dependencies = [    
-    "gradio==6.0.2",
-    "transformers==4.57.2",
-    "spaces==0.42.1",
-    "boto3==1.42.1",
+    "gradio<=6.12.0",
+    "transformers<=5.3.0",
+    "spaces<=0.48.1",
+    "boto3<=1.42.80",
     "pandas<=2.3.3",
-    "pyarrow>=21.0.0",
-    "openpyxl>=3.1.5",
-    "markdown>=3.7",
-    "tabulate>=0.9.0",
-    "lxml>=5.3.0",
-    "google-genai<=1.52.0",
-    "openai<=2.8.1",
-    "html5lib>=1.1",
-    "beautifulsoup4>=4.12.3",
-    "rapidfuzz>=3.13.0",
-    "python-dotenv>=1.1.0"
+    "pyarrow<=23.0.1",
+    "openpyxl<=3.1.5",
+    "markdown<=3.10.2",
+    "tabulate<=0.9.0",
+    "lxml<=6.0.4",
+    "google-genai<=1.73.0",
+    "openai<=2.31.0",
+    "html5lib<=1.1",
+    "beautifulsoup4<=4.14.3",
+    "rapidfuzz<=3.14.5",
+    "python-dotenv<=1.2.2"
 ]
 
 [project.optional-dependencies]
@@ -74,26 +74,27 @@ dev = ["pytest"]
 test = ["pytest", "pytest-cov"]
 
 # Extra dependencies for VLM models
-# For torch you should use --index-url https://download.pytorch.org/whl/cu128. Additionally installs the unsloth package
+# For torch you should use --index-url https://download.pytorch.org/whl/cu129. Additionally installs the unsloth package
 torch = [
     "torch<=2.9.1",
     "torchvision",
     "accelerate",
     "bitsandbytes",
-    "unsloth==2025.11.6",
-    "unsloth_zoo==2025.11.6",
+    "unsloth<=2026.4.4",
+    "unsloth_zoo<=2026.4.4",
     "timm",
     "xformers"
 ]
 
-# If you want to install llama-cpp-python in GPU mode, use cmake.args="-DGGML_CUDA=on" . If that doesn't work, try specific wheels for your system, e.g. for Linux see files in https://github.com/JamePeng/llama-cpp-python/releases. More details on installation here: https://llama-cpp-python.readthedocs.io/en/latest
+# Support for llama-cpp-python is deprecated with this repo is deprecated as the original repo has become inconsistently updated. I advise using a llama.cpp/vllm inference server instead. If you want to use llama-cpp-python with recent models, you can try specific wheels for your system, e.g. for Linux see files in https://github.com/JamePeng/llama-cpp-python/releases. More details on installation here: https://github.com/JamePeng/llama-cpp-python
 llamacpp = [
-    "llama-cpp-python>=0.3.16",
+    "llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git",
+    #"llama-cpp-python<=0.3.16",
 ]
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]==6.0.2"
+    "gradio[mcp]<=6.12.0"
 ]
 
 [project.urls]

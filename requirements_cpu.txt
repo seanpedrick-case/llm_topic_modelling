@@ -1,21 +1,21 @@
-gradio==6.0.2
-transformers==4.57.2
-spaces==0.42.1
-pandas>=2.3.3
-boto3>=1.42.1
-pyarrow>=21.0.0
-openpyxl>=3.1.5
-markdown>=3.7
-tabulate>=0.9.0
-lxml>=5.3.0
-google-genai>=1.52.0
-openai>=2.8.1
-html5lib>=1.1
-beautifulsoup4>=4.12.3
-rapidfuzz>=3.13.0
-python-dotenv>=1.1.0
+gradio<=6.12.0
+transformers<=5.3.0
+spaces<=0.48.1
+pandas<=2.3.3
+boto3<=1.42.80
+pyarrow<=23.0.1
+openpyxl<=3.1.5
+markdown<=3.10.2
+tabulate<=0.9.0
+lxml<=6.0.4
+google-genai<=1.73.0
+openai<=2.31.0
+html5lib<=1.1
+beautifulsoup4<=4.14.3
+rapidfuzz<=3.14.5
+python-dotenv<=1.2.2
 torch<=2.9.1 --extra-index-url https://download.pytorch.org/whl/cpu
-llama-cpp-python==0.3.16 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS"
+llama-cpp-python<=0.3.16 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS"
 # Direct wheel links if above doesn't work
 # I have created CPU Linux, Python 3.11 compatible wheels:
 # https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/download/v0.1.0/llama_cpp_python-0.3.16-cp311-cp311-linux_x86_64.whl
