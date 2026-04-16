@@ -1494,7 +1494,7 @@ with app:
     ###
 
     # Tabular data upload
-    in_data_files.change(
+    in_data_files.upload(
         fn=put_columns_in_df,
         inputs=[in_data_files],
         outputs=[
