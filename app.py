@@ -163,6 +163,10 @@ from tools.prompts import (
     system_prompt,
     two_para_summary_format_prompt,
 )
+from tools.view_logs import (
+    load_log_file_handler,
+    update_log_display_on_filter,
+)
 
 ensure_folder_exists(CONFIG_FOLDER)
 ensure_folder_exists(OUTPUT_FOLDER)
@@ -224,6 +228,7 @@ in_group_col = gr.Dropdown(
     label="Select the column to group results by",
     allow_custom_value=True,
     interactive=True,
+    visible=True,
 )
 batch_size_number = gr.Number(
     label="Number of responses to submit in a single LLM query (batch size)",
@@ -687,6 +692,9 @@ with app:
             visible="hidden",
             elem_classes="hidden_component",
         )
+
+        # State to store loaded log data
+        log_data_state = gr.State(value=[])
 
     ###
     # UI LAYOUT
@@ -1224,16 +1232,79 @@ with app:
             )
 
     with gr.Tab(label="Topic table viewer", visible="hidden"):
-        gr.Markdown("""### View a 'unique_topic_table' csv file in markdown format.""")
+        with gr.Accordion(
+            "View LLM log files containing prompts and responses", open=True
+        ):
+            gr.Markdown(
+                """Upload a JSON log file to view prompts and responses by batch number and task type."""
+            )
 
-        in_view_table = gr.File(
-            height=FILE_INPUT_HEIGHT,
-            label="Choose unique topic csv files",
-            file_count="single",
-            file_types=[".csv", ".parquet"],
-        )
+            with gr.Row():
+                in_view_log_file = gr.File(
+                    height=FILE_INPUT_HEIGHT,
+                    label="Choose JSON log file",
+                    file_count="single",
+                    file_types=[".json"],
+                )
+                in_view_table = gr.File(
+                    height=FILE_INPUT_HEIGHT,
+                    label="Choose unique topic csv files (legacy)",
+                    file_count="single",
+                    file_types=[".csv", ".parquet"],
+                    visible=False,
+                )
+        with gr.Row():
+            log_batch_dropdown = gr.Dropdown(
+                choices=[],
+                label="Select batch number",
+                multiselect=False,
+                interactive=True,
+                allow_custom_value=False,
+            )
+            log_task_type_dropdown = gr.Dropdown(
+                choices=[],
+                label="Select task type",
+                multiselect=False,
+                interactive=True,
+                allow_custom_value=False,
+            )
+        with gr.Row():
+            log_group_dropdown = gr.Dropdown(
+                choices=[],
+                label="Select group",
+                multiselect=False,
+                interactive=True,
+                allow_custom_value=False,
+            )
+            log_model_choice_dropdown = gr.Dropdown(
+                choices=[],
+                label="Select model choice",
+                multiselect=False,
+                interactive=True,
+                allow_custom_value=False,
+            )
+            log_validated_dropdown = gr.Dropdown(
+                choices=[],
+                label="Select validated",
+                multiselect=False,
+                interactive=True,
+                allow_custom_value=False,
+            )
+
+        with gr.Row():
+            log_prompt_markdown = gr.Markdown(
+                value="### Prompt\n\nUpload a JSON log file to view prompts.",
+                label="Prompt",
+                buttons=["copy"],
+            )
+            log_response_markdown = gr.Markdown(
+                value="### Response\n\nUpload a JSON log file to view responses.",
+                label="Response",
+                buttons=["copy"],
+            )
+
         view_table_markdown = gr.Markdown(
-            value="", label="View table", buttons=["copy"]
+            value="", label="View table (legacy)", buttons=["copy"], visible=False
         )
 
     with gr.Tab(label="Continue unfinished topic extraction", visible="hidden"):
@@ -2385,6 +2456,97 @@ with app:
     # VIEW TABLE PAGE
     ###
 
+    # Handle log file upload
+    in_view_log_file.upload(
+        fn=load_log_file_handler,
+        inputs=[in_view_log_file],
+        outputs=[
+            log_data_state,
+            log_batch_dropdown,
+            log_task_type_dropdown,
+            log_group_dropdown,
+            log_model_choice_dropdown,
+            log_validated_dropdown,
+            log_prompt_markdown,
+            log_response_markdown,
+        ],
+    )
+
+    # Update display when any filter changes
+    def update_on_filter_change(
+        log_data, batch_str, task_type, group, model_choice, validated
+    ):
+        """Wrapper to update display when any filter changes."""
+        return update_log_display_on_filter(
+            log_data, batch_str, task_type, group, model_choice, validated
+        )
+
+    log_batch_dropdown.change(
+        fn=update_on_filter_change,
+        inputs=[
+            log_data_state,
+            log_batch_dropdown,
+            log_task_type_dropdown,
+            log_group_dropdown,
+            log_model_choice_dropdown,
+            log_validated_dropdown,
+        ],
+        outputs=[log_prompt_markdown, log_response_markdown],
+    )
+
+    log_task_type_dropdown.change(
+        fn=update_on_filter_change,
+        inputs=[
+            log_data_state,
+            log_batch_dropdown,
+            log_task_type_dropdown,
+            log_group_dropdown,
+            log_model_choice_dropdown,
+            log_validated_dropdown,
+        ],
+        outputs=[log_prompt_markdown, log_response_markdown],
+    )
+
+    log_group_dropdown.change(
+        fn=update_on_filter_change,
+        inputs=[
+            log_data_state,
+            log_batch_dropdown,
+            log_task_type_dropdown,
+            log_group_dropdown,
+            log_model_choice_dropdown,
+            log_validated_dropdown,
+        ],
+        outputs=[log_prompt_markdown, log_response_markdown],
+    )
+
+    log_model_choice_dropdown.change(
+        fn=update_on_filter_change,
+        inputs=[
+            log_data_state,
+            log_batch_dropdown,
+            log_task_type_dropdown,
+            log_group_dropdown,
+            log_model_choice_dropdown,
+            log_validated_dropdown,
+        ],
+        outputs=[log_prompt_markdown, log_response_markdown],
+    )
+
+    log_validated_dropdown.change(
+        fn=update_on_filter_change,
+        inputs=[
+            log_data_state,
+            log_batch_dropdown,
+            log_task_type_dropdown,
+            log_group_dropdown,
+            log_model_choice_dropdown,
+            log_validated_dropdown,
+        ],
+        outputs=[log_prompt_markdown, log_response_markdown],
+    )
+
+    # Legacy view_table handler (kept for backward compatibility)
     in_view_table.upload(
         view_table, inputs=[in_view_table], outputs=[view_table_markdown]
     )

@@ -23,8 +23,7 @@ In the second column named 'Subtopic', list subtopics relevant to responses. Mak
 {sentiment_choices}{response_reference_format}
 In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
-
-Response table: 
+ 
 {response_table}
 
 New table:{previous_table_introduction}{previous_table}{validate_prompt_suffix}"""
@@ -49,7 +48,8 @@ add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create o
 In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
-Choose from among the following topic names to assign to the responses, only if they are directly relevant to responses from the response table below: 
+Choose from among the following topic names to assign to the responses, only if they are directly relevant to responses from the response table below:
+
 {topics}
 
 {response_table}
@@ -172,7 +172,7 @@ excel_plain_text_format_prompt = "Return a comprehensive summary that covers all
 
 llm_deduplication_system_prompt = """You are an expert at analysing and consolidating topic categories. Your task is to identify semantically similar topics that should be merged together, even if they use different wording or synonyms."""
 
-llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and CONSOLIDATE multiple different topics into the SAME merged topic names. The goal is to REDUCE the total number of unique topics by merging similar ones together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}.
+llm_deduplication_prompt = """You are given a table of topics with their General topics, Subtopics{sentiment_text}. Your task is to identify topics that are semantically similar and CONSOLIDATE multiple different topics into the SAME merged topic names. The goal is to REDUCE the total number of unique topics by merging similar ones together. Only merge topics that are almost identical in terms of meaning - if in doubt, do not merge. The user has specified that there should be a maximum of {max_number_of_topics} topics, so if the current number of topics is greater than this, merge topics until the number of topics is less than or equal to {max_number_of_topics}. If no duplicates are found, return an empty table with the column headings suggested below.
 
 IMPORTANT: You must CONSOLIDATE multiple different topics into the same merged topic names. For example, if you have:
 - "Transportation issues" 

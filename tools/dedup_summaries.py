@@ -18,6 +18,8 @@ from tools.config import (
     CHOSEN_LOCAL_MODEL_TYPE,
     DEDUPLICATION_THRESHOLD,
     DEFAULT_SAMPLED_SUMMARIES,
+    INFERENCE_SERVER_SAMPLER_TOKEN_BUDGET_FRACTION,
+    LLM_CONTEXT_HEADROOM_FRACTION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
     LLM_SEED,
@@ -34,6 +36,18 @@ from tools.config import (
     TIMEOUT_WAIT,
     model_name_map,
 )
+
+
+def _effective_context_limit() -> int:
+    """Return max context length with safety headroom applied."""
+    try:
+        frac = float(LLM_CONTEXT_HEADROOM_FRACTION)
+    except Exception:
+        frac = 0.05
+    frac = min(max(frac, 0.0), 0.5)
+    return max(1, int(LLM_CONTEXT_LENGTH * (1.0 - frac)))
+
+
 from tools.helper_functions import (
     clean_column_name,
     convert_reference_table_to_pivot_table,
@@ -258,6 +272,14 @@ def deduplicate_topics(
             "reference_df must contain 'Response References' column. "
             f"Available columns: {list(reference_df.columns)}"
         )
+
+    # Many downstream dedup steps assume a Sentiment column exists.
+    # When sentiment assessment is disabled upstream, we normalise to a single placeholder value.
+    if sentiment_checkbox == "Do not assess sentiment":
+        if "Sentiment" not in reference_df.columns:
+            reference_df["Sentiment"] = "Not assessed"
+        if "Sentiment" not in topic_summary_df.columns:
+            topic_summary_df["Sentiment"] = "Not assessed"
 
     # Add 'Topic number' column if it doesn't exist (row number starting from 1)
     if "Topic number" not in topic_summary_df.columns:
@@ -631,8 +653,13 @@ def deduplicate_topics(
             reference_df["Group"].nunique() if ref_df_has_group else 0
         )
 
-        # If input didn't have meaningful Group distinction, normalize to single Group
-        if not input_has_group or input_unique_groups <= 1:
+        # If input didn't have meaningful Group distinction, normalise to a single Group
+        # ONLY when the reference table also doesn't have meaningful Group distinction.
+        # If reference_df contains multiple Groups, collapsing them here would silently drop
+        # group-level outputs downstream (e.g. only one Group appears in the XLSX).
+        if (not input_has_group or input_unique_groups <= 1) and (
+            ref_df_unique_groups_before <= 1
+        ):
             # Get the most common Group value from reference_df, or use "All" if not present
             if ref_df_has_group and not reference_df["Group"].empty:
                 most_common_group = (
@@ -654,6 +681,13 @@ def deduplicate_topics(
                     f"and {ref_df_unique_groups_after} after. Forcing all to '{most_common_group}'."
                 )
                 reference_df["Group"] = most_common_group
+        elif (not input_has_group or input_unique_groups <= 1) and (
+            ref_df_unique_groups_before > 1
+        ):
+            print(
+                "Warning: topic_summary_df had no/one Group but reference_df has multiple Groups. "
+                "Preserving reference_df Group values to avoid dropping grouped outputs."
+            )
 
         # Remake topic_summary_df based on new reference_df
         # Rebuild topic_summary_df from updated reference_df to ensure consistency
@@ -683,11 +717,29 @@ def deduplicate_topics(
         # Then merge the topic numbers back to the original dataframe
         # Only merge if both dataframes are not empty
         if not reference_df.empty and not topic_summary_df.empty:
+            on_cols = ["General topic", "Subtopic"]
+            if (
+                sentiment_checkbox != "Do not assess sentiment"
+                and "Sentiment" in reference_df.columns
+                and "Sentiment" in topic_summary_df.columns
+            ):
+                on_cols.append("Sentiment")
+            if "Group" in reference_df.columns and "Group" in topic_summary_df.columns:
+                on_cols.append("Group")
+            on_cols = [
+                c
+                for c in on_cols
+                if c in reference_df.columns and c in topic_summary_df.columns
+            ]
+
+            right_cols = list(on_cols)
+            if "Topic number" in topic_summary_df.columns:
+                right_cols.append("Topic number")
+            right_cols = [c for c in right_cols if c in topic_summary_df.columns]
+
             reference_df = reference_df.merge(
-                topic_summary_df[
-                    ["General topic", "Subtopic", "Sentiment", "Group", "Topic number"]
-                ],
-                on=["General topic", "Subtopic", "Sentiment", "Group"],
+                topic_summary_df[right_cols],
+                on=on_cols,
                 how="left",
             )
 
@@ -2007,17 +2059,63 @@ def deduplicate_topics_llm(
     )  # , num_merges_applied
 
 
+def join_unique_summaries(x):
+    unique_summaries = []
+    seen = set()
+
+    for s in x:
+        if pd.isna(s):
+            continue
+
+        # 1. Normalize whitespace and split lines
+        s_str = str(s).strip()
+        # Split on both newlines and <br> separators to avoid duplicating segments
+        # that were previously concatenated in other stages.
+        lines = re.split(r"\n|<br>| <br> ", s_str)
+
+        for line in lines:
+            # 2. Aggressive Cleaning
+            # Remove "Rows X to Y:" prefix
+            line = re.sub(
+                r"^Rows\s+\d+\s+to\s+\d+:\s*", "", line, flags=re.IGNORECASE
+            ).strip()
+
+            # Remove generic "Prefix:" if it exists (e.g., "Summary: ...")
+            if ": " in line:
+                parts = line.split(": ", 1)
+                if len(parts[0]) < 50 and " " not in parts[0]:
+                    line = parts[1].strip()
+
+            # 3. Handle Invisible Characters (Crucial)
+            # Replace non-breaking spaces (\xa0) and multiple spaces with a single standard space
+            normalized_line = re.sub(r"\s+", " ", line).strip()
+
+            # 4. Check against Seen
+            if normalized_line and normalized_line not in seen:
+                unique_summaries.append(normalized_line)
+                seen.add(normalized_line)
+
+    return "\n".join(unique_summaries)
+
+
 def sample_reference_table_summaries(
     reference_df: pd.DataFrame,
     random_seed: int,
     no_of_sampled_summaries: int = default_number_of_sampled_summaries,
     sample_reference_table_checkbox: bool = False,
+    available_tokens_for_summaries: int = None,
+    tokenizer=None,
+    model_source: str = "Local",
 ):
     """
     Sample x number of summaries from which to produce summaries, so that the input token length is not too long.
     """
 
     if sample_reference_table_checkbox:
+        # If caller didn't provide a budget, use a conservative default.
+        # (We avoid truncating mid-passage; the budget controls how many whole samples we keep.)
+        if available_tokens_for_summaries is None:
+            available_tokens_for_summaries = int(_effective_context_limit() * 0.6)
 
         all_summaries = pd.DataFrame(
             columns=[
@@ -2037,6 +2135,14 @@ def sample_reference_table_summaries(
             ["General topic", "Subtopic", "Sentiment", "Group"]
         )
 
+        # Sampling diagnostics
+        sampling_stats = {
+            "topic_combos_seen": 0,
+            "topics_budget_reduced": 0,
+            "total_passages_dropped": 0,
+            "topics_dropped_entirely": 0,
+        }
+
         if "Revised summary" in reference_df.columns:
             out_message = "Summary has already been created for this file"
             print(out_message)
@@ -2044,25 +2150,137 @@ def sample_reference_table_summaries(
 
         for group_keys, reference_df_group in reference_df_grouped:
             if len(reference_df_group["General topic"]) > 1:
+                sampling_stats["topic_combos_seen"] += 1
 
                 filtered_reference_df = reference_df_group.reset_index()
 
                 filtered_reference_df_unique = filtered_reference_df.drop_duplicates(
-                    ["General topic", "Subtopic", "Sentiment", "Summary"]
+                    [
+                        "General topic",
+                        "Subtopic",
+                        "Sentiment",
+                        "Group",
+                        "Start row of group",
+                    ]
                 )
 
                 # Sample n of the unique topic summaries PER GROUP. To limit the length of the text going into the summarisation tool
                 # This ensures each group gets up to no_of_sampled_summaries summaries, not the total across all groups
-                filtered_reference_df_unique_sampled = (
-                    filtered_reference_df_unique.sample(
-                        min(no_of_sampled_summaries, len(filtered_reference_df_unique)),
-                        random_state=random_seed,
-                    )
+                number_of_summaries_to_sample = min(
+                    no_of_sampled_summaries, len(filtered_reference_df_unique)
                 )
 
-                all_summaries = pd.concat(
-                    [all_summaries, filtered_reference_df_unique_sampled]
-                )
+                # Sample once at the maximum size, then shrink by taking a prefix if needed.
+                sampled_max_df = filtered_reference_df_unique.sample(
+                    number_of_summaries_to_sample, random_state=random_seed
+                ).reset_index(drop=True)
+
+                # Never allow the same underlying response to be sampled twice for a topic combo
+                if "Response References" in sampled_max_df.columns:
+                    sampled_max_df = sampled_max_df.drop_duplicates(
+                        subset=["Response References"]
+                    ).reset_index(drop=True)
+
+                def _split_passages_for_budget(text: str) -> List[str]:
+                    if not isinstance(text, str) or not text.strip():
+                        return []
+                    # Prefer newline (join_unique_summaries uses "\n"), then <br>
+                    parts = [p.strip() for p in str(text).split("\n") if p.strip()]
+                    if len(parts) <= 1 and "<br>" in str(text):
+                        parts = [
+                            p.strip() for p in str(text).split("<br>") if p.strip()
+                        ]
+                    return parts if parts else [str(text).strip()]
+
+                def _trim_joined_text_to_budget(text: str) -> str:
+                    """Trim joined summaries by dropping whole passages to fit token budget."""
+                    passages = _split_passages_for_budget(text)
+                    if not passages:
+                        return ""
+
+                    # Fast path: already fits
+                    joined = "\n".join(passages)
+                    if (
+                        count_tokens_in_text(joined, tokenizer, model_source)
+                        <= available_tokens_for_summaries
+                    ):
+                        return joined
+
+                    # Binary search max number of passages that fit
+                    lo, hi = 1, len(passages)
+                    best = None
+                    while lo <= hi:
+                        mid = (lo + hi) // 2
+                        candidate = "\n".join(passages[:mid])
+                        cand_tokens = count_tokens_in_text(
+                            candidate, tokenizer, model_source
+                        )
+                        if cand_tokens <= available_tokens_for_summaries:
+                            best = candidate
+                            lo = mid + 1
+                        else:
+                            hi = mid - 1
+
+                    if best is None:
+                        # Even one passage doesn't fit: return empty rather than crash the pipeline.
+                        one_tokens = count_tokens_in_text(
+                            passages[0], tokenizer, model_source
+                        )
+                        print(
+                            "Warning: A single passage is too large to fit token budget during sampling. "
+                            f"topic-sentiment-group={group_keys}, passage_tokens={one_tokens}, "
+                            f"budget={available_tokens_for_summaries}. Dropping this summary from sampling."
+                        )
+                        sampling_stats["topics_dropped_entirely"] += 1
+                        return ""
+
+                    # Track how much we dropped
+                    try:
+                        kept = len([p for p in best.splitlines() if p.strip()])
+                    except Exception:
+                        kept = 0
+                    dropped = max(0, len(passages) - kept)
+                    if dropped > 0:
+                        sampling_stats["topics_budget_reduced"] += 1
+                        sampling_stats["total_passages_dropped"] += dropped
+
+                    return best
+
+                def _joined_summary_token_count(df: pd.DataFrame) -> int:
+                    joined = join_unique_summaries(df["Summary"])
+                    joined = _trim_joined_text_to_budget(joined)
+                    return count_tokens_in_text(joined, tokenizer, model_source)
+
+                # Ensure the joined summary fits within the token budget by dropping whole samples
+                # (never truncating a passage mid-way).
+                if len(sampled_max_df) > 0:
+                    current_tokens = _joined_summary_token_count(sampled_max_df)
+                    if current_tokens > available_tokens_for_summaries:
+                        lo, hi = 1, len(sampled_max_df)
+                        best_k = 0
+                        while lo <= hi:
+                            mid = (lo + hi) // 2
+                            test_df = sampled_max_df.iloc[:mid]
+                            test_tokens = _joined_summary_token_count(test_df)
+                            if test_tokens <= available_tokens_for_summaries:
+                                best_k = mid
+                                lo = mid + 1
+                            else:
+                                hi = mid - 1
+
+                        if best_k == 0:
+                            # With passage-level trimming, we should always be able to fit *something* unless
+                            # even one passage is too large. In that case we just keep 1 row and allow the
+                            # downstream summariser to skip/handle empty summaries.
+                            best_k = 1
+
+                        print(
+                            f"Warning: Joined summaries for topic-sentiment-group combination {group_keys} exceed token budget. "
+                            f"Reducing samples from {len(sampled_max_df)} to {best_k} to fit."
+                        )
+                        sampled_max_df = sampled_max_df.iloc[:best_k]
+
+                all_summaries = pd.concat([all_summaries, sampled_max_df])
 
         # If no responses/topics qualify, just go ahead with the original reference dataframe
         if all_summaries.empty:
@@ -2073,25 +2291,10 @@ def sample_reference_table_summaries(
             ]
         else:
             # Deduplicate summaries within each group before joining to prevent repeated summaries
-            def join_unique_summaries(x):
-                """Join unique summaries, handling both formats with and without ': ' prefix."""
-                unique_summaries = []
-                seen = set()
-                for s in x:
-                    if pd.notna(s):  # Skip NaN values
-                        # Convert to string and strip whitespace
-                        s_str = str(s).strip()
-                        if s_str:  # Skip empty strings
-                            # Handle summaries with ": " prefix
-                            if ": " in s_str:
-                                summary_text = s_str.split(": ", 1)[1].strip()
-                            else:
-                                summary_text = s_str
-                            # Only add if we haven't seen this exact summary text before
-                            if summary_text and summary_text not in seen:
-                                unique_summaries.append(summary_text)
-                                seen.add(summary_text)
-                return "\n".join(unique_summaries)
+
+            def join_unique_summaries_with_budget(x):
+                joined = join_unique_summaries(x)
+                return _trim_joined_text_to_budget(joined)
 
             sampled_reference_table_df = (
                 all_summaries.groupby(
@@ -2100,7 +2303,7 @@ def sample_reference_table_summaries(
                 .agg(
                     {
                         "Response References": "size",  # Count the number of references
-                        "Summary": join_unique_summaries,  # Join unique summaries only
+                        "Summary": join_unique_summaries_with_budget,  # Join unique summaries only (budgeted)
                     }
                 )
                 .reset_index()
@@ -2110,6 +2313,14 @@ def sample_reference_table_summaries(
                 (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
                 & (sampled_reference_table_df["Response References"] > 1)
             ]
+
+        print(
+            "Sampling stats: "
+            f"topic_combos_seen={sampling_stats['topic_combos_seen']}, "
+            f"topics_budget_reduced={sampling_stats['topics_budget_reduced']}, "
+            f"total_passages_dropped={sampling_stats['total_passages_dropped']}, "
+            f"topics_dropped_entirely={sampling_stats['topics_dropped_entirely']}"
+        )
     else:
         sampled_reference_table_df = reference_df
 
@@ -2147,6 +2358,85 @@ def count_tokens_in_text(text: str, tokenizer=None, model_source: str = "Local")
         # Fallback: rough estimation using word count
         word_count = len(text.split())
         return int(word_count * 1.3)
+
+
+def _inference_server_prompt_token_count(
+    api_url: str, messages: List[dict], chat_template_kwargs: dict | None = None
+) -> int | None:
+    """
+    Best-effort server-side token counting for llama.cpp / OpenAI-compatible inference servers.
+
+    We try to:
+    1) Apply the server's chat template (so counts match what the server will tokenize)
+    2) Tokenize that rendered prompt
+
+    If the server doesn't expose these endpoints, returns None.
+    """
+    if not api_url:
+        return None
+
+    try:
+        import requests
+
+        # 1) Try apply-template (llama.cpp exposes this on some builds)
+        prompt_text = None
+        for path in ("/apply-template", "/v1/apply-template"):
+            try:
+                r = requests.post(
+                    f"{api_url}{path}",
+                    json={
+                        "messages": messages,
+                        "chat_template_kwargs": chat_template_kwargs or {},
+                    },
+                    timeout=10,
+                )
+                if r.status_code == 404:
+                    continue
+                r.raise_for_status()
+                data = (
+                    r.json()
+                    if "application/json" in r.headers.get("content-type", "")
+                    else r.text
+                )
+                if isinstance(data, dict):
+                    prompt_text = (
+                        data.get("prompt") or data.get("content") or data.get("text")
+                    )
+                elif isinstance(data, str):
+                    prompt_text = data
+                if prompt_text:
+                    break
+            except Exception:
+                continue
+
+        # If no apply-template endpoint, we can't reliably match server tokenization.
+        if not prompt_text:
+            return None
+
+        # 2) Tokenize the rendered prompt
+        for path in ("/tokenize", "/v1/tokenize"):
+            try:
+                r = requests.post(
+                    f"{api_url}{path}",
+                    json={"content": prompt_text},
+                    timeout=10,
+                )
+                if r.status_code == 404:
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                if isinstance(data, dict):
+                    if "tokens" in data and isinstance(data["tokens"], list):
+                        return len(data["tokens"])
+                    if "n_tokens" in data:
+                        return int(data["n_tokens"])
+                break
+            except Exception:
+                continue
+    except Exception:
+        return None
+
+    return None
 
 
 def clean_markdown_table_whitespace(markdown_text: str) -> str:
@@ -2248,15 +2538,45 @@ def summarise_output_topics_query(
     )
 
     # Count tokens in the input text
-    input_token_count = count_tokens_in_text(full_input_text, tokenizer, model_source)
+    if "inference-server" in str(model_source).lower() and api_url:
+        messages = [
+            {"role": "system", "content": summarise_topic_descriptions_system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    formatted_summary_prompt[0]
+                    if isinstance(formatted_summary_prompt, list)
+                    else formatted_summary_prompt
+                ),
+            },
+        ]
+        input_token_count = _inference_server_prompt_token_count(api_url, messages)
+        if input_token_count is None:
+            input_token_count = count_tokens_in_text(
+                full_input_text, tokenizer, model_source
+            )
+            print(
+                "Warning: Using approximate token count for inference-server; "
+                "server-side tokenization endpoint not available."
+            )
+    else:
+        input_token_count = count_tokens_in_text(
+            full_input_text, tokenizer, model_source
+        )
 
-    # Check if input exceeds context length
-    if input_token_count > LLM_CONTEXT_LENGTH:
-        error_message = f"Input text exceeds LLM context length. Input tokens: {input_token_count}, Max context length: {LLM_CONTEXT_LENGTH}. Please reduce the input text size."
+    effective_limit = _effective_context_limit()
+
+    # Check if input exceeds context length (with headroom)
+    if input_token_count > effective_limit:
+        error_message = (
+            f"Input text exceeds LLM context length (with headroom). "
+            f"Input tokens: {input_token_count}, Max (effective): {effective_limit} "
+            f"(raw max: {LLM_CONTEXT_LENGTH}). Please reduce the input text size."
+        )
         print(error_message)
         raise ValueError(error_message)
 
-    print(f"Input token count: {input_token_count} (Max: {LLM_CONTEXT_LENGTH})")
+    print(f"Input token count: {input_token_count} (Max effective: {effective_limit})")
 
     # Prepare Gemini models before query
     if "Gemini" in model_source:
@@ -2661,6 +2981,16 @@ def summarise_output_topics(
     topic_summary_df = topic_summary_df.rename(
         columns={"General Topic": "General topic"}, errors="ignore"
     )
+
+    # Sentiment is optional upstream. Normalise to a placeholder value so the
+    # rest of this function (joins/grouping/output schemas) stays consistent.
+    for _df in (reference_table_df, topic_summary_df, sampled_reference_table_df):
+        if "Sentiment" not in _df.columns:
+            _df["Sentiment"] = "Not assessed"
+
+    if "Number of responses" not in topic_summary_df.columns:
+        topic_summary_df["Number of responses"] = 0
+
     if "Group" not in reference_table_df.columns:
         reference_table_df["Group"] = "All"
     if "Group" not in topic_summary_df.columns:
@@ -2673,6 +3003,23 @@ def summarise_output_topics(
         all_summaries = sampled_reference_table_df["Summary"].tolist()
     else:
         all_summaries = sampled_reference_table_df["Revised summary"].tolist()
+
+    # Normalise separators in sampled summaries to avoid wasting context window
+    # with repeated blank lines / <br> tags.
+    def _normalise_summary_separators(text: str) -> str:
+        if not isinstance(text, str):
+            return ""
+        t = text
+        # Collapse repeated spaces/tabs to a single space (keep newlines intact)
+        t = re.sub(r"[ \t]{2,}", " ", t)
+        t = re.sub(r"(<br>\s*){2,}", "<br>", t, flags=re.IGNORECASE)
+        t = re.sub(r"\n{2,}", "\n", t)
+        t = re.sub(r"(\s*<br>\s*){2,}", "<br>", t, flags=re.IGNORECASE)
+        # Trim stray separators at ends
+        t = t.strip().strip("<br>").strip()
+        return t
+
+    all_summaries = [_normalise_summary_separators(s) for s in all_summaries]
 
     all_groups = sampled_reference_table_df["Group"].tolist()
 
@@ -2729,13 +3076,6 @@ def summarise_output_topics(
 
             batch_file_path_details = f"{file_name_clean}_batch_{latest_summary_completed + 1}_size_1_col_{in_column_cleaned}"
 
-            summary_text = all_summaries[summary_no]
-            formatted_summary_prompt = [
-                summarise_topic_descriptions_prompt.format(
-                    summaries=summary_text, summary_format=combined_summary_instructions
-                )
-            ]
-
             formatted_summarise_topic_descriptions_system_prompt = (
                 summarise_topic_descriptions_system_prompt.format(
                     column_name=chosen_cols, consultation_context=context_textbox
@@ -2766,6 +3106,157 @@ def summarise_output_topics(
                     + reasoning_suffix
                 )
 
+            # ---- Context-length safety (never cut passages mid-way) ----
+            # We prefer dropping whole sampled passages over truncating.
+            # Passages are expected to be joined with newlines by join_unique_summaries().
+            summary_text = all_summaries[summary_no]
+
+            # Compute base token overhead (system prompt + prompt template without summaries)
+            base_prompt = summarise_topic_descriptions_prompt.format(
+                summaries="",
+                summary_format=combined_summary_instructions,
+            )
+            base_token_count = count_tokens_in_text(
+                formatted_summarise_topic_descriptions_system_prompt
+                + "\n"
+                + base_prompt,
+                tokenizer,
+                model_source,
+            )
+            # Use effective context limit (with headroom) to reduce risk of server-side mismatch
+            effective_limit = _effective_context_limit()
+            available_tokens_for_summaries = max(0, effective_limit - base_token_count)
+
+            def _full_prompt_token_count_for_summary_text(text: str) -> int:
+                """Token count for the full system+user prompt for this summary."""
+                user_prompt = summarise_topic_descriptions_prompt.format(
+                    summaries=text, summary_format=combined_summary_instructions
+                )
+                full_text = (
+                    formatted_summarise_topic_descriptions_system_prompt
+                    + "\n"
+                    + user_prompt
+                )
+
+                if "inference-server" in str(model_source).lower() and api_url:
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": formatted_summarise_topic_descriptions_system_prompt,
+                        },
+                        {"role": "user", "content": user_prompt},
+                    ]
+                    server_tokens = _inference_server_prompt_token_count(
+                        api_url, messages
+                    )
+                    if server_tokens is not None:
+                        return int(server_tokens)
+
+                return int(count_tokens_in_text(full_text, tokenizer, model_source))
+
+            def _split_passages(text: str) -> List[str]:
+                if not isinstance(text, str) or not text.strip():
+                    return []
+                # Prefer newline-split first (join_unique_summaries uses "\n")
+                parts = [p.strip() for p in str(text).split("\n") if p.strip()]
+                if len(parts) <= 1 and "<br>" in str(text):
+                    parts = [p.strip() for p in str(text).split("<br>") if p.strip()]
+                # If we still can't split, treat the entire text as one passage
+                return parts if parts else [str(text).strip()]
+
+            passages = _split_passages(summary_text)
+            if passages:
+                joined_text = "\n".join(passages)
+                passage_tokens = count_tokens_in_text(
+                    joined_text, tokenizer, model_source
+                )
+                if passage_tokens > available_tokens_for_summaries:
+                    # Binary-search the maximum number of whole passages that fit.
+                    lo, hi = 1, len(passages)
+                    best = None
+                    while lo <= hi:
+                        mid = (lo + hi) // 2
+                        candidate = "\n".join(passages[:mid])
+                        cand_tokens = count_tokens_in_text(
+                            candidate, tokenizer, model_source
+                        )
+                        if cand_tokens <= available_tokens_for_summaries:
+                            best = candidate
+                            lo = mid + 1
+                        else:
+                            hi = mid - 1
+
+                    if best is None:
+                        # Even a single passage is too large. Don't truncate mid-passage: skip this topic.
+                        single_tokens = count_tokens_in_text(
+                            passages[0], tokenizer, model_source
+                        )
+                        print(
+                            "Warning: A single sampled passage is too large to summarise within context. "
+                            f"Skipping this topic summary. Passage tokens: {single_tokens}, "
+                            f"Available for passages: {available_tokens_for_summaries}, "
+                            f"Max effective context length: {effective_limit}."
+                        )
+                        summarised_outputs.append(None)
+                        # Keep metadata aligned
+                        out_metadata_str = ". ".join(out_metadata)
+                        latest_summary_completed += 1
+                        continue
+
+                    print(
+                        "Warning: Sampled summaries exceed context limit for this topic. "
+                        f"Reducing from {len(passages)} passages to {len(best.splitlines())} passages to fit."
+                    )
+                    summary_text = best
+
+            # Final guard: ensure the FULL prompt is within context (with headroom).
+            # If not, drop whole passages until it fits. This prevents constructing a request
+            # that the server will reject.
+            if passages:
+                prompt_tokens = _full_prompt_token_count_for_summary_text(summary_text)
+                if prompt_tokens > effective_limit:
+                    print(
+                        "Warning: Full prompt still exceeds context after passage trimming. "
+                        f"Prompt tokens: {prompt_tokens}, Max effective: {effective_limit}. "
+                        "Dropping more passages."
+                    )
+                    lo, hi = 1, len(passages)
+                    best_text = None
+                    while lo <= hi:
+                        mid = (lo + hi) // 2
+                        candidate_text = "\n".join(passages[:mid])
+                        cand_tokens = _full_prompt_token_count_for_summary_text(
+                            candidate_text
+                        )
+                        if cand_tokens <= effective_limit:
+                            best_text = candidate_text
+                            lo = mid + 1
+                        else:
+                            hi = mid - 1
+
+                    if best_text is None:
+                        print(
+                            "Warning: Even one passage cannot fit within context for this summary prompt. "
+                            "Skipping this topic summary."
+                        )
+                        summarised_outputs.append(None)
+                        out_metadata_str = (
+                            ". ".join(out_metadata) if out_metadata else ""
+                        )
+                        latest_summary_completed += 1
+                        continue
+
+                    summary_text = best_text
+
+            formatted_summary_prompt = [
+                summarise_topic_descriptions_prompt.format(
+                    summaries=summary_text, summary_format=combined_summary_instructions
+                )
+            ]
+
+            # Ensure locals exist even if the call fails (e.g. context-length error)
+            conversation_history = list()
+            metadata = []
             try:
                 response, conversation_history, metadata, response_text = (
                     summarise_output_topics_query(
@@ -2787,10 +3278,13 @@ def summarise_output_topics(
             except Exception as e:
                 print("Creating summary failed:", e)
                 summarised_output = ""
+                conversation_history = list()
+                metadata = []
 
             summarised_outputs.append(summarised_output)
-            out_metadata.extend(metadata)
-            out_metadata_str = ". ".join(out_metadata)
+            if metadata:
+                out_metadata.extend(metadata)
+            out_metadata_str = ". ".join(out_metadata) if out_metadata else ""
 
             # Call the new function to process and log debug outputs for the current iteration.
             # The returned values are the contents of the prompt, summary, conversation, and metadata
@@ -3262,11 +3756,80 @@ def wrapper_summarise_output_topics_per_group(
         print(
             f"Sampling reference table with {no_of_sampled_summaries} summaries per group..."
         )
+        # Compute a token budget for the sampled summaries so downstream prompts always fit.
+        model_source = model_name_map[model_choice]["source"]
+        combined_summary_instructions = (
+            summarise_format_radio + ". " + additional_summary_instructions_provided
+        )
+        formatted_sys = summarise_topic_descriptions_system_prompt.format(
+            column_name=chosen_cols, consultation_context=context_textbox
+        )
+        # Apply reasoning suffix for GPT-OSS models (Local, inference-server, or AWS)
+        is_gpt_oss_model = (
+            "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower()
+        )
+        if is_gpt_oss_model:
+            effective_reasoning_suffix = (
+                reasoning_suffix if reasoning_suffix else "Reasoning: low"
+            )
+            if effective_reasoning_suffix:
+                formatted_sys = formatted_sys + "\n" + effective_reasoning_suffix
+        elif "Local" in model_source and reasoning_suffix:
+            formatted_sys = formatted_sys + "\n" + reasoning_suffix
+
+        base_prompt = summarise_topic_descriptions_prompt.format(
+            summaries="", summary_format=combined_summary_instructions
+        )
+        base_tokens = count_tokens_in_text(
+            formatted_sys + "\n" + base_prompt, tokenizer, model_source
+        )
+        available_tokens_for_summaries = max(
+            0, _effective_context_limit() - base_tokens
+        )
+
+        # Extra safety for inference-server when we don't have server-side token counting.
+        # If the server applies a chat template, it can push us over the limit even if our
+        # local estimate says we're OK.
+        if "inference-server" in str(model_source).lower():
+            try:
+                frac = float(INFERENCE_SERVER_SAMPLER_TOKEN_BUDGET_FRACTION)
+            except Exception:
+                frac = 0.9
+            frac = min(max(frac, 0.1), 1.0)
+
+            # If the server can tokenize/apply-template, we can rely on accurate limits elsewhere.
+            # If not, be conservative here.
+            can_server_count = False
+            if api_url:
+                try:
+                    from tools.dedup_summaries import (
+                        _inference_server_prompt_token_count,
+                    )
+
+                    test_messages = [
+                        {"role": "system", "content": formatted_sys},
+                        {"role": "user", "content": base_prompt},
+                    ]
+                    can_server_count = (
+                        _inference_server_prompt_token_count(api_url, test_messages)
+                        is not None
+                    )
+                except Exception:
+                    can_server_count = False
+
+            if not can_server_count:
+                available_tokens_for_summaries = int(
+                    available_tokens_for_summaries * frac
+                )
+
         sampled_reference_table_df, _ = sample_reference_table_summaries(
             reference_table_df,
             random_seed=random_seed,
             no_of_sampled_summaries=no_of_sampled_summaries,
             sample_reference_table_checkbox=sample_reference_table,
+            available_tokens_for_summaries=available_tokens_for_summaries,
+            tokenizer=tokenizer,
+            model_source=model_source,
         )
         print(
             f"Sampling complete. {len(sampled_reference_table_df)} summaries selected."
@@ -3712,10 +4275,14 @@ def overall_summary(
     log_output_files = list()
     all_logged_content = list()
     all_file_names_content = list()
+    out_metadata_str = ""
     tic = time.perf_counter()
 
     if "Group" not in topic_summary_df.columns:
         topic_summary_df["Group"] = "All"
+
+    if "Number of responses" not in topic_summary_df.columns:
+        topic_summary_df["Number of responses"] = 0
 
     topic_summary_df = topic_summary_df.sort_values(
         by=["Group", "Number of responses"], ascending=[True, False]
@@ -3825,59 +4392,58 @@ def overall_summary(
                 + "\n"
                 + test_formatted_summary_prompt[0]
             )
-            base_token_count = count_tokens_in_text(
-                full_test_text, tokenizer, model_source
-            )
+            count_tokens_in_text(full_test_text, tokenizer, model_source)
 
-            # Calculate available tokens for the summary table
-            available_tokens = LLM_CONTEXT_LENGTH - base_token_count
+            # Fit-to-context by dropping whole rows (never truncating text).
+            # We enforce the limit against the FULL prompt (system + formatted prompt),
+            # not just the table text, to avoid undercount edge cases.
+            def _prompt_tokens_for_df(df: pd.DataFrame) -> int:
+                table_text = clean_markdown_table_whitespace(
+                    df.to_markdown(index=False)
+                )
+                prompt_text = summarise_everything_prompt.format(
+                    topic_summary_table=table_text,
+                    summary_format=comprehensive_summary_format_prompt,
+                )
+                full_text = (
+                    formatted_summarise_everything_system_prompt + "\n" + prompt_text
+                )
+                return count_tokens_in_text(full_text, tokenizer, model_source)
 
-            # Truncate DataFrame rows if needed to fit within context limit
             if len(group_df) > 0:
-                # Start with all rows and check if they fit
-                current_summary_text = group_df.to_markdown(index=False)
-                current_summary_text = clean_markdown_table_whitespace(
-                    current_summary_text
-                )
-                current_token_count = count_tokens_in_text(
-                    current_summary_text, tokenizer, model_source
-                )
-
-                # If the full table exceeds available tokens, truncate rows
-                if current_token_count > available_tokens:
+                effective_limit = _effective_context_limit()
+                full_tokens = _prompt_tokens_for_df(group_df)
+                if full_tokens > effective_limit:
                     print(
-                        f"Warning: Summary table for group '{summary_group}' exceeds context limit. "
-                        f"Truncating rows. Table tokens: {current_token_count}, Available: {available_tokens}"
+                        f"Warning: Overall summary prompt for group '{summary_group}' exceeds context limit. "
+                        f"Dropping rows. Prompt tokens: {full_tokens}, Max (effective): {effective_limit} (raw max: {LLM_CONTEXT_LENGTH})"
                     )
 
-                    # Binary search approach: find the maximum number of rows that fit
-                    # Start with all rows and reduce until we fit
                     num_rows = len(group_df)
-                    min_rows = 0
-                    max_rows = num_rows
-                    best_df = group_df.iloc[:0]  # Empty DataFrame as fallback
+                    lo, hi = 1, num_rows
+                    best_df = group_df.iloc[:0]
 
-                    # Try to find the maximum number of rows that fit
-                    while min_rows < max_rows:
-                        mid_rows = (min_rows + max_rows + 1) // 2
-                        test_df = group_df.iloc[:mid_rows]
-                        test_summary = test_df.to_markdown(index=False)
-                        test_summary = clean_markdown_table_whitespace(test_summary)
-                        test_token_count = count_tokens_in_text(
-                            test_summary, tokenizer, model_source
+                    while lo <= hi:
+                        mid = (lo + hi) // 2
+                        test_df = group_df.iloc[:mid]
+                        test_tokens = _prompt_tokens_for_df(test_df)
+                        if test_tokens <= effective_limit:
+                            best_df = test_df
+                            lo = mid + 1
+                        else:
+                            hi = mid - 1
+
+                    if best_df.empty:
+                        # Even one row doesn't fit (usually means system prompt itself is too large).
+                        raise ValueError(
+                            "Overall summary prompt is too large even with a single table row. "
+                            f"Max effective context length: {effective_limit} (raw max: {LLM_CONTEXT_LENGTH}). "
+                            "Reduce prompt size/format or use a model with a larger context window."
                         )
 
-                        if test_token_count <= available_tokens:
-                            best_df = test_df
-                            min_rows = mid_rows
-                        else:
-                            max_rows = mid_rows - 1
-
-                    # Use the best fitting DataFrame
                     group_df = best_df
                     print(
-                        f"Truncated to {len(group_df)} rows (from {num_rows} original rows) "
-                        f"to fit within context limit."
+                        f"Truncated to {len(group_df)} rows (from {num_rows} original rows) to fit context."
                     )
 
             # Create summary_text from (possibly truncated) DataFrame
@@ -3892,6 +4458,9 @@ def overall_summary(
                 )
             ]
 
+            # Ensure locals are always defined even if the LLM call fails early
+            conversation_history = list()
+            metadata = list()
             try:
                 response, conversation_history, metadata, response_text = (
                     summarise_output_topics_query(
@@ -3920,6 +4489,8 @@ def overall_summary(
                 )
                 summarised_output = ""
                 summarised_output_for_df = ""
+                conversation_history = list()
+                metadata = list()
 
             # Remove multiple consecutive line breaks (2 or more) and replace with single line break
             if summarised_output_for_df:
@@ -3939,8 +4510,9 @@ def overall_summary(
                 f"""Group name: {summary_group}\n""" + summarised_output
             )
 
-            out_metadata.extend(metadata)
-            out_metadata_str = ". ".join(out_metadata)
+            if metadata:
+                out_metadata.extend(metadata)
+            out_metadata_str = ". ".join(out_metadata) if out_metadata else ""
 
             full_prompt = (
                 formatted_summarise_everything_system_prompt
@@ -3999,8 +4571,13 @@ def overall_summary(
             data={"Group": unique_groups, "Summary": summarised_outputs}
         )
         summarised_outputs_df_for_display["Summary"] = (
+            summarised_outputs_df_for_display["Summary"].apply(
+                lambda x: markdown.markdown(x) if isinstance(x, str) else ""
+            )
+        )
+        summarised_outputs_df_for_display["Summary"] = (
             summarised_outputs_df_for_display["Summary"]
-            .apply(lambda x: markdown.markdown(x) if isinstance(x, str) else x)
+            .astype(str)
             .str.replace(r"\n", "<br>", regex=False)
             .str.replace(r"(<br>\s*){2,}", "<br>", regex=True)
         )

@@ -154,7 +154,34 @@ def read_file(filename: str, sheet: str = ""):
     file_type = detect_file_type(filename)
 
     if file_type == "csv":
-        return pd.read_csv(filename, low_memory=False)
+        # CSVs in UK local gov contexts are often Windows-1252 (smart quotes like 0x92),
+        # UTF-8, or UTF-8 with BOM. Try the common encodings first.
+        encodings_to_try = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
+        last_err: Exception | None = None
+        for enc in encodings_to_try:
+            try:
+                return pd.read_csv(filename, low_memory=False, encoding=enc)
+            except UnicodeDecodeError as e:
+                last_err = e
+                continue
+            except Exception:
+                # Non-encoding errors should surface immediately
+                raise
+
+        # Final fallback: force a load with replacement chars so the user can still proceed.
+        # (Better to show � than crash the whole app.)
+        try:
+            return pd.read_csv(
+                filename,
+                low_memory=False,
+                encoding="utf-8",
+                encoding_errors="replace",
+            )
+        except Exception:
+            # Re-raise the original decode error with context
+            if last_err is not None:
+                raise last_err
+            raise UnicodeDecodeError("utf-8", b"", 0, 1, "Could not decode CSV")
     elif file_type == "xlsx":
         if sheet:
             return pd.read_excel(filename, sheet_name=sheet)
@@ -498,6 +525,9 @@ def get_basic_response_data(
 def convert_reference_table_to_pivot_table(
     df: pd.DataFrame, basic_response_data: pd.DataFrame = pd.DataFrame()
 ):
+    df = df.copy()
+    if "Sentiment" not in df.columns:
+        df["Sentiment"] = "Not assessed"
 
     df_in = df[["Response References", "General topic", "Subtopic", "Sentiment"]].copy()
 

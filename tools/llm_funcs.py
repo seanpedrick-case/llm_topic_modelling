@@ -53,6 +53,8 @@ from tools.config import (
     COMPILE_TRANSFORMERS,
     DEDUPLICATION_THRESHOLD,
     HF_TOKEN,
+    INFERENCE_SERVER_DISABLE_THINKING,
+    INFERENCE_SERVER_READ_TIMEOUT_SECONDS,
     INT8_WITH_OFFLOAD_TO_CPU,
     K_QUANT_LEVEL,
     LLM_BATCH_SIZE,
@@ -124,6 +126,7 @@ if LLM_STOP_STRINGS:
 
 max_tokens = LLM_MAX_NEW_TOKENS
 timeout_wait = TIMEOUT_WAIT
+inference_server_read_timeout_seconds = INFERENCE_SERVER_READ_TIMEOUT_SECONDS
 number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
@@ -526,21 +529,24 @@ def load_model(
         # gpu_config.update_context(max_context_length)
         cpu_config.update_context(max_context_length)
 
-        if speculative_decoding:
-            model = Llama(
-                model_path=model_path,
-                draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS),
-                **vars(cpu_config),
-            )
-        else:
-            model = Llama(model_path=model_path, **vars(cpu_config))
+        # if speculative_decoding:
+        #     model = Llama(
+        #         model_path=model_path,
+        #         draft_model=LlamaPromptLookupDecoding(num_pred_tokens=NUM_PRED_TOKENS),
+        #         **vars(cpu_config),
+        #     )
+        # else:
+        #     model = Llama(model_path=model_path, **vars(cpu_config))
 
-        print(
-            "Loading with",
-            cpu_config.n_gpu_layers,
-            "model layers sent to GPU and a maximum context length of",
-            cpu_config.n_ctx,
-        )
+        # print(
+        #     "Loading with",
+        #     cpu_config.n_gpu_layers,
+        #     "model layers sent to GPU and a maximum context length of",
+        #     cpu_config.n_ctx,
+        # )
+
+        model = None
+        print("Llama_cpp_python model not currently supported")
 
     print("Finished loading model:", local_model_type)
     print("GPU layers assigned to cuda:", gpu_layers)
@@ -822,6 +828,8 @@ def call_inference_server_api(
     api_url: str = "http://localhost:8080",
     model_name: str = None,
     use_llama_swap: bool = USE_LLAMA_SWAP,
+    disable_thinking: bool = INFERENCE_SERVER_DISABLE_THINKING,
+    read_timeout_seconds: int = None,
 ):
     """
     Calls a inference-server API endpoint with a formatted user message and system prompt,
@@ -837,6 +845,8 @@ def call_inference_server_api(
         api_url (str): The base URL of the inference-server API (default: "http://localhost:8080").
         model_name (str): Optional model name to use. If None, uses the default model.
         use_llama_swap (bool): Whether to use llama-swap for the model.
+        disable_thinking (bool): When True, adds chat_template_kwargs={"enable_thinking": False}
+            for vLLM Qwen3/Qwen3.5-style chat templates. Defaults to INFERENCE_SERVER_DISABLE_THINKING.
     Returns:
         dict: Response in the same format as call_llama_cpp_chatmodel
 
@@ -910,6 +920,9 @@ def call_inference_server_api(
     if model_name and use_llama_swap:
         payload["model"] = model_name
 
+    if disable_thinking:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+
     # Determine the endpoint based on streaming preference
     if stream:
         endpoint = f"{api_url}/v1/chat/completions"
@@ -917,6 +930,11 @@ def call_inference_server_api(
         endpoint = f"{api_url}/v1/chat/completions"
 
     try:
+        timeout_seconds = (
+            int(read_timeout_seconds)
+            if read_timeout_seconds is not None
+            else int(inference_server_read_timeout_seconds)
+        )
         if stream:
             # Handle streaming response
             response = requests.post(
@@ -924,7 +942,7 @@ def call_inference_server_api(
                 json=payload,
                 headers={"Content-Type": "application/json"},
                 stream=True,
-                timeout=timeout_wait,
+                timeout=timeout_seconds,
             )
             response.raise_for_status()
 
@@ -977,7 +995,7 @@ def call_inference_server_api(
                 endpoint,
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=timeout_wait,
+                timeout=timeout_seconds,
             )
             response.raise_for_status()
 
@@ -989,6 +1007,18 @@ def call_inference_server_api(
 
             return result
 
+    except requests.exceptions.HTTPError as e:
+        # Preserve server error details (llama.cpp includes useful context-limit info in the body)
+        detail = ""
+        try:
+            if e.response is not None:
+                detail = e.response.text
+        except Exception:
+            detail = ""
+        raise ConnectionError(
+            f"Failed to connect to inference-server at {api_url}: {str(e)}"
+            + (f" | server_response={detail}" if detail else "")
+        )
     except requests.exceptions.RequestException as e:
         raise ConnectionError(
             f"Failed to connect to inference-server at {api_url}: {str(e)}"
@@ -1197,45 +1227,94 @@ def call_transformers_model(
     # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
     # with images/videos. For text-only content, even multimodal models expect plain strings.
 
+    # Check if system_prompt is meaningful (not empty/None)
+    has_system_prompt = system_prompt and str(system_prompt).strip()
+
     # Always use string format for text-only content, regardless of MULTIMODAL_PROMPT_FORMAT setting
     # MULTIMODAL_PROMPT_FORMAT should only be used when you actually have multimodal inputs (images, etc.)
     if MULTIMODAL_PROMPT_FORMAT == "True":
-        conversation = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": str(system_prompt)}],
-            },
-            {"role": "user", "content": [{"type": "text", "text": str(prompt)}]},
-        ]
+        conversation = []
+        if has_system_prompt:
+            conversation.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": str(system_prompt)}],
+                }
+            )
+        conversation.append(
+            {"role": "user", "content": [{"type": "text", "text": str(prompt)}]}
+        )
     else:
-        conversation = [
-            {"role": "system", "content": str(system_prompt)},
-            {"role": "user", "content": str(prompt)},
-        ]
+        conversation = []
+        if has_system_prompt:
+            conversation.append({"role": "system", "content": str(system_prompt)})
+        conversation.append({"role": "user", "content": str(prompt)})
 
     # 2. Apply the chat template
+    # Get the device from the model (handles both single device and device_map="auto" cases)
     try:
-        # Try applying chat template
+        model_device = next(model.parameters()).device
+    except (StopIteration, AttributeError):
+        # Fallback to cuda if we can't determine device
+        model_device = "cuda"
+
+    try:
+        # Try applying chat template with system prompt (if present)
         input_ids = tokenizer.apply_chat_template(
             conversation,
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        ).to("cuda")
-    except (TypeError, KeyError, IndexError) as e:
-        # If chat template fails, try manual formatting
-        print(f"Chat template failed ({e}), using manual tokenization")
-        # Combine system and user prompts manually
-        full_prompt = f"{system_prompt}\n\n{prompt}"
-        # Tokenize manually with special tokens
-        encoded = tokenizer(full_prompt, return_tensors="pt", add_special_tokens=True)
-        if encoded is None:
-            raise ValueError(
-                "Tokenizer returned None - tokenizer may not be properly initialized"
+        ).to(model_device)
+    except (TypeError, KeyError, IndexError, ValueError) as e:
+        # If chat template fails, try without system prompt (some models don't support it)
+        if has_system_prompt:
+            print(
+                f"Chat template failed with system prompt ({e}), trying without system prompt..."
             )
-        if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
-            raise ValueError("Tokenizer output does not contain input_ids")
-        input_ids = encoded.input_ids.to("cuda")
+            # Try again with only user prompt
+            user_only_conversation = [{"role": "user", "content": str(prompt)}]
+            try:
+                input_ids = tokenizer.apply_chat_template(
+                    user_only_conversation,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_tensors="pt",
+                ).to(model_device)
+                print("Successfully applied chat template without system prompt")
+            except Exception as e2:
+                print(
+                    f"Chat template failed without system prompt ({e2}), using manual tokenization"
+                )
+                # Combine system and user prompts manually as fallback
+                full_prompt = (
+                    f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
+                )
+                # Tokenize manually with special tokens
+                encoded = tokenizer(
+                    full_prompt, return_tensors="pt", add_special_tokens=True
+                )
+                if encoded is None:
+                    raise ValueError(
+                        "Tokenizer returned None - tokenizer may not be properly initialized"
+                    )
+                if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
+                    raise ValueError("Tokenizer output does not contain input_ids")
+                input_ids = encoded.input_ids.to(model_device)
+        else:
+            # No system prompt, but chat template still failed - use manual tokenization
+            print(f"Chat template failed ({e}), using manual tokenization")
+            full_prompt = str(prompt)
+            encoded = tokenizer(
+                full_prompt, return_tensors="pt", add_special_tokens=True
+            )
+            if encoded is None:
+                raise ValueError(
+                    "Tokenizer returned None - tokenizer may not be properly initialized"
+                )
+            if not hasattr(encoded, "input_ids") or encoded.input_ids is None:
+                raise ValueError("Tokenizer output does not contain input_ids")
+            input_ids = encoded.input_ids.to(model_device)
     except Exception as e:
         print("Error applying chat template:", e)
         import traceback
@@ -1929,7 +2008,7 @@ def call_llm_with_markdown_table_checks(
             break  # Success - exit loop
 
         # Increase temperature for next attempt
-        call_temperature = temperature + (0.1 * (attempt + 1))
+        call_temperature = max(1.0, temperature + (0.1 * (attempt + 1)))
         print(
             f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
             f"Trying again with temperature: {call_temperature}"
