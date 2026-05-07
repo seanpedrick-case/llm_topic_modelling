@@ -8,7 +8,7 @@ sdk_version: 6.10.0
 app_file: app.py
 pinned: true
 license: agpl-3.0
-short_description: Extract topics and create thematic summaries for open text data with LLMs
+short_description: Extract topics from open text data with LLMs
 ---
 
 # Large language model topic modelling
