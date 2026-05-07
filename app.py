@@ -929,7 +929,9 @@ with app:
                 )
                 produce_structured_summary_radio.render()
 
-        with gr.Accordion("Response sentiment analysis (default is Negative or Positive)", open=False):
+        with gr.Accordion(
+            "Response sentiment analysis (default is Negative or Positive)", open=False
+        ):
             sentiment_checkbox = gr.Radio(
                 label="Should the model assess the sentiment of responses?",
                 value="Negative or Positive",
