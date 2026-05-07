@@ -730,7 +730,7 @@ def create_topic_summary_df_from_reference_table(
 
 
 # Wrap text in each column to the specified max width, including whole words
-def wrap_text(text: str, max_width=80, max_text_length=None):
+def wrap_text(text: str, max_width=60, max_text_length=None):
     if not isinstance(text, str):
         return text
 
