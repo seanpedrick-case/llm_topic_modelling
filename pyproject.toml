@@ -94,7 +94,7 @@ llamacpp = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.12.0"
+    "gradio[mcp]<=6.10.0"
 ]
 
 [project.urls]
