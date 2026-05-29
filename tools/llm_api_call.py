@@ -2005,6 +2005,33 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
     return html_table
 
 
+def _normalize_parsed_table_column_name(name: object) -> str:
+    return str(name).lower().strip().replace("_", " ")
+
+
+def _find_parsed_table_column(df: pd.DataFrame, standard_name: str) -> str | None:
+    target = _normalize_parsed_table_column_name(standard_name)
+    for col in df.columns:
+        if _normalize_parsed_table_column_name(col) == target:
+            return col
+    return None
+
+
+def _four_column_table_has_sentiment(df: pd.DataFrame) -> bool:
+    """Distinguish 4-column tables with Sentiment (batch_size==1) from those without."""
+    if _find_parsed_table_column(df, "Sentiment") is not None:
+        return True
+    if _find_parsed_table_column(df, "Response References") is not None:
+        return False
+    if df.shape[1] < 3:
+        return False
+    col2 = df.iloc[:, 2].astype(str).str.strip().str.lower()
+    sentiment_values = {"negative", "neutral", "positive", "not assessed"}
+    if col2.empty:
+        return False
+    return col2.isin(sentiment_values).mean() >= 0.5
+
+
 def convert_response_text_to_dataframe(
     response_text: str, table_type: str = "Main table"
 ):
@@ -2324,20 +2351,47 @@ def write_llm_output_and_logs(
 
         topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
     elif topic_with_response_df.shape[1] == 4:
-        # Handle 4-column case (missing Sentiment column)
-        # Rename all 4 columns first
-        new_column_names = {
-            topic_with_response_df.columns[0]: "General topic",
-            topic_with_response_df.columns[1]: "Subtopic",
-            topic_with_response_df.columns[2]: "Response References",
-            topic_with_response_df.columns[3]: "Summary",
-        }
-        topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
-        # Add missing Sentiment column
-        topic_with_response_df["Sentiment"] = pd.Series(
-            ["Not assessed"] * len(topic_with_response_df), dtype=str
-        )
-        # Reorder columns to match expected format
+        if _four_column_table_has_sentiment(topic_with_response_df):
+            # batch_size==1: General topic, Subtopic, Sentiment, Summary (no Response References)
+            rename_map = {}
+            for standard_name in [
+                "General topic",
+                "Subtopic",
+                "Sentiment",
+                "Summary",
+            ]:
+                found_col = _find_parsed_table_column(
+                    topic_with_response_df, standard_name
+                )
+                if found_col is not None:
+                    rename_map[found_col] = standard_name
+            if len(rename_map) < 4:
+                rename_map.update(
+                    {
+                        topic_with_response_df.columns[0]: "General topic",
+                        topic_with_response_df.columns[1]: "Subtopic",
+                        topic_with_response_df.columns[2]: "Sentiment",
+                        topic_with_response_df.columns[3]: "Summary",
+                    }
+                )
+            topic_with_response_df = topic_with_response_df.rename(columns=rename_map)
+            topic_with_response_df["Response References"] = pd.Series(
+                ["1"] * len(topic_with_response_df), dtype=str
+            )
+        else:
+            # 4-column case without Sentiment (Response References present instead)
+            new_column_names = {
+                topic_with_response_df.columns[0]: "General topic",
+                topic_with_response_df.columns[1]: "Subtopic",
+                topic_with_response_df.columns[2]: "Response References",
+                topic_with_response_df.columns[3]: "Summary",
+            }
+            topic_with_response_df = topic_with_response_df.rename(
+                columns=new_column_names
+            )
+            topic_with_response_df["Sentiment"] = pd.Series(
+                ["Not assessed"] * len(topic_with_response_df), dtype=str
+            )
         topic_with_response_df = topic_with_response_df[
             ["General topic", "Subtopic", "Sentiment", "Response References", "Summary"]
         ]
