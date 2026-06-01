@@ -401,7 +401,7 @@ def write_usage_log(
         # Let's use the names that match what the Excel function expects
         headers = [
             "Session hash",
-            "Reference data file name",
+            "Response ID data file name",
             "Select the open text column of interest. In an Excel file, this shows columns across all sheets.",
             "Large language model for topic extraction and summarisation",
             "Conversation metadata",
@@ -609,7 +609,7 @@ To run these, you need to do the following:
 python cli_topics.py --task extract --input_file example_data/combined_case_notes.csv --text_column "Case Note"
 
 ## Extract topics with custom model and context:
-python cli_topics.py --task extract --input_file example_data/combined_case_notes.csv --text_column "Case Note" --model_choice "gemini-2.5-flash-lite" --context "Social Care case notes for young people"
+python cli_topics.py --task extract --input_file example_data/combined_case_notes.csv --text_column "Case Note" --model_choice "gemini-flash-lite-latest" --context "Social Care case notes for young people"
 
 ## Extract topics with grouping:
 python cli_topics.py --task extract --input_file example_data/combined_case_notes.csv --text_column "Case Note" --group_by "Client"
@@ -630,22 +630,22 @@ Note: you will need to change the reference to previous output files to match th
 python cli_topics.py --task deduplicate --previous_output_files output/combined_case_notes_col_Case_Note_reference_table.csv output/combined_case_notes_col_Case_Note_unique_topics.csv --similarity_threshold 90 --no_xlsx_output
 
 ## Deduplicate topics using LLM:
-python cli_topics.py --task deduplicate --previous_output_files output/combined_case_notes_col_Case_Note_reference_table.csv output/combined_case_notes_col_Case_Note_unique_topics.csv --method llm --model_choice "gemini-2.5-flash-lite" --no_xlsx_output
+python cli_topics.py --task deduplicate --previous_output_files output/combined_case_notes_col_Case_Note_reference_table.csv output/combined_case_notes_col_Case_Note_unique_topics.csv --method llm --model_choice "gemini-flash-lite-latest" --no_xlsx_output
 
 # Summarisation
 
 Note: you will need to change the reference to previous output files to match the exact file names created from the previous task. This includes the relative path to the app folder. Also, the function will create an xlsx output file by default. the --input_file and --text_column arguments are needed for this, unless you pass in --no_xlsx_output as seen below.
 
 ## Summarise topics:
-python cli_topics.py --task summarise --previous_output_files output/combined_case_notes_col_Case_Note_reference_table.csv output/combined_case_notes_col_Case_Note_unique_topics.csv --model_choice "gemini-2.5-flash-lite" --no_xlsx_output
+python cli_topics.py --task summarise --previous_output_files output/combined_case_notes_col_Case_Note_reference_table.csv output/combined_case_notes_col_Case_Note_unique_topics.csv --model_choice "gemini-flash-lite-latest" --no_xlsx_output
 
 ## Create overall summary:
-python cli_topics.py --task overall_summary --previous_output_files output/combined_case_notes_col_Case_Note_unique_topics.csv --model_choice "gemini-2.5-flash-lite" --no_xlsx_output
+python cli_topics.py --task overall_summary --previous_output_files output/combined_case_notes_col_Case_Note_unique_topics.csv --model_choice "gemini-flash-lite-latest" --no_xlsx_output
 
 # All-in-one pipeline
 
 ## Run complete pipeline (extract, deduplicate, summarise):
-python cli_topics.py --task all_in_one --input_file example_data/combined_case_notes.csv --text_column "Case Note" --model_choice "gemini-2.5-flash-lite"
+python cli_topics.py --task all_in_one --input_file example_data/combined_case_notes.csv --text_column "Case Note" --model_choice "gemini-flash-lite-latest"
 
 """,
     )

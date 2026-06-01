@@ -2036,27 +2036,27 @@ def create_missing_references_df(
     Returns a DataFrame with the missing references and the character count of their responses.
 
     Args:
-        basic_response_df (pd.DataFrame): DataFrame containing 'Reference' and 'Response' columns.
-        existing_reference_df (pd.DataFrame): DataFrame containing 'Response References' column.
+        basic_response_df (pd.DataFrame): DataFrame containing 'Response ID' and 'Response' columns.
+        existing_reference_df (pd.DataFrame): DataFrame containing 'Response ID' column.
 
     Returns:
-        pd.DataFrame: A DataFrame with 'Missing Reference' and 'Response Character Count' columns.
+        pd.DataFrame: A DataFrame with 'Missing Response ID' and 'Response Character Count' columns.
                       'Response Character Count' will be 0 for empty strings and NaN for actual missing data.
     """
     # Ensure columns are treated as strings for robust comparison
     existing_references_unique = (
-        existing_reference_df["Response References"].astype(str).unique()
+        existing_reference_df["Response ID"].astype(str).unique()
     )
 
     # Step 1: Identify all rows from basic_response_df that correspond to missing references
     # We want the entire row to access the 'Response' column later
     missing_data_rows = basic_response_df[
-        ~basic_response_df["Reference"].astype(str).isin(existing_references_unique)
+        ~basic_response_df["Response ID"].astype(str).isin(existing_references_unique)
     ].copy()  # .copy() to avoid SettingWithCopyWarning
 
     # Step 2: Create the new DataFrame
-    # Populate the 'Missing Reference' column directly
-    missing_df = pd.DataFrame({"Missing Reference": missing_data_rows["Reference"]})
+    # Populate the 'Missing Response ID' column directly
+    missing_df = pd.DataFrame({"Missing Response ID": missing_data_rows["Response ID"]})
 
     # Step 3: Calculate and add 'Response Character Count'
     # .str.len() works on Series of strings, handling empty strings (0) and NaN (NaN)

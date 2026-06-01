@@ -15,7 +15,7 @@ initial_table_system_prompt = system_prompt + markdown_additional_prompt
 
 initial_table_assistant_prefill = "|"
 
-default_response_reference_format = "In the next column named 'Response References', list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do not write any other text in this column."
+default_response_reference_format = "In the next column named 'Response ID', list each specific Response reference number that is relevant to the Subtopic, separated by commas. Do not write any other text in this column."
 
 initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table based on open text responses in the reponse table below.
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
@@ -247,7 +247,7 @@ verify_titles_prompt = """Response numbers alongside the Response text and assig
 The criteria for a suitable description for these responses is that they should be readable, concise, and fully encapsulate the main subject of the response.
 
 Create a markdown table with four columns.
-The first column is 'Response References', and should contain just the response number under consideration.
+The first column is 'Response ID', and should contain just the response number under consideration.
 The second column is 'Is this a suitable description', answer the question with 'Yes' or 'No', with no other text.
 The third column is 'Explanation', give a short explanation for your response in the second column.
 The fourth column is 'Alternative description', suggest an alternative description for the response that meet the criteria stated above.

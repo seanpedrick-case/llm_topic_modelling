@@ -11,6 +11,7 @@ tools/__pycache__/*
 build/*
 dist/*
 logs/*
+docs/*
 usage/*
 feedback/*
 test_code/*
@@ -20,3 +21,5 @@ test/tmp/*
 unsloth_compiled_cache/*
 .vscode/*
 llm_topic_modelling.egg-info/*
+index.qmd
+_quarto.yml

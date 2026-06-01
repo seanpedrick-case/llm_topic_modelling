@@ -454,11 +454,13 @@ if RUN_AWS_BEDROCK_MODELS == "1":
     model_source.extend(["AWS"] * len(amazon_models))
 
 if RUN_GEMINI_MODELS == "1":
-    gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+    gemini_models = [
+        "gemini-flash-lite-latest",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+    ]
     model_full_names.extend(gemini_models)
-    model_short_names.extend(
-        ["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"]
-    )
+    model_short_names.extend(["gemini_flash_lite", "gemini_flash", "gemini_pro"])
     model_source.extend(["Gemini"] * len(gemini_models))
 
 # Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)

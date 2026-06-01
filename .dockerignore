@@ -12,6 +12,7 @@ build/*
 dist/*
 logs/*
 usage/*
+docs/*
 feedback/*
 test_code/*
 test/tmp/*
@@ -25,3 +26,5 @@ usage/
 feedback/
 config/
 tmp/
+index.qmd
+_quarto.yml

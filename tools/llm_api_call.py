@@ -195,14 +195,14 @@ def reconstruct_markdown_table_from_reference_df(
     # Filter reference_df to current batch if start_row and end_row are provided
     filtered_df = reference_df.copy()
     if start_row is not None and end_row is not None:
-        # Convert Response References to numeric for filtering
-        filtered_df["Response References"] = pd.to_numeric(
-            filtered_df["Response References"], errors="coerce"
+        # Convert Response ID to numeric for filtering
+        filtered_df["Response ID"] = pd.to_numeric(
+            filtered_df["Response ID"], errors="coerce"
         )
-        # Filter to only include rows where Response References fall within the current batch range
+        # Filter to only include rows where Response ID fall within the current batch range
         filtered_df = filtered_df[
-            (filtered_df["Response References"] >= start_row + 1)
-            & (filtered_df["Response References"] <= end_row + 1)
+            (filtered_df["Response ID"] >= start_row + 1)
+            & (filtered_df["Response ID"] <= end_row + 1)
         ]
 
         if filtered_df.empty:
@@ -219,9 +219,7 @@ def reconstruct_markdown_table_from_reference_df(
         filtered_df.groupby(["General topic", "Subtopic", "Sentiment"])
         .agg(
             {
-                "Response References": lambda x: ", ".join(
-                    map(str, sorted(x.unique()))
-                ),
+                "Response ID": lambda x: ", ".join(map(str, sorted(x.unique()))),
                 "Summary": "first",  # Take the first summary for each group
             }
         )
@@ -245,9 +243,7 @@ def reconstruct_markdown_table_from_reference_df(
             except (ValueError, TypeError):
                 return refs_str
 
-        grouped_df["Response References"] = grouped_df["Response References"].apply(
-            adjust_references
-        )
+        grouped_df["Response ID"] = grouped_df["Response ID"].apply(adjust_references)
 
     # Clean up the data to handle any NaN values and remove "Rows x to y: " prefix from summary
     cleaned_df = grouped_df.copy()
@@ -255,7 +251,7 @@ def reconstruct_markdown_table_from_reference_df(
         "General topic",
         "Subtopic",
         "Sentiment",
-        "Response References",
+        "Response ID",
         "Summary",
     ]:
         cleaned_df[col] = cleaned_df[col].fillna("").astype(str)
@@ -268,12 +264,12 @@ def reconstruct_markdown_table_from_reference_df(
     )
 
     cleaned_df.drop_duplicates(
-        ["General topic", "Subtopic", "Sentiment", "Response References"], inplace=True
+        ["General topic", "Subtopic", "Sentiment", "Response ID"], inplace=True
     )
 
     # Create the markdown table
     markdown_table = (
-        "| General topic | Subtopic | Sentiment | Response References | Summary |\n"
+        "| General topic | Subtopic | Sentiment | Response ID | Summary |\n"
     )
     markdown_table += "|---|---|---|---|---|\n"
 
@@ -281,7 +277,7 @@ def reconstruct_markdown_table_from_reference_df(
         general_topic = row["General topic"]
         subtopic = row["Subtopic"]
         sentiment = row["Sentiment"]
-        response_refs = row["Response References"]
+        response_refs = row["Response ID"]
         summary = row["Summary"]
 
         # Add row to markdown table
@@ -1138,20 +1134,20 @@ def validate_topics(
         )
 
     # Sort output dataframes
-    validation_reference_df["Response References"] = (
-        validation_reference_df["Response References"].astype(float).astype(int)
+    validation_reference_df["Response ID"] = (
+        validation_reference_df["Response ID"].astype(float).astype(int)
     )
     validation_reference_df["Start row of group"] = validation_reference_df[
         "Start row of group"
     ].astype(int)
     validation_reference_df.drop_duplicates(
-        ["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True
+        ["Response ID", "General topic", "Subtopic", "Sentiment"], inplace=True
     )
     validation_reference_df.sort_values(
         [
             "Group",
             "Start row of group",
-            "Response References",
+            "Response ID",
             "General topic",
             "Subtopic",
             "Sentiment",
@@ -1439,7 +1435,7 @@ def validate_topics_wrapper(
                     [acc_reference_df, validation_reference_df], ignore_index=True
                 )
                 acc_reference_df.drop_duplicates(
-                    ["Response References", "General topic", "Subtopic", "Sentiment"],
+                    ["Response ID", "General topic", "Subtopic", "Sentiment"],
                     inplace=True,
                 )
             if not validation_topic_summary_df.empty:
@@ -1517,8 +1513,8 @@ def validate_topics_wrapper(
                         how="left",
                     )
                 # Sort output dataframes
-                acc_reference_df["Response References"] = (
-                    acc_reference_df["Response References"].astype(float).astype(int)
+                acc_reference_df["Response ID"] = (
+                    acc_reference_df["Response ID"].astype(float).astype(int)
                 )
                 acc_reference_df["Start row of group"] = acc_reference_df[
                     "Start row of group"
@@ -1526,7 +1522,7 @@ def validate_topics_wrapper(
                 ref_sort_cols = [
                     "Group",
                     "Start row of group",
-                    "Response References",
+                    "Response ID",
                     "General topic",
                     "Subtopic",
                 ]
@@ -1545,8 +1541,8 @@ def validate_topics_wrapper(
                     how="left",
                 )
                 # Sort output dataframes
-                acc_reference_df["Response References"] = (
-                    acc_reference_df["Response References"].astype(float).astype(int)
+                acc_reference_df["Response ID"] = (
+                    acc_reference_df["Response ID"].astype(float).astype(int)
                 )
                 acc_reference_df["Start row of group"] = acc_reference_df[
                     "Start row of group"
@@ -1555,7 +1551,7 @@ def validate_topics_wrapper(
                     [
                         "Group",
                         "Start row of group",
-                        "Response References",
+                        "Response ID",
                         "Main heading",
                         "Subheading",
                         "Topic number",
@@ -1631,12 +1627,12 @@ def validate_topics_wrapper(
         else:
             # Fallback: if no logged content, create empty missing_df
             acc_missing_df = pd.DataFrame(
-                columns=["Missing Reference", "Response Character Count"]
+                columns=["Missing Response ID", "Response Character Count"]
             )
     else:
         # Fallback: if no logged content, create empty missing_df
         acc_missing_df = pd.DataFrame(
-            columns=["Missing Reference", "Response Character Count"]
+            columns=["Missing Response ID", "Response Character Count"]
         )
 
     # Create display table markdown for validation results
@@ -1731,7 +1727,7 @@ def data_file_to_markdown_table(
         file_data, chosen_cols, verify_titles=verify_titles
     )
 
-    file_len = int(len(basic_response_data["Reference"]))
+    file_len = int(len(basic_response_data["Response ID"]))
     batch_size = int(batch_size)
     batch_number = int(batch_number)
 
@@ -1750,12 +1746,12 @@ def data_file_to_markdown_table(
         end_row = file_len + 1
 
     batch_basic_response_data = basic_response_data.loc[
-        start_row:end_row, ["Reference", "Response", "Original Reference"]
+        start_row:end_row, ["Response ID", "Response", "Original Response ID"]
     ]  # Select the current batch
 
     # Now replace the reference numbers with numbers starting from 1
-    batch_basic_response_data.loc[:, "Reference"] = (
-        batch_basic_response_data["Reference"] - start_row
+    batch_basic_response_data.loc[:, "Response ID"] = (
+        batch_basic_response_data["Response ID"] - start_row
     )
 
     # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
@@ -1793,7 +1789,7 @@ def data_file_to_markdown_table(
     ]  # ~(batch_basic_response_data["Response"].str.len() < 5), :]
 
     simple_markdown_table = batch_basic_response_data[
-        ["Reference", "Response"]
+        ["Response ID", "Response"]
     ].to_markdown(index=None)
 
     normalised_simple_markdown_table = normalise_string(simple_markdown_table)
@@ -1950,7 +1946,7 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
             pd.io.common.StringIO(clean_md_text),
             sep="|",
             skipinitialspace=True,
-            dtype={"Response References": str},
+            dtype={"Response ID": str},
         )
 
         # Ensure unique column names
@@ -1971,7 +1967,7 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
                     <th>General topic</th>
                     <th>Subtopic</th>
                     <th>Sentiment</th>                
-                    <th>Response References</th>
+                    <th>Response ID</th>
                     <th>Summary</th>
                 </tr>
                 {html_table}
@@ -1993,7 +1989,7 @@ def convert_to_html_table(input_string: str, table_type: str = "Main table"):
             html_table = f"""
             <table>
                 <tr>
-                    <th>Response References</th>
+                    <th>Response ID</th>
                     <th>Is this a suitable title</th>
                     <th>Explanation</th>
                     <th>Alternative title</th>
@@ -2021,7 +2017,7 @@ def _four_column_table_has_sentiment(df: pd.DataFrame) -> bool:
     """Distinguish 4-column tables with Sentiment (batch_size==1) from those without."""
     if _find_parsed_table_column(df, "Sentiment") is not None:
         return True
-    if _find_parsed_table_column(df, "Response References") is not None:
+    if _find_parsed_table_column(df, "Response ID") is not None:
         return False
     if df.shape[1] < 3:
         return False
@@ -2155,13 +2151,13 @@ def write_llm_output_and_logs(
             "General topic",
             "Subtopic",
             "Sentiment",
-            "Response References",
+            "Response ID",
             "Summary",
         ]
     )
     out_reference_df = pd.DataFrame(
         columns=[
-            "Response References",
+            "Response ID",
             "General topic",
             "Subtopic",
             "Sentiment",
@@ -2254,7 +2250,7 @@ def write_llm_output_and_logs(
                     "Main heading",
                     "Subheading",
                     "Sentiment",
-                    "Response References",
+                    "Response ID",
                     "Summary",
                 ]
             )
@@ -2264,7 +2260,7 @@ def write_llm_output_and_logs(
                     "General topic",
                     "Subtopic",
                     "Sentiment",
-                    "Response References",
+                    "Response ID",
                     "Summary",
                 ]
             )
@@ -2345,14 +2341,14 @@ def write_llm_output_and_logs(
             topic_with_response_df.columns[0]: "General topic",
             topic_with_response_df.columns[1]: "Subtopic",
             topic_with_response_df.columns[2]: "Sentiment",
-            topic_with_response_df.columns[3]: "Response References",
+            topic_with_response_df.columns[3]: "Response ID",
             topic_with_response_df.columns[4]: "Summary",
         }
 
         topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
     elif topic_with_response_df.shape[1] == 4:
         if _four_column_table_has_sentiment(topic_with_response_df):
-            # batch_size==1: General topic, Subtopic, Sentiment, Summary (no Response References)
+            # batch_size==1: General topic, Subtopic, Sentiment, Summary (no Response ID)
             rename_map = {}
             for standard_name in [
                 "General topic",
@@ -2375,15 +2371,15 @@ def write_llm_output_and_logs(
                     }
                 )
             topic_with_response_df = topic_with_response_df.rename(columns=rename_map)
-            topic_with_response_df["Response References"] = pd.Series(
+            topic_with_response_df["Response ID"] = pd.Series(
                 ["1"] * len(topic_with_response_df), dtype=str
             )
         else:
-            # 4-column case without Sentiment (Response References present instead)
+            # 4-column case without Sentiment (Response ID present instead)
             new_column_names = {
                 topic_with_response_df.columns[0]: "General topic",
                 topic_with_response_df.columns[1]: "Subtopic",
-                topic_with_response_df.columns[2]: "Response References",
+                topic_with_response_df.columns[2]: "Response ID",
                 topic_with_response_df.columns[3]: "Summary",
             }
             topic_with_response_df = topic_with_response_df.rename(
@@ -2393,7 +2389,7 @@ def write_llm_output_and_logs(
                 ["Not assessed"] * len(topic_with_response_df), dtype=str
             )
         topic_with_response_df = topic_with_response_df[
-            ["General topic", "Subtopic", "Sentiment", "Response References", "Summary"]
+            ["General topic", "Subtopic", "Sentiment", "Response ID", "Summary"]
         ]
     else:
         # Something went wrong with the table output, so add empty columns
@@ -2426,7 +2422,7 @@ def write_llm_output_and_logs(
                     "General topic",
                     "Subtopic",
                     "Sentiment",
-                    "Response References",
+                    "Response ID",
                     "Summary",
                 ]
             )
@@ -2437,13 +2433,13 @@ def write_llm_output_and_logs(
             topic_with_response_df["Sentiment"] = pd.Series(
                 ["Not assessed"] * len(topic_with_response_df), dtype=str
             )
-        if "Response References" not in topic_with_response_df.columns:
+        if "Response ID" not in topic_with_response_df.columns:
             if batch_size_number == 1:
-                topic_with_response_df["Response References"] = pd.Series(
+                topic_with_response_df["Response ID"] = pd.Series(
                     ["1"] * len(topic_with_response_df), dtype=str
                 )
             else:
-                topic_with_response_df["Response References"] = pd.Series(
+                topic_with_response_df["Response ID"] = pd.Series(
                     [""] * len(topic_with_response_df), dtype=str
                 )
         if "Summary" not in topic_with_response_df.columns:
@@ -2456,7 +2452,7 @@ def write_llm_output_and_logs(
             "General topic",
             "Subtopic",
             "Sentiment",
-            "Response References",
+            "Response ID",
             "Summary",
         ]
         topic_with_response_df = topic_with_response_df[expected_cols].copy()
@@ -2483,31 +2479,31 @@ def write_llm_output_and_logs(
                 "General topic",
                 "Subtopic",
                 "Sentiment",
-                "Response References",
+                "Response ID",
                 "Summary",
             ]
         )
 
-    # For instances where you end up with float values in Response References
+    # For instances where you end up with float values in Response ID
     # Ensure we're working with a Series by using iloc if needed
     if (
-        "Response References" in topic_with_response_df.columns
+        "Response ID" in topic_with_response_df.columns
         and not topic_with_response_df.empty
     ):
         # Handle case where column access might return DataFrame (e.g., duplicate column names)
         try:
-            response_ref_series = topic_with_response_df["Response References"]
+            response_ref_series = topic_with_response_df["Response ID"]
             # If it's a DataFrame (due to duplicate columns), take first column
             if isinstance(response_ref_series, pd.DataFrame):
                 response_ref_series = response_ref_series.iloc[:, 0]
-            topic_with_response_df["Response References"] = response_ref_series.astype(
+            topic_with_response_df["Response ID"] = response_ref_series.astype(
                 str
             ).str.replace(".0", "", regex=False)
         except Exception as e:
-            print(f"Warning: Error processing Response References column: {e}")
+            print(f"Warning: Error processing Response ID column: {e}")
             # Fallback: create a simple Series
-            topic_with_response_df["Response References"] = topic_with_response_df[
-                "Response References"
+            topic_with_response_df["Response ID"] = topic_with_response_df[
+                "Response ID"
             ].astype(str)
 
     # Strip and lower case topic names to remove issues where model is randomly capitalising topics/sentiment
@@ -2552,38 +2548,38 @@ def write_llm_output_and_logs(
     reference_data = list()
     existing_reference_numbers = False
 
-    batch_basic_response_df["Reference"] = batch_basic_response_df["Reference"].astype(
-        str
-    )
+    batch_basic_response_df["Response ID"] = batch_basic_response_df[
+        "Response ID"
+    ].astype(str)
     batch_size_number = int(batch_size_number)
 
-    # Handle blank Response References: remove rows if batch_size > 1, set to "1" if batch_size == 1
-    # Skip this processing when producing structured summaries, as they don't have Response References column
+    # Handle blank Response ID: remove rows if batch_size > 1, set to "1" if batch_size == 1
+    # Skip this processing when producing structured summaries, as they don't have Response ID column
     if (
         produce_structured_summary_radio != "Yes"
-        and "Response References" in topic_with_response_df.columns
+        and "Response ID" in topic_with_response_df.columns
         and not topic_with_response_df.empty
     ):
-        # Convert Response References to string and identify blank entries
-        topic_with_response_df["Response References"] = topic_with_response_df[
-            "Response References"
+        # Convert Response ID to string and identify blank entries
+        topic_with_response_df["Response ID"] = topic_with_response_df[
+            "Response ID"
         ].astype(str)
 
-        # Identify rows with invalid Response References
+        # Identify rows with invalid Response ID
         # For batch_size > 1: blank, "nan", contains no digits, or contains "0"
         # For batch_size == 1: only blank or "nan" (will be set to "1")
         blank_or_invalid_mask = (
-            topic_with_response_df["Response References"].str.strip() == ""
-        ) | (topic_with_response_df["Response References"].str.lower() == "nan")
+            topic_with_response_df["Response ID"].str.strip() == ""
+        ) | (topic_with_response_df["Response ID"].str.lower() == "nan")
 
         if batch_size_number > 1:
             # Also check for non-numeric characters (no digits) or "0" when batch_size > 1
-            no_digits_mask = ~topic_with_response_df[
-                "Response References"
-            ].str.contains(r"\d", regex=True, na=False)
-            contains_zero_mask = topic_with_response_df[
-                "Response References"
-            ].str.contains(r"\b0\b", regex=True, na=False)
+            no_digits_mask = ~topic_with_response_df["Response ID"].str.contains(
+                r"\d", regex=True, na=False
+            )
+            contains_zero_mask = topic_with_response_df["Response ID"].str.contains(
+                r"\b0\b", regex=True, na=False
+            )
 
             # Combine all invalid conditions for batch_size > 1
             invalid_mask = blank_or_invalid_mask | no_digits_mask | contains_zero_mask
@@ -2591,7 +2587,7 @@ def write_llm_output_and_logs(
             if invalid_mask.any():
                 rows_removed = invalid_mask.sum()
                 print(
-                    f"Removing {rows_removed} row(s) with invalid Response References "
+                    f"Removing {rows_removed} row(s) with invalid Response ID "
                     f"(blank, non-numeric, or '0' when batch_size > 1)"
                 )
                 topic_with_response_df = topic_with_response_df[~invalid_mask].copy()
@@ -2600,11 +2596,9 @@ def write_llm_output_and_logs(
             if blank_or_invalid_mask.any():
                 rows_updated = blank_or_invalid_mask.sum()
                 print(
-                    f"Setting {rows_updated} blank Response Reference(s) to '1' (batch_size == 1)"
+                    f"Setting {rows_updated} blank Response ID(s) to '1' (batch_size == 1)"
                 )
-                topic_with_response_df.loc[
-                    blank_or_invalid_mask, "Response References"
-                ] = "1"
+                topic_with_response_df.loc[blank_or_invalid_mask, "Response ID"] = "1"
 
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
@@ -2659,14 +2653,14 @@ def write_llm_output_and_logs(
                     try:
                         response_ref_no = int(ref) + int(start_row)
                     except ValueError:
-                        print(f"Reference '{ref}' is not a number and was skipped.")
+                        print(f"Response ID '{ref}' is not a number and was skipped.")
                         continue  # Skip to the next 'ref' in the loop
 
                 else:
                     # --- Scenario 2: The DataFrame is NOT empty, so we look up the reference ---
                     matching_series = batch_basic_response_df.loc[
-                        batch_basic_response_df["Reference"] == str(ref),
-                        "Original Reference",
+                        batch_basic_response_df["Response ID"] == str(ref),
+                        "Original Response ID",
                     ]
 
                     if not matching_series.empty:
@@ -2674,14 +2668,14 @@ def write_llm_output_and_logs(
                         response_ref_no = matching_series.iloc[0]
                     else:
                         # If not found, report it and skip this reference
-                        print(f"Reference '{ref}' not found in the DataFrame.")
+                        print(f"Response ID '{ref}' not found in the DataFrame.")
                         continue  # Skip to the next 'ref' in the loop
 
                 # This code runs for every *valid* reference that wasn't skipped by 'continue'.
                 # It uses the 'response_ref_no' calculated in the if/else block above.
                 reference_data.append(
                     {
-                        "Response References": str(response_ref_no),
+                        "Response ID": str(response_ref_no),
                         "General topic": topic,
                         "Subtopic": subtopic,
                         "Sentiment": sentiment,
@@ -2698,7 +2692,7 @@ def write_llm_output_and_logs(
 
             reference_data.append(
                 {
-                    "Response References": str(response_ref_no),
+                    "Response ID": str(response_ref_no),
                     "General topic": topic,
                     "Subtopic": subtopic,
                     "Sentiment": sentiment,
@@ -2713,7 +2707,7 @@ def write_llm_output_and_logs(
     else:
         new_reference_df = pd.DataFrame(
             columns=[
-                "Response References",
+                "Response ID",
                 "General topic",
                 "Subtopic",
                 "Sentiment",
@@ -2724,7 +2718,7 @@ def write_llm_output_and_logs(
 
     # Ensure new_reference_df has all required columns
     required_cols = [
-        "Response References",
+        "Response ID",
         "General topic",
         "Subtopic",
         "Sentiment",
@@ -2759,11 +2753,11 @@ def write_llm_output_and_logs(
             if col not in out_reference_df.columns:
                 out_reference_df[col] = ""
 
-    # Remove duplicate Response References for the same topic
+    # Remove duplicate Response ID for the same topic
     # Only if out_reference_df is not empty and has the required columns
-    if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+    if not out_reference_df.empty and "Response ID" in out_reference_df.columns:
         out_reference_df.drop_duplicates(
-            ["Response References", "General topic", "Subtopic", "Sentiment"],
+            ["Response ID", "General topic", "Subtopic", "Sentiment"],
             inplace=True,
         )
 
@@ -2771,21 +2765,21 @@ def write_llm_output_and_logs(
     if (
         existing_reference_numbers is True
         and not out_reference_df.empty
-        and "Response References" in out_reference_df.columns
+        and "Response ID" in out_reference_df.columns
     ):
         try:
-            out_reference_df["Response References"] = (
-                out_reference_df["Response References"].astype(float).astype(int)
+            out_reference_df["Response ID"] = (
+                out_reference_df["Response ID"].astype(float).astype(int)
             )
         except Exception as e:
-            print("Could not convert Response References column to integer due to", e)
+            print("Could not convert Response ID column to integer due to", e)
 
     # Only sort if out_reference_df is not empty and has the required columns
-    if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+    if not out_reference_df.empty and "Response ID" in out_reference_df.columns:
         out_reference_df.sort_values(
             [
                 "Start row of group",
-                "Response References",
+                "Response ID",
                 "General topic",
                 "Subtopic",
                 "Sentiment",
@@ -2795,7 +2789,7 @@ def write_llm_output_and_logs(
 
     # Each topic should only be associated with each individual response once
     out_reference_df.drop_duplicates(
-        ["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True
+        ["Response ID", "General topic", "Subtopic", "Sentiment"], inplace=True
     )
     out_reference_df["Group"] = group_name
 
@@ -2848,7 +2842,7 @@ def write_llm_output_and_logs(
 
     # Get count of rows that refer to particular topics
     # Only do this if out_reference_df is not empty and has the required columns
-    if not out_reference_df.empty and "Response References" in out_reference_df.columns:
+    if not out_reference_df.empty and "Response ID" in out_reference_df.columns:
         # Helper function to join unique summaries, preventing duplicates
         def join_unique_summaries(x):
             """Join unique summaries, handling both formats with and without '<br>' separators."""
@@ -2880,7 +2874,7 @@ def write_llm_output_and_logs(
             out_reference_df.groupby(["General topic", "Subtopic", "Sentiment"])
             .agg(
                 {
-                    "Response References": "size",  # Count the number of references
+                    "Response ID": "size",  # Count the number of references
                     "Summary": join_unique_summaries,  # Join unique summaries only
                 }
             )
@@ -2888,13 +2882,13 @@ def write_llm_output_and_logs(
         )
         # Rename the aggregated column to avoid merge conflicts
         reference_counts = reference_counts.rename(
-            columns={"Response References": "Number of responses"}
+            columns={"Response ID": "Number of responses"}
         )
 
-        # Drop any existing "Response References" or "Number of responses" columns from out_topic_summary_df
+        # Drop any existing "Response ID" or "Number of responses" columns from out_topic_summary_df
         # to avoid duplicate columns after merge
         out_topic_summary_df = out_topic_summary_df.drop(
-            ["Response References", "Number of responses"], axis=1, errors="ignore"
+            ["Response ID", "Number of responses"], axis=1, errors="ignore"
         )
 
         # Join the counts to existing_topic_summary_df
@@ -2914,7 +2908,7 @@ def write_llm_output_and_logs(
             # If merge didn't add the column, add it with default values
             out_topic_summary_df["Number of responses"] = 0
     else:
-        # If out_reference_df is empty or missing Response References, add default column
+        # If out_reference_df is empty or missing Response ID, add default column
         out_topic_summary_df["Number of responses"] = 0
         if "Summary" not in out_topic_summary_df.columns:
             out_topic_summary_df["Summary"] = ""
@@ -3417,7 +3411,7 @@ def extract_topics(
     missing_df = pd.DataFrame()
     new_reference_df = pd.DataFrame(
         columns=[
-            "Response References",
+            "Response ID",
             "General topic",
             "Subtopic",
             "Sentiment",
@@ -3451,7 +3445,7 @@ def extract_topics(
     if existing_reference_df.empty:
         existing_reference_df = pd.DataFrame(
             columns=[
-                "Response References",
+                "Response ID",
                 "General topic",
                 "Subtopic",
                 "Sentiment",
@@ -3503,7 +3497,7 @@ def extract_topics(
     )
     pd.DataFrame(
         columns=[
-            "Response References",
+            "Response ID",
             "General topic",
             "Subtopic",
             "Sentiment",
@@ -3995,7 +3989,7 @@ def extract_topics(
                     all_task_type_content.append(task_type)
                     all_file_names_content.append(original_full_file_name)
 
-                    ## Reference table mapping response numbers to topics
+                    ## Response ID table mapping response numbers to topics
                     if output_debug_files == "True":
                         new_reference_df.drop(
                             ["1", "2", "3"], axis=1, errors="ignore"
@@ -4603,7 +4597,7 @@ def extract_topics(
             + ".csv"
         )
 
-        ## Reference table mapping response numbers to topics
+        ## Response ID table mapping response numbers to topics
         # Ensure Group is present for grouped pipelines and downstream concatenation
         if "Group" not in existing_reference_df.columns:
             existing_reference_df["Group"] = group_name
@@ -4663,7 +4657,7 @@ def extract_topics(
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if "_final_" in x]
 
-        ## Reference table mapping response numbers to topics
+        ## Response ID table mapping response numbers to topics
         existing_reference_df_pivot["Group"] = group_name
         existing_reference_df_pivot.drop(
             ["1", "2", "3"], axis=1, errors="ignore"
@@ -5179,8 +5173,8 @@ def wrapper_extract_topics_per_column_value(
                         how="left",
                     )
                 # Sort output dataframes
-                acc_reference_df["Response References"] = (
-                    acc_reference_df["Response References"].astype(float).astype(int)
+                acc_reference_df["Response ID"] = (
+                    acc_reference_df["Response ID"].astype(float).astype(int)
                 )
                 acc_reference_df["Start row of group"] = acc_reference_df[
                     "Start row of group"
@@ -5188,7 +5182,7 @@ def wrapper_extract_topics_per_column_value(
                 grp_ref_sort_cols = [
                     "Group",
                     "Start row of group",
-                    "Response References",
+                    "Response ID",
                     "General topic",
                     "Subtopic",
                 ]
@@ -5207,8 +5201,8 @@ def wrapper_extract_topics_per_column_value(
                     how="left",
                 )
                 # Sort output dataframes
-                acc_reference_df["Response References"] = (
-                    acc_reference_df["Response References"].astype(float).astype(int)
+                acc_reference_df["Response ID"] = (
+                    acc_reference_df["Response ID"].astype(float).astype(int)
                 )
                 acc_reference_df["Start row of group"] = acc_reference_df[
                     "Start row of group"
@@ -5217,7 +5211,7 @@ def wrapper_extract_topics_per_column_value(
                     [
                         "Group",
                         "Start row of group",
-                        "Response References",
+                        "Response ID",
                         "Main heading",
                         "Subheading",
                         "Topic number",
@@ -5280,7 +5274,7 @@ def wrapper_extract_topics_per_column_value(
         else:
             # Fallback: if no logged content, create empty missing_df
             acc_missing_df = pd.DataFrame(
-                columns=["Missing Reference", "Response Character Count"]
+                columns=["Missing Response ID", "Response Character Count"]
             )
 
         acc_reference_df_path = (
@@ -5501,12 +5495,12 @@ def join_modified_topic_names_to_ref_table(
         errors="ignore",
     )
 
-    # modified_reference_df.drop_duplicates(["Response References", "General topic", "Subtopic", "Sentiment"], inplace=True)
+    # modified_reference_df.drop_duplicates(["Response ID", "General topic", "Subtopic", "Sentiment"], inplace=True)
 
     modified_reference_df.sort_values(
         [
             "Start row of group",
-            "Response References",
+            "Response ID",
             "General topic",
             "Subtopic",
             "Sentiment",
@@ -5517,7 +5511,7 @@ def join_modified_topic_names_to_ref_table(
     modified_reference_df = modified_reference_df.loc[
         :,
         [
-            "Response References",
+            "Response ID",
             "General topic",
             "Subtopic",
             "Sentiment",
@@ -5527,9 +5521,9 @@ def join_modified_topic_names_to_ref_table(
         ],
     ]
 
-    # Drop rows where Response References is either NA or null
+    # Drop rows where Response ID is either NA or null
     modified_reference_df = modified_reference_df[
-        ~modified_reference_df["Response References"].isnull()
+        ~modified_reference_df["Response ID"].isnull()
     ]
 
     return modified_reference_df
@@ -5571,7 +5565,7 @@ def modify_existing_output_tables(
             modifiable_topic_summary_df, original_topic_summary_df, reference_df
         )
 
-        ## Reference table mapping response numbers to topics
+        ## Response ID table mapping response numbers to topics
         reference_table_file_name = reference_file_path.replace(".csv", "_mod")
         new_reference_df_file_path = output_folder + reference_table_file_name + ".csv"
         reference_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
@@ -5610,7 +5604,7 @@ def modify_existing_output_tables(
         output_file_list = text_output_file_list_state
         reference_table_file_name = reference_file_path
         unique_table_file_name = unique_table_file_path
-        raise Exception("Reference and unique topic tables not found.")
+        raise Exception("Response ID and unique topic tables not found.")
 
     # Outputs for markdown table output
     unique_table_df_revised_display = modifiable_topic_summary_df.apply(

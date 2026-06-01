@@ -556,7 +556,7 @@ with app:
         )
 
         original_data_file_name_textbox = gr.Textbox(
-            label="Reference data file name",
+            label="Response ID data file name",
             value="",
             visible=False,
             elem_classes="hidden_component",
@@ -1467,7 +1467,7 @@ with app:
             with gr.Row():
                 in_join_files = gr.File(
                     height=FILE_INPUT_HEIGHT,
-                    label="Reference file should go here. Original data file should be loaded on the first tab.",
+                    label="Response ID file should go here. Original data file should be loaded on the first tab.",
                 )
                 join_cols_btn = gr.Button(
                     "Join columns to reference output", variant="primary"
