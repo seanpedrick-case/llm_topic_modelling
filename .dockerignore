@@ -13,6 +13,7 @@ dist/*
 logs/*
 usage/*
 docs/*
+guide/*
 feedback/*
 test_code/*
 test/tmp/*

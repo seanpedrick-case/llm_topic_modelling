@@ -12,6 +12,7 @@ build/*
 dist/*
 logs/*
 docs/*
+guide/*
 usage/*
 feedback/*
 test_code/*
@@ -23,3 +24,5 @@ unsloth_compiled_cache/*
 llm_topic_modelling.egg-info/*
 index.qmd
 _quarto.yml
+/.quarto/
+**/*.quarto_ipynb
