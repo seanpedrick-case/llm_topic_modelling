@@ -277,8 +277,8 @@ def csvs_to_excel(
             try:
                 # Create a copy to avoid modifying the original
                 df_copy = df.copy()
-                # Insert the Reference column at position 0 (first column)
-                df_copy.insert(0, "Reference", unique_reference_numbers)
+                # Insert the Response ID column at position 0 (first column)
+                df_copy.insert(0, "Response ID", unique_reference_numbers)
                 df = df_copy
             except Exception as e:
                 print("Could not add reference number to original data due to:", e)
@@ -517,7 +517,7 @@ def collect_output_csvs_and_create_excel_output(
             master_reference_df_state, basic_response_data
         )
 
-        unique_reference_numbers = basic_response_data["Reference"].tolist()
+        unique_reference_numbers = basic_response_data["Response ID"].tolist()
 
         try:
             master_reference_df_state.rename(
@@ -530,7 +530,7 @@ def collect_output_csvs_and_create_excel_output(
             print("Could not rename Topic_number due to", e)
 
         number_of_responses_with_topic_assignment = len(
-            master_reference_df_state["Response References"].unique()
+            master_reference_df_state["Response ID"].unique()
         )
 
         reference_table_csv_path = output_folder + "reference_df_for_xlsx.csv"
@@ -698,7 +698,7 @@ def collect_output_csvs_and_create_excel_output(
 
             relevant_logs = usage_logs.loc[
                 (
-                    usage_logs["Reference data file name"]
+                    usage_logs["Response ID data file name"]
                     == reference_data_file_name_textbox
                 )
                 & (

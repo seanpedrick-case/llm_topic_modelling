@@ -267,9 +267,9 @@ def deduplicate_topics(
         total_number_of_batches = 1
 
     # Validate that required columns exist in reference_df
-    if "Response References" not in reference_df.columns:
+    if "Response ID" not in reference_df.columns:
         raise ValueError(
-            "reference_df must contain 'Response References' column. "
+            "reference_df must contain 'Response ID' column. "
             f"Available columns: {list(reference_df.columns)}"
         )
 
@@ -289,10 +289,10 @@ def deduplicate_topics(
             # If empty, create empty column - it will be populated when DataFrame is recreated
             topic_summary_df["Topic number"] = pd.Series(dtype="int64")
 
-    if "Response References" in reference_df.columns:
+    if "Response ID" in reference_df.columns:
         # Convert float or str to int
-        reference_df["Response References"] = (
-            reference_df["Response References"].astype(float).astype(int)
+        reference_df["Response ID"] = (
+            reference_df["Response ID"].astype(float).astype(int)
         )
     if "Start row of group" in reference_df.columns:
         # Convert float or str to int
@@ -300,7 +300,7 @@ def deduplicate_topics(
             reference_df["Start row of group"].astype(float).astype(int)
         )
 
-    if (len(reference_df["Response References"].unique()) == 1) | (
+    if (len(reference_df["Response ID"].unique()) == 1) | (
         len(topic_summary_df["Topic number"].unique()) == 1
     ):
         print(
@@ -351,7 +351,7 @@ def deduplicate_topics(
         )
 
     # For checking that data is not lost during the process
-    initial_unique_references = len(reference_df["Response References"].unique())
+    initial_unique_references = len(reference_df["Response ID"].unique())
 
     if topic_summary_df.empty:
         topic_summary_df = create_topic_summary_df_from_reference_table(
@@ -545,7 +545,7 @@ def deduplicate_topics(
             )
             reference_df = reference_df[
                 [
-                    "Response References",
+                    "Response ID",
                     "General topic",
                     "Subtopic",
                     "Sentiment",
@@ -611,7 +611,7 @@ def deduplicate_topics(
             # print("reference_df:", reference_df)
             reference_df = reference_df[
                 [
-                    "Response References",
+                    "Response ID",
                     "General topic",
                     "Subtopic",
                     "Sentiment",
@@ -623,11 +623,11 @@ def deduplicate_topics(
 
         # Update reference summary column with all summaries
         reference_df["Summary"] = reference_df.groupby(
-            ["Response References", "General topic", "Subtopic", "Sentiment"]
+            ["Response ID", "General topic", "Subtopic", "Sentiment"]
         )["Summary"].transform(" <br> ".join)
 
         # Check that we have not inadvertantly removed some data during the above process
-        end_unique_references = len(reference_df["Response References"].unique())
+        end_unique_references = len(reference_df["Response ID"].unique())
 
         if initial_unique_references != end_unique_references:
             raise Exception(
@@ -636,7 +636,7 @@ def deduplicate_topics(
 
         # Drop duplicates in the reference table - each comment should only have the same topic referred to once
         reference_df.drop_duplicates(
-            ["Response References", "General topic", "Subtopic", "Sentiment"],
+            ["Response ID", "General topic", "Subtopic", "Sentiment"],
             inplace=True,
         )
 
@@ -693,14 +693,14 @@ def deduplicate_topics(
         # Rebuild topic_summary_df from updated reference_df to ensure consistency
         # This ensures the topic count reflects the actual merged state
         if not reference_df.empty:
-            # Check if Response References are present and not all empty
-            if "Response References" in reference_df.columns:
-                non_empty_refs = reference_df["Response References"].notna() & (
-                    reference_df["Response References"].astype(str).str.strip() != ""
+            # Check if Response ID are present and not all empty
+            if "Response ID" in reference_df.columns:
+                non_empty_refs = reference_df["Response ID"].notna() & (
+                    reference_df["Response ID"].astype(str).str.strip() != ""
                 )
                 if not non_empty_refs.any():
                     print(
-                        "Warning: All Response References are empty in reference_df. "
+                        "Warning: All Response ID are empty in reference_df. "
                         "Number of responses will be 0 for all topics."
                     )
             topic_summary_df = create_topic_summary_df_from_reference_table(
@@ -877,10 +877,10 @@ def deduplicate_topics_llm(
     file_data = pd.DataFrame()
     deduplicated_unique_table_markdown = ""
 
-    if "Response References" in reference_df.columns:
+    if "Response ID" in reference_df.columns:
         # Convert float or str to int
-        reference_df["Response References"] = (
-            reference_df["Response References"].astype(float).astype(int)
+        reference_df["Response ID"] = (
+            reference_df["Response ID"].astype(float).astype(int)
         )
     if "Start row of group" in reference_df.columns:
         # Convert float or str to int
@@ -889,7 +889,7 @@ def deduplicate_topics_llm(
         )
 
     # Check if data is too short for deduplication
-    if (len(reference_df["Response References"].unique()) == 1) | (
+    if (len(reference_df["Response ID"].unique()) == 1) | (
         len(topic_summary_df["Topic number"].unique()) == 1
     ):
         print(
@@ -960,7 +960,7 @@ def deduplicate_topics_llm(
         )
 
     # For checking that data is not lost during the process
-    initial_unique_references = len(reference_df["Response References"].unique())
+    initial_unique_references = len(reference_df["Response ID"].unique())
 
     # Capture input topic count for comparison
     if not topic_summary_df.empty:
@@ -979,7 +979,7 @@ def deduplicate_topics_llm(
         ).shape[0]
 
         topic_summary_df.drop(
-            ["1", "2", "3", "Response References"],
+            ["1", "2", "3", "Response ID"],
             axis=1,
             errors="ignore",
             inplace=True,
@@ -1002,7 +1002,7 @@ def deduplicate_topics_llm(
     )
     if should_output_files == "True":
         topic_summary_df.drop(
-            ["1", "2", "3", "Response References"], axis=1, errors="ignore"
+            ["1", "2", "3", "Response ID"], axis=1, errors="ignore"
         ).to_csv(orig_unique_topics_file_out_path, index=None, encoding="utf-8-sig")
 
     # Load data files if provided
@@ -1860,15 +1860,15 @@ def deduplicate_topics_llm(
     # Update reference summary column with all summaries
     if include_sentiment:
         reference_df["Summary"] = reference_df.groupby(
-            ["Response References", "General topic", "Subtopic", "Sentiment"]
+            ["Response ID", "General topic", "Subtopic", "Sentiment"]
         )["Summary"].transform(" <br> ".join)
     else:
         reference_df["Summary"] = reference_df.groupby(
-            ["Response References", "General topic", "Subtopic"]
+            ["Response ID", "General topic", "Subtopic"]
         )["Summary"].transform(" <br> ".join)
 
     # Check that we have not inadvertently removed some data during the process
-    end_unique_references = len(reference_df["Response References"].unique())
+    end_unique_references = len(reference_df["Response ID"].unique())
 
     if initial_unique_references != end_unique_references:
         raise Exception(
@@ -1878,12 +1878,12 @@ def deduplicate_topics_llm(
     # Drop duplicates in the reference table
     if include_sentiment:
         reference_df.drop_duplicates(
-            ["Response References", "General topic", "Subtopic", "Sentiment"],
+            ["Response ID", "General topic", "Subtopic", "Sentiment"],
             inplace=True,
         )
     else:
         reference_df.drop_duplicates(
-            ["Response References", "General topic", "Subtopic"], inplace=True
+            ["Response ID", "General topic", "Subtopic"], inplace=True
         )
 
     # Before recreating topic_summary_df, check if input had Group information
@@ -2123,7 +2123,7 @@ def sample_reference_table_summaries(
                 "Subtopic",
                 "Sentiment",
                 "Group",
-                "Response References",
+                "Response ID",
                 "Summary",
             ]
         )
@@ -2176,9 +2176,9 @@ def sample_reference_table_summaries(
                 ).reset_index(drop=True)
 
                 # Never allow the same underlying response to be sampled twice for a topic combo
-                if "Response References" in sampled_max_df.columns:
+                if "Response ID" in sampled_max_df.columns:
                     sampled_max_df = sampled_max_df.drop_duplicates(
-                        subset=["Response References"]
+                        subset=["Response ID"]
                     ).reset_index(drop=True)
 
                 def _split_passages_for_budget(text: str) -> List[str]:
@@ -2285,7 +2285,7 @@ def sample_reference_table_summaries(
         # If no responses/topics qualify, just go ahead with the original reference dataframe
         if all_summaries.empty:
             sampled_reference_table_df = reference_df
-            # Filter by sentiment only (Response References is a string in original df, not a count)
+            # Filter by sentiment only (Response ID is a string in original df, not a count)
             sampled_reference_table_df = sampled_reference_table_df.loc[
                 sampled_reference_table_df["Sentiment"] != "Not Mentioned"
             ]
@@ -2302,16 +2302,16 @@ def sample_reference_table_summaries(
                 )
                 .agg(
                     {
-                        "Response References": "size",  # Count the number of references
+                        "Response ID": "size",  # Count the number of references
                         "Summary": join_unique_summaries_with_budget,  # Join unique summaries only (budgeted)
                     }
                 )
                 .reset_index()
             )
-            # Filter by sentiment and count (Response References is now a numeric count after aggregation)
+            # Filter by sentiment and count (Response ID is now a numeric count after aggregation)
             sampled_reference_table_df = sampled_reference_table_df.loc[
                 (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
-                & (sampled_reference_table_df["Response References"] > 1)
+                & (sampled_reference_table_df["Response ID"] > 1)
             ]
 
         print(

@@ -32,7 +32,7 @@ class MockInferenceServerHandler(BaseHTTPRequestHandler):
         """
         # Generate a simple markdown table that satisfies the validation
         # This mimics a topic extraction table response
-        mock_table = """| General topic | Subtopic | Sentiment | Response References | Summary |
+        mock_table = """| General topic | Subtopic | Sentiment | Response ID | Summary |
 |-----------|---------------|-----------|-----------|-----------|
 | Test Topic | Test Subtopic | Positive | 1 | Test summary |
 | Another Topic | Another Subtopic | Neutral | 2,3 | Another summary |

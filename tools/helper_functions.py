@@ -290,7 +290,7 @@ def load_in_previous_reference_file(file: str):
         try:
             reference_file_data, reference_file_name = load_in_file(file)
             # print("reference_file_data:", reference_file_data.head(2))
-            out_message = out_message + " Reference file load successful."
+            out_message = out_message + " Response ID file load successful."
         except Exception as e:
             out_message = "Could not load reference file data:" + str(e)
             raise Exception("Could not load reference file data:", e)
@@ -342,7 +342,7 @@ def load_in_previous_data_files(
             try:
                 reference_file_data, reference_file_name = load_in_file(file)
                 # print("reference_file_data:", reference_file_data.head(2))
-                out_message = out_message + " Reference file load successful."
+                out_message = out_message + " Response ID file load successful."
 
             except Exception as e:
                 out_message = "Could not load reference file data:" + str(e)
@@ -423,22 +423,20 @@ def join_cols_onto_reference_df(
     # print("original_data_df columns:", original_data_df.columns)
     # print("original_data_df:", original_data_df)
 
-    original_data_df.reset_index(names="Response References", inplace=True)
-    original_data_df["Response References"] += 1
+    original_data_df.reset_index(names="Response ID", inplace=True)
+    original_data_df["Response ID"] += 1
 
     # print("reference_df columns:", reference_df.columns)
     # print("reference_df:", reference_df)
 
-    join_columns.append("Response References")
+    join_columns.append("Response ID")
 
-    reference_df["Response References"] = (
-        reference_df["Response References"].fillna("-1").astype(int)
-    )
+    reference_df["Response ID"] = reference_df["Response ID"].fillna("-1").astype(int)
 
     save_file_name = output_folder + original_file_name + "_j.csv"
 
     out_reference_df = reference_df.merge(
-        original_data_df[join_columns], on="Response References", how="left"
+        original_data_df[join_columns], on="Response ID", how="left"
     )
     out_reference_df.to_csv(save_file_name, index=None)
 
@@ -492,26 +490,26 @@ def get_basic_response_data(
             columns={basic_response_data.columns[0]: "Response"}
         )
     basic_response_data = basic_response_data.reset_index(
-        names="Original Reference"
+        names="Original Response ID"
     )  # .reset_index(drop=True) #
     # Try to convert to int, if it fails, return a range of 1 to last row + 1
     try:
-        basic_response_data["Original Reference"] = (
-            basic_response_data["Original Reference"].astype(int) + 1
+        basic_response_data["Original Response ID"] = (
+            basic_response_data["Original Response ID"].astype(int) + 1
         )
     except (ValueError, TypeError):
-        basic_response_data["Original Reference"] = range(
+        basic_response_data["Original Response ID"] = range(
             1, len(basic_response_data) + 1
         )
 
-    basic_response_data["Reference"] = basic_response_data.index.astype(int) + 1
+    basic_response_data["Response ID"] = basic_response_data.index.astype(int) + 1
 
     if verify_titles is True:
         basic_response_data["Title"] = basic_response_data["Title"].str.strip()
         basic_response_data["Title"] = basic_response_data["Title"].apply(initial_clean)
     else:
         basic_response_data = basic_response_data[
-            ["Reference", "Response", "Original Reference"]
+            ["Response ID", "Response", "Original Response ID"]
         ]
 
     basic_response_data["Response"] = basic_response_data["Response"].str.strip()
@@ -529,12 +527,12 @@ def convert_reference_table_to_pivot_table(
     if "Sentiment" not in df.columns:
         df["Sentiment"] = "Not assessed"
 
-    df_in = df[["Response References", "General topic", "Subtopic", "Sentiment"]].copy()
+    df_in = df[["Response ID", "General topic", "Subtopic", "Sentiment"]].copy()
 
     # Convert to numeric first (handles float strings like '1.0'), then to int
-    df_in["Response References"] = pd.to_numeric(
-        df_in["Response References"], errors="coerce"
-    ).astype("Int64")
+    df_in["Response ID"] = pd.to_numeric(df_in["Response ID"], errors="coerce").astype(
+        "Int64"
+    )
 
     # Create a combined category column
     df_in["Category"] = (
@@ -543,7 +541,7 @@ def convert_reference_table_to_pivot_table(
 
     # Create pivot table counting occurrences of each unique combination
     pivot_table = pd.crosstab(
-        index=df_in["Response References"],
+        index=df_in["Response ID"],
         columns=[df_in["General topic"], df_in["Subtopic"], df_in["Sentiment"]],
         margins=True,
     )
@@ -555,10 +553,10 @@ def convert_reference_table_to_pivot_table(
 
     if not basic_response_data.empty:
         pivot_table = basic_response_data.merge(
-            pivot_table, right_on="Response References", left_on="Reference", how="left"
+            pivot_table, right_on="Response ID", left_on="Response ID", how="left"
         )
 
-        pivot_table.drop("Response References", axis=1, inplace=True)
+        pivot_table.drop("Response ID", axis=1, inplace=True)
 
     pivot_table.columns = pivot_table.columns.str.replace(
         "Not assessed - ", ""
@@ -588,17 +586,17 @@ def create_topic_summary_df_from_reference_table(
     # When sentiment is assessed: group by General topic, Subtopic, Sentiment, and Group
     # When sentiment is NOT assessed: group by General topic, Subtopic, and Group
     # In both cases, duplicate rows with the same combination will be merged:
-    # - Response References will be concatenated into a comma-separated list
+    # - Response ID will be concatenated into a comma-separated list
     # - Summaries will be concatenated with "<br>" separators
     if include_sentiment:
         groupby_cols = ["General topic", "Subtopic", "Sentiment", "Group"]
     else:
         groupby_cols = ["General topic", "Subtopic", "Group"]
 
-    # Helper function to collect and join Response References
-    # This aggregates all unique Response References from rows with the same topic combination
+    # Helper function to collect and join Response ID
+    # This aggregates all unique Response ID from rows with the same topic combination
     def aggregate_response_references(x):
-        # Collect all unique Response References, convert to string, sort numerically
+        # Collect all unique Response ID, convert to string, sort numerically
         refs = set()
         for ref in x:
             if pd.notna(ref) and str(ref).strip():
@@ -676,30 +674,30 @@ def create_topic_summary_df_from_reference_table(
         reference_df.groupby(groupby_cols)
         .agg(
             {
-                "Response References": aggregate_response_references,
+                "Response ID": aggregate_response_references,
                 "Summary": aggregate_summaries,
             }
         )
         .reset_index()
     )
 
-    # Calculate number of responses from the Response References string
+    # Calculate number of responses from the Response ID string
     # (count comma-separated values)
     def count_responses(ref_str):
         if not ref_str or str(ref_str).strip() == "":
             return 0
         return len([r for r in str(ref_str).split(",") if r.strip()])
 
-    # Store Response References before potentially renaming
-    response_refs_col = out_topic_summary_df["Response References"].copy()
+    # Store Response ID before potentially renaming
+    response_refs_col = out_topic_summary_df["Response ID"].copy()
 
-    # Calculate Number of responses from Response References
+    # Calculate Number of responses from Response ID
     out_topic_summary_df["Number of responses"] = response_refs_col.apply(
         count_responses
     )
 
-    # For backward compatibility with code that expects "Number of responses" instead of "Response References",
-    # we keep both columns. The "Response References" column contains the concatenated reference numbers,
+    # For backward compatibility with code that expects "Number of responses" instead of "Response ID",
+    # we keep both columns. The "Response ID" column contains the concatenated reference numbers,
     # and "Number of responses" contains the count.
 
     # Sort the dataframe first
@@ -723,7 +721,7 @@ def create_topic_summary_df_from_reference_table(
     out_topic_summary_df.rename(columns={"Topic_number": "Topic number"}, inplace=True)
 
     out_topic_summary_df.drop(
-        ["1", "2", "3", "Response References"], axis=1, errors="ignore", inplace=True
+        ["1", "2", "3", "Response ID"], axis=1, errors="ignore", inplace=True
     )
 
     return out_topic_summary_df
