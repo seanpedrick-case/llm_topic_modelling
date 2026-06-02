@@ -1,6 +1,6 @@
 gradio<=6.10.0
 transformers<=5.3.0
-spaces<=0.49.0
+spaces
 pandas<=2.3.3
 boto3<=1.42.80
 pyarrow<=23.0.1
