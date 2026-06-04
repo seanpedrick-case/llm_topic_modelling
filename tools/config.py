@@ -191,6 +191,13 @@ UPLOAD_USAGE_LOG_TO_S3_OUTPUTS = convert_string_to_boolean(
     get_or_create_env_var("UPLOAD_USAGE_LOG_TO_S3_OUTPUTS", "False")
 )  # Whether to upload usage log to S3 output folder when uploading outputs
 
+# Output format for the Excel/spreadsheet file (xlsx or ods)
+EXPORT_FORMAT = get_or_create_env_var(
+    "EXPORT_FORMAT", "xlsx"
+).lower()  # 'xlsx' or 'ods'
+if EXPORT_FORMAT not in ["xlsx", "ods"]:
+    EXPORT_FORMAT = "xlsx"  # Default to xlsx if invalid value provided
+
 ###
 # LOGGING OPTIONS
 ###

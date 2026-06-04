@@ -11,7 +11,7 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-from tools.config import OUTPUT_FOLDER
+from tools.config import EXPORT_FORMAT, OUTPUT_FOLDER
 from tools.config import model_name_map as global_model_name_map
 from tools.helper_functions import (
     clean_column_name,
@@ -116,6 +116,42 @@ def markdown_to_richtext(
         return text
 
     return rich_text
+
+
+def convert_xlsx_to_ods(xlsx_path: str, ods_path: str):
+    """
+    Convert an Excel (.xlsx) file to OpenDocument Spreadsheet (.ods) format.
+
+    Args:
+        xlsx_path (str): Path to the source Excel file
+        ods_path (str): Path where the ODS file should be saved
+    """
+    try:
+        import pyexcel
+        import pyexcel_ods
+
+        # Use pyexcel to read xlsx and save as ods
+        pyexcel.save_as(file_name=xlsx_path, dest_file_name=ods_path)
+        print(f"Output ods summary saved as '{ods_path}'")
+
+        # Delete the temporary xlsx file
+        if os.path.exists(xlsx_path):
+            os.remove(xlsx_path)
+
+        return ods_path
+    except ImportError:
+        print(
+            "Warning: pyexcel or pyexcel_ods not installed. Install with: "
+            "pip install pyexcel pyexcel-ods\n"
+            "Keeping output as xlsx format instead."
+        )
+        return xlsx_path
+    except Exception as e:
+        print(
+            f"Warning: Could not convert xlsx to ods due to: {e}\n"
+            "Keeping output as xlsx format instead."
+        )
+        return xlsx_path
 
 
 def add_cover_sheet(
@@ -364,7 +400,13 @@ def csvs_to_excel(
 
     wb.save(output_filename)
 
-    print(f"Output xlsx summary saved as '{output_filename}'")
+    # Convert to ODS format if requested
+    if EXPORT_FORMAT == "ods":
+        # Change file extension from .xlsx to .ods
+        ods_filename = output_filename.replace(".xlsx", ".ods")
+        output_filename = convert_xlsx_to_ods(output_filename, ods_filename)
+    else:
+        print(f"Output xlsx summary saved as '{output_filename}'")
 
     return output_filename
 
@@ -540,6 +582,13 @@ def collect_output_csvs_and_create_excel_output(
         reference_pivot_table_csv_path = (
             output_folder + "reference_pivot_df_for_xlsx.csv"
         )
+        # Reorder columns to ensure 'Original response ID' comes before 'Response'
+        cols = list(reference_pivot_table.columns)
+        if "Original response ID" in cols and "Response" in cols:
+            cols.remove("Original response ID")
+            cols.remove("Response")
+            cols = ["Original response ID", "Response"] + cols
+            reference_pivot_table = reference_pivot_table[cols]
         reference_pivot_table.to_csv(reference_pivot_table_csv_path, index=None)
         temp_csv_files_for_cleanup.append(reference_pivot_table_csv_path)
 
