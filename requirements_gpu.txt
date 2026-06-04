@@ -1,13 +1,13 @@
-gradio<=6.10.0
+gradio<=6.16.0
 transformers<=5.3.0
-spaces<=0.49.0
+spaces
 pandas<=2.3.3
 boto3<=1.42.80
 pyarrow<=23.0.1
 openpyxl<=3.1.5
 markdown<=3.10.2
 tabulate<=0.9.0
-lxml<=6.0.4
+lxml<=6.1.1
 google-genai<=1.73.0
 openai<=2.31.0
 html5lib<=1.1
@@ -23,6 +23,6 @@ unsloth_zoo<=2026.4.4
 #triton-windows<3.3
 timm
 # Llama CPP Python
-llama-cpp-python>=0.3.16 -C cmake.args="-DGGML_CUDA=on"
+llama-cpp-python>=0.3.25 -C cmake.args="-DGGML_CUDA=on"
 #llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git -C cmake.args="-DGGML_CUDA=on"
 # If above doesn't work, try specific wheels for your system, see files in https://github.com/JamePeng/llama-cpp-python/releases for different python versions
