@@ -19,11 +19,13 @@ python-dotenv<=1.2.2
 # Torch/Unsloth and llama-cpp-python
 # Latest compatible with CUDA 12.4
 torch<=2.9.1 --extra-index-url https://download.pytorch.org/whl/cu128
-unsloth[cu128-torch280]<=2025.11.6
-unsloth_zoo<=2025.11.6
+unsloth<=2026.4.4
+unsloth_zoo<=2026.4.4
 timm
-# llama-cpp-python direct wheel link for GPU compatible version 3.17 for use with Python 3.10 and Hugging Face
-https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.17-cu128-Basic-linux-20251202/llama_cpp_python-0.3.17-cp310-cp310-linux_x86_64.whl
+# llama-cpp-python direct wheel link for GPU compatible version 3.25 for use with Python 3.10 and Hugging Face
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.25-cu125/llama_cpp_python-0.3.25-py3-none-linux_x86_64.whl
+#https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.17-cu128-Basic-linux-20251202/llama_cpp_python-0.3.17-cp310-cp310-linux_x86_64.whl
 #https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl
+
 
 

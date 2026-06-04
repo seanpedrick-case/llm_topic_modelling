@@ -23,6 +23,6 @@ unsloth_zoo<=2026.4.4
 #triton-windows<3.3
 timm
 # Llama CPP Python
-llama-cpp-python>=0.3.16 -C cmake.args="-DGGML_CUDA=on"
+llama-cpp-python>=0.3.25 -C cmake.args="-DGGML_CUDA=on"
 #llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git -C cmake.args="-DGGML_CUDA=on"
 # If above doesn't work, try specific wheels for your system, see files in https://github.com/JamePeng/llama-cpp-python/releases for different python versions

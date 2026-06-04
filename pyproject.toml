@@ -86,10 +86,9 @@ torch = [
     "xformers"
 ]
 
-# Support for llama-cpp-python is deprecated with this repo is deprecated as the original repo has become inconsistently updated. I advise using a llama.cpp/vllm inference server instead. If you want to use llama-cpp-python with recent models, you can try specific wheels for your system, e.g. for Linux see files in https://github.com/JamePeng/llama-cpp-python/releases. More details on installation here: https://github.com/JamePeng/llama-cpp-python
+# Support for llama-cpp-python is experimental - I have not directly tested the latest versions of llamacpp against the app
 llamacpp = [
-    "llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git",
-    #"llama-cpp-python<=0.3.16",
+    "llama-cpp-python<=0.3.25",
 ]
 
 # Run Gradio as an mcp server
