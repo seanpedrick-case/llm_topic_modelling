@@ -128,7 +128,6 @@ def convert_xlsx_to_ods(xlsx_path: str, ods_path: str):
     """
     try:
         import pyexcel
-        import pyexcel_ods
 
         # Use pyexcel to read xlsx and save as ods
         pyexcel.save_as(file_name=xlsx_path, dest_file_name=ods_path)
