@@ -3477,13 +3477,14 @@ def create_headless_output_notifications(
     scope: Construct,
     logical_id_prefix: str,
     *,
-    output_bucket_name: str,
+    output_bucket: s3.IBucket,
     output_prefix: str,
     notify_email: str,
     iam_user_name: str,
     metric_filter_id: str,
     sns_topic_name: str,
     alarm_name: str,
+    kms_key_arn: Optional[str] = None,
 ) -> Dict[str, str]:
     """
     Headless follow-on: S3 PutRequests metric on ``output_prefix`` -> CloudWatch alarm
@@ -3491,6 +3492,7 @@ def create_headless_output_notifications(
 
     Mirrors the pattern documented under cdk/alarms_and_user/.
     """
+    output_bucket_name = output_bucket.bucket_name
     metric_id = sanitize_headless_metric_filter_id(metric_filter_id)
     prefix = (output_prefix or "output/").strip()
     if prefix and not prefix.endswith("/"):
@@ -3616,6 +3618,38 @@ def create_headless_output_notifications(
                 f"arn:aws:s3:::{output_bucket_name}",
                 f"arn:aws:s3:::{output_bucket_name}/*",
             ],
+        )
+    )
+    if kms_key_arn:
+        reader_user.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
+                resources=[kms_key_arn],
+            )
+        )
+
+    # Resource-based policy on the bucket (matches TaskRole grants; required for some
+    # KMS-encrypted buckets and org policies that expect explicit bucket principals).
+    output_bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            principals=[reader_user],
+            actions=["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+            resources=[f"{output_bucket.bucket_arn}/*"],
+        )
+    )
+    output_bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            principals=[reader_user],
+            actions=["s3:ListBucket"],
+            resources=[output_bucket.bucket_arn],
         )
     )
 

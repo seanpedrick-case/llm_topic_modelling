@@ -27,7 +27,7 @@ def test_validate_notify_email():
 def test_headless_output_notifications_synth():
     from aws_cdk import App, Environment, Stack
     from aws_cdk import aws_s3 as s3
-    from aws_cdk.assertions import Template
+    from aws_cdk.assertions import Match, Template
     from cdk_functions import create_headless_output_notifications
 
     app = App()
@@ -41,7 +41,7 @@ def test_headless_output_notifications_synth():
     create_headless_output_notifications(
         stack,
         "Notify",
-        output_bucket_name=bucket.bucket_name,
+        output_bucket=bucket,
         output_prefix="output/",
         notify_email="analyst@example.com",
         iam_user_name="test-s3-output-reader",
@@ -54,6 +54,23 @@ def test_headless_output_notifications_synth():
     template.resource_count_is("AWS::SNS::Topic", 1)
     template.resource_count_is("AWS::CloudWatch::Alarm", 1)
     template.resource_count_is("AWS::IAM::User", 1)
+    template.has_resource_properties(
+        "AWS::S3::BucketPolicy",
+        {
+            "PolicyDocument": {
+                "Statement": Match.array_with(
+                    [
+                        Match.object_like(
+                            {
+                                "Effect": "Allow",
+                                "Action": Match.array_with(["s3:GetObject"]),
+                            }
+                        )
+                    ]
+                )
+            }
+        },
+    )
     template.has_resource_properties(
         "AWS::CloudWatch::Alarm",
         {

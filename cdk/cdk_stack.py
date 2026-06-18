@@ -2636,13 +2636,14 @@ class CdkStack(Stack):
                         create_headless_output_notifications(
                             self,
                             "HeadlessOutputNotifications",
-                            output_bucket_name=output_bucket.bucket_name,
+                            output_bucket=output_bucket,
                             output_prefix=HEADLESS_OUTPUT_S3_PREFIX,
                             notify_email=HEADLESS_OUTPUT_NOTIFY_EMAIL,
                             iam_user_name=HEADLESS_OUTPUT_IAM_USER_NAME,
                             metric_filter_id=HEADLESS_OUTPUT_S3_METRIC_FILTER_ID,
                             sns_topic_name=HEADLESS_OUTPUT_SNS_TOPIC_NAME,
                             alarm_name=HEADLESS_OUTPUT_ALARM_NAME,
+                            kms_key_arn=shared_kms_key_arn,
                         )
                         print(
                             "Headless output notifications enabled: S3 PutRequests "
