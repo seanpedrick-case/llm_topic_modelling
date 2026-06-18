@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import os
+import re
 from typing import Any, Dict, FrozenSet, List, Literal, Optional, Tuple, Union
 
 S3BucketAvailability = Literal["owned", "available", "globally_taken"]
@@ -19,6 +20,8 @@ from aws_cdk import (
     Stack,
     Tags,
 )
+from aws_cdk import aws_cloudwatch as cloudwatch
+from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
@@ -31,6 +34,8 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3_notifications as s3n
 from aws_cdk import aws_secretsmanager as secretsmanager
+from aws_cdk import aws_sns as sns
+from aws_cdk import aws_sns_subscriptions as sns_subscriptions
 from aws_cdk import aws_wafv2 as wafv2
 from aws_cdk import custom_resources as cr
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -3459,6 +3464,186 @@ def create_s3_batch_ecs_trigger_lambda(
     )
 
     return batch_fn
+
+
+def sanitize_headless_metric_filter_id(raw: str) -> str:
+    """S3 request metrics configuration Id (alphanumeric, hyphen, underscore)."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", (raw or "").strip())
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
+    return (cleaned or "s3-output-put")[:64]
+
+
+def create_headless_output_notifications(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    output_bucket_name: str,
+    output_prefix: str,
+    notify_email: str,
+    iam_user_name: str,
+    metric_filter_id: str,
+    sns_topic_name: str,
+    alarm_name: str,
+) -> Dict[str, str]:
+    """
+    Headless follow-on: S3 PutRequests metric on ``output_prefix`` -> CloudWatch alarm
+    -> SNS email, plus an IAM user that can list/get/put/delete objects in the bucket.
+
+    Mirrors the pattern documented under cdk/alarms_and_user/.
+    """
+    metric_id = sanitize_headless_metric_filter_id(metric_filter_id)
+    prefix = (output_prefix or "output/").strip()
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+    email = (notify_email or "").strip()
+    if not email:
+        raise ValueError("notify_email is required for headless output notifications")
+
+    metrics_resource = cr.AwsCustomResource(
+        scope,
+        f"{logical_id_prefix}OutputBucketPutMetrics",
+        on_create=cr.AwsSdkCall(
+            service="S3",
+            action="putBucketMetricsConfiguration",
+            parameters={
+                "Bucket": output_bucket_name,
+                "Id": metric_id,
+                "MetricsConfiguration": {
+                    "Id": metric_id,
+                    "Filter": {"Prefix": prefix},
+                },
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(
+                f"{output_bucket_name}-{metric_id}"
+            ),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="S3",
+            action="putBucketMetricsConfiguration",
+            parameters={
+                "Bucket": output_bucket_name,
+                "Id": metric_id,
+                "MetricsConfiguration": {
+                    "Id": metric_id,
+                    "Filter": {"Prefix": prefix},
+                },
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(
+                f"{output_bucket_name}-{metric_id}"
+            ),
+        ),
+        on_delete=cr.AwsSdkCall(
+            service="S3",
+            action="deleteBucketMetricsConfiguration",
+            parameters={"Bucket": output_bucket_name, "Id": metric_id},
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_statements(
+            [
+                iam.PolicyStatement(
+                    actions=[
+                        "s3:PutMetricsConfiguration",
+                        "s3:GetMetricsConfiguration",
+                        "s3:DeleteMetricsConfiguration",
+                        "s3:ListBucket",
+                    ],
+                    resources=[
+                        f"arn:aws:s3:::{output_bucket_name}",
+                        f"arn:aws:s3:::{output_bucket_name}/*",
+                    ],
+                )
+            ]
+        ),
+    )
+
+    topic = sns.Topic(
+        scope,
+        f"{logical_id_prefix}OutputNotifyTopic",
+        topic_name=sns_topic_name[:256],
+        display_name=sns_topic_name[:100],
+    )
+    topic.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="AllowPublishAlarms",
+            effect=iam.Effect.ALLOW,
+            principals=[iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+            actions=["sns:Publish"],
+            resources=[topic.topic_arn],
+        )
+    )
+    topic.add_subscription(sns_subscriptions.EmailSubscription(email))
+
+    alarm = cloudwatch.Alarm(
+        scope,
+        f"{logical_id_prefix}OutputPutAlarm",
+        alarm_name=alarm_name[:255],
+        metric=cloudwatch.Metric(
+            namespace="AWS/S3",
+            metric_name="PutRequests",
+            dimensions_map={
+                "BucketName": output_bucket_name,
+                "FilterId": metric_id,
+            },
+            statistic="Sum",
+            period=Duration.minutes(1),
+        ),
+        threshold=0,
+        evaluation_periods=1,
+        comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        alarm_description=(
+            f"Notify when new analysis outputs are written under s3://"
+            f"{output_bucket_name}/{prefix}"
+        ),
+    )
+    alarm.add_alarm_action(cloudwatch_actions.SnsAction(topic))
+    alarm.node.add_dependency(metrics_resource)
+
+    reader_user = iam.User(
+        scope,
+        f"{logical_id_prefix}OutputReaderUser",
+        user_name=iam_user_name[:64],
+    )
+    reader_user.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:ListBucket",
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+            ],
+            resources=[
+                f"arn:aws:s3:::{output_bucket_name}",
+                f"arn:aws:s3:::{output_bucket_name}/*",
+            ],
+        )
+    )
+
+    CfnOutput(
+        scope,
+        f"{logical_id_prefix}OutputNotifyTopicArn",
+        value=topic.topic_arn,
+        description="SNS topic for headless output-bucket PutRequests alarms",
+    )
+    CfnOutput(
+        scope,
+        f"{logical_id_prefix}OutputReaderUserArn",
+        value=reader_user.user_arn,
+        description="IAM user for programmatic download of headless analysis outputs",
+    )
+    CfnOutput(
+        scope,
+        f"{logical_id_prefix}OutputPutAlarmName",
+        value=alarm.alarm_name,
+        description="CloudWatch alarm on S3 PutRequests for new analysis outputs",
+    )
+
+    return {
+        "sns_topic_arn": topic.topic_arn,
+        "iam_user_name": reader_user.user_name,
+        "alarm_name": alarm.alarm_name,
+        "metric_filter_id": metric_id,
+    }
 
 
 def build_headless_app_defaults_env_content(

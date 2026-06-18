@@ -20,7 +20,7 @@ from cdk_functions import (
 def test_public_github_repository_url():
     assert (
         public_github_repository_url("seanpedrick-case", "llm_topic_modeller")
-        == "https://github.com/seanpedrick-case/llm_topic_modeller"
+        == "https://github.com/seanpedrick-case/llm_topic_modeller.git"
     )
 
 

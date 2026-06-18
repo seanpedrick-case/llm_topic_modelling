@@ -100,6 +100,7 @@ from cdk_config import (
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
+    ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     ENABLE_S3_BATCH_ECS_TRIGGER,
@@ -112,6 +113,12 @@ from cdk_config import (
     GITHUB_REPO_NAME,
     GITHUB_REPO_USERNAME,
     GRADIO_SERVER_PORT,
+    HEADLESS_OUTPUT_ALARM_NAME,
+    HEADLESS_OUTPUT_IAM_USER_NAME,
+    HEADLESS_OUTPUT_NOTIFY_EMAIL,
+    HEADLESS_OUTPUT_S3_METRIC_FILTER_ID,
+    HEADLESS_OUTPUT_S3_PREFIX,
+    HEADLESS_OUTPUT_SNS_TOPIC_NAME,
     LOAD_BALANCER_WEB_ACL_NAME,
     NAT_GATEWAY_NAME,
     NEW_VPC_CIDR,
@@ -167,6 +174,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_ecs_express_infrastructure_role,
     create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
+    create_headless_output_notifications,
     create_headless_s3_batch_seed,
     create_nat_gateway,
     create_pi_agent_ecs_resources,
@@ -2620,6 +2628,25 @@ class CdkStack(Stack):
                             destination_bucket=output_bucket,
                             seed_asset_directory=seed_asset_dir,
                             s3_outputs_bucket_name=output_bucket.bucket_name,
+                        )
+                    if (
+                        enable_headless
+                        and ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS == "True"
+                    ):
+                        create_headless_output_notifications(
+                            self,
+                            "HeadlessOutputNotifications",
+                            output_bucket_name=output_bucket.bucket_name,
+                            output_prefix=HEADLESS_OUTPUT_S3_PREFIX,
+                            notify_email=HEADLESS_OUTPUT_NOTIFY_EMAIL,
+                            iam_user_name=HEADLESS_OUTPUT_IAM_USER_NAME,
+                            metric_filter_id=HEADLESS_OUTPUT_S3_METRIC_FILTER_ID,
+                            sns_topic_name=HEADLESS_OUTPUT_SNS_TOPIC_NAME,
+                            alarm_name=HEADLESS_OUTPUT_ALARM_NAME,
+                        )
+                        print(
+                            "Headless output notifications enabled: S3 PutRequests "
+                            f"alarm -> SNS ({HEADLESS_OUTPUT_NOTIFY_EMAIL})."
                         )
                     print("S3 batch ECS trigger Lambda defined.")
                 except Exception as e:

@@ -29,6 +29,11 @@ Usage examples::
     # Headless batch (S3 → Lambda → one-shot ECS direct mode)
     python cdk_install.py --profile headless --vpc-name my-vpc --yes
     python cdk_install.py --profile production --headless --vpc-name my-vpc --yes
+
+    # Headless with S3 output email alerts + IAM reader user
+    python cdk_install.py --profile headless --vpc-name my-vpc --yes \\
+        --headless-output-notifications \\
+        --headless-notify-email analyst@example.com
 """
 
 from __future__ import annotations
@@ -1257,6 +1262,9 @@ class InstallAnswers:
     enable_service_connect: bool = False
     enable_s3_batch: bool = False
     enable_headless: bool = False
+    enable_headless_output_notifications: bool = False
+    headless_output_notify_email: str = ""
+    headless_output_iam_user_name: str = ""
     ecs_memory: str = "8192"
     pi_alb_routing: str = "path"
     pi_alb_path_prefix: str = "/agent"
@@ -1791,11 +1799,29 @@ def headless_profile_error(answers: "InstallAnswers") -> Optional[str]:
     return None
 
 
+def validate_notify_email(email: str) -> Optional[str]:
+    """Return an error message when email is not a plausible notification address."""
+    cleaned = (email or "").strip()
+    if not cleaned:
+        return "Notification email address is required."
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", cleaned):
+        return f"Invalid notification email address: {cleaned!r}"
+    return None
+
+
 def validate_install_answers(answers: "InstallAnswers") -> List[str]:
     errors: List[str] = []
     msg = headless_profile_error(answers)
     if msg:
         errors.append(msg)
+    if answers.enable_headless_output_notifications:
+        if not answers_use_headless(answers):
+            errors.append(
+                "Headless output notifications require headless batch deployment."
+            )
+        email_error = validate_notify_email(answers.headless_output_notify_email)
+        if email_error:
+            errors.append(email_error)
     return errors
 
 
@@ -1882,6 +1908,20 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
                 "ENABLE_ECS_SERVICE_CONNECT": "False",
             }
         )
+        if answers.enable_headless_output_notifications:
+            iam_user = (
+                answers.headless_output_iam_user_name.strip()
+                or f"{answers.cdk_prefix}s3-output-reader"
+            )
+            values.update(
+                {
+                    "ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS": "True",
+                    "HEADLESS_OUTPUT_NOTIFY_EMAIL": (
+                        answers.headless_output_notify_email.strip()
+                    ),
+                    "HEADLESS_OUTPUT_IAM_USER_NAME": iam_user,
+                }
+            )
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
     if answers.pi_enabled:
@@ -2073,6 +2113,18 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
         errors.append(
             "ENABLE_HEADLESS_DEPLOYMENT is incompatible with agent mode or Service Connect."
         )
+
+    if values.get("ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS") == "True":
+        if not headless:
+            errors.append(
+                "ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS requires "
+                "ENABLE_HEADLESS_DEPLOYMENT=True."
+            )
+        email_error = validate_notify_email(
+            values.get("HEADLESS_OUTPUT_NOTIFY_EMAIL", "")
+        )
+        if email_error:
+            errors.append(email_error)
 
     pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
     if pi_ecs:
@@ -3307,6 +3359,50 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
         if mem:
             answers.ecs_memory = mem
+        if getattr(args, "headless_output_notifications", False):
+            answers.enable_headless_output_notifications = True
+        elif getattr(args, "no_headless_output_notifications", False):
+            answers.enable_headless_output_notifications = False
+        elif ask_yes_no(
+            "Enable email notifications when new analysis outputs are uploaded to S3?",
+            default=True,
+        ):
+            answers.enable_headless_output_notifications = True
+        if answers.enable_headless_output_notifications:
+            default_email = getattr(args, "headless_notify_email", "") or ""
+            while True:
+                answers.headless_output_notify_email = ask(
+                    "Notification email address (SNS subscription; confirm via AWS email)",
+                    default_email,
+                ).strip()
+                email_error = validate_notify_email(
+                    answers.headless_output_notify_email
+                )
+                if not email_error:
+                    break
+                print(email_error)
+            default_iam_user = (
+                getattr(args, "headless_output_iam_user", "").strip()
+                or f"{answers.cdk_prefix}s3-output-reader"
+            )
+            iam_user = ask(
+                "IAM user name for programmatic S3 output access",
+                default_iam_user,
+            ).strip()
+            answers.headless_output_iam_user_name = iam_user or default_iam_user
+    elif answers_use_headless(answers):
+        if getattr(args, "headless_output_notifications", False):
+            answers.enable_headless_output_notifications = True
+            answers.headless_output_notify_email = (
+                getattr(args, "headless_notify_email", "") or ""
+            ).strip()
+            answers.headless_output_iam_user_name = (
+                getattr(args, "headless_output_iam_user", "").strip()
+                or f"{answers.cdk_prefix}s3-output-reader"
+            )
+            email_error = validate_notify_email(answers.headless_output_notify_email)
+            if email_error:
+                raise SystemExit(email_error)
     elif interactive and ask_yes_no("Configure other optional add-ons?", False):
         if not is_express:
             if not answers.enable_service_connect:
@@ -3417,6 +3513,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--headless",
         action="store_true",
         help="Batch-only add-on (production/custom without Express only; not valid with demo)",
+    )
+    p.add_argument(
+        "--headless-output-notifications",
+        action="store_true",
+        help="Enable S3 output PutRequests alarm, SNS email, and IAM reader user (headless)",
+    )
+    p.add_argument(
+        "--no-headless-output-notifications",
+        action="store_true",
+        help="Disable headless output notifications in interactive headless installs",
+    )
+    p.add_argument(
+        "--headless-notify-email",
+        help="Email for SNS notifications when headless outputs are uploaded",
+    )
+    p.add_argument(
+        "--headless-output-iam-user",
+        help="IAM user name for programmatic download of headless S3 outputs",
+    )
+    p.add_argument(
+        "--create-headless-output-access-key",
+        action="store_true",
+        help="After deploy, create IAM access key for the headless output reader user",
+    )
+    p.add_argument(
+        "--skip-headless-output-access-key",
+        action="store_true",
+        help="Do not offer to create IAM access key after headless deploy",
     )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
@@ -3611,10 +3735,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if is_headless:
-        from cdk_post_deploy import print_headless_deployment_next_steps
+        from cdk_post_deploy import (
+            print_headless_deployment_next_steps,
+            print_headless_output_notification_steps,
+            provision_headless_output_reader_access_key,
+        )
 
         if args.skip_quickstart or not run_qs:
             print_headless_deployment_next_steps(values)
+        if values.get("ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS") == "True":
+            print_headless_output_notification_steps(values)
+            create_key = False
+            if args.skip_headless_output_access_key:
+                create_key = False
+            elif args.create_headless_output_access_key:
+                create_key = True
+            elif not args.yes and not args.deploy_only:
+                create_key = ask_yes_no(
+                    "Create IAM access key for the headless output reader user now?",
+                    default=True,
+                )
+            elif args.yes:
+                create_key = True
+            if create_key:
+                provision_headless_output_reader_access_key(values)
         return 0
 
     print("\nDone. Next steps:")

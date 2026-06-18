@@ -45,7 +45,7 @@ def test_ensure_codebuild_updates_oauth_project(monkeypatch):
     assert kwargs["source"]["type"] == "GITHUB"
     assert (
         kwargs["source"]["location"]
-        == "https://github.com/seanpedrick-case/llm_topic_modeller"
+        == "https://github.com/seanpedrick-case/llm_topic_modeller.git"
     )
     assert "auth" not in kwargs["source"]
     assert kwargs["sourceVersion"] == "main"
@@ -60,7 +60,7 @@ def test_ensure_codebuild_skips_when_already_public(monkeypatch):
                 "name": "MyProject",
                 "source": {
                     "type": "GITHUB",
-                    "location": "https://github.com/seanpedrick-case/llm_topic_modeller",
+                    "location": "https://github.com/seanpedrick-case/llm_topic_modeller.git",
                     "reportBuildStatus": False,
                 },
                 "sourceVersion": "main",

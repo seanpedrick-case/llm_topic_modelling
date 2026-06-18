@@ -140,7 +140,7 @@ APPREGISTRY_ATTRIBUTE_GROUP_NAME = get_or_create_env_var(
 )
 APPREGISTRY_REPOSITORY_URL = get_or_create_env_var(
     "APPREGISTRY_REPOSITORY_URL",
-    "https://github.com/seanpedrick-case/llm_topic_modeller",
+    "https://github.com/seanpedrick-case/llm_topic_modeller.git",
 )
 
 _precheck_context_file = get_or_create_env_var("CONTEXT_FILE", "precheck.context.json")
@@ -659,6 +659,46 @@ if ENABLE_HEADLESS_DEPLOYMENT == "True":
     if USE_CLOUDFRONT == "True":
         raise ValueError(
             "ENABLE_HEADLESS_DEPLOYMENT=True is incompatible with USE_CLOUDFRONT=True."
+        )
+
+# Optional headless follow-on: S3 output PutRequests alarm -> SNS email + IAM user for downloads.
+ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS = get_or_create_env_var(
+    "ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS", "False"
+)
+HEADLESS_OUTPUT_NOTIFY_EMAIL = get_or_create_env_var("HEADLESS_OUTPUT_NOTIFY_EMAIL", "")
+HEADLESS_OUTPUT_IAM_USER_NAME = get_or_create_env_var(
+    "HEADLESS_OUTPUT_IAM_USER_NAME", f"{CDK_PREFIX}s3-output-reader"
+)
+HEADLESS_OUTPUT_S3_METRIC_FILTER_ID = get_or_create_env_var(
+    "HEADLESS_OUTPUT_S3_METRIC_FILTER_ID",
+    f"{CDK_PREFIX}s3-output-put".lower().replace("_", "-"),
+)
+HEADLESS_OUTPUT_SNS_TOPIC_NAME = get_or_create_env_var(
+    "HEADLESS_OUTPUT_SNS_TOPIC_NAME",
+    f"{CDK_PREFIX}llm-topic-s3-save-sns".lower().replace("_", "-"),
+)
+HEADLESS_OUTPUT_ALARM_NAME = get_or_create_env_var(
+    "HEADLESS_OUTPUT_ALARM_NAME",
+    f"{CDK_PREFIX}cloudwatch-alarm-new-output-s3".lower().replace("_", "-"),
+)
+HEADLESS_OUTPUT_S3_PREFIX = get_or_create_env_var(
+    "HEADLESS_OUTPUT_S3_PREFIX", "output/"
+)
+HEADLESS_OUTPUT_IAM_SECRET_NAME = get_or_create_env_var(
+    "HEADLESS_OUTPUT_IAM_SECRET_NAME",
+    f"{CDK_PREFIX}headless-output-reader-key",
+)
+
+if ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS == "True":
+    if ENABLE_HEADLESS_DEPLOYMENT != "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS=True requires "
+            "ENABLE_HEADLESS_DEPLOYMENT=True."
+        )
+    if not (HEADLESS_OUTPUT_NOTIFY_EMAIL or "").strip():
+        raise ValueError(
+            "HEADLESS_OUTPUT_NOTIFY_EMAIL is required when "
+            "ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS=True."
         )
 
 # Pi agent Gradio UI (second Fargate service; shared legacy ALB + Service Connect to main app).

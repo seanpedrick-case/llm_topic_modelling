@@ -1318,3 +1318,96 @@ def print_headless_deployment_next_steps(
             f"  - Batch task logs: CloudWatch log group {log_group} "
             "(streams appear once the container starts)."
         )
+
+
+def print_headless_output_notification_steps(values: Dict[str, str]) -> None:
+    """Print follow-on steps for S3 output alarms, SNS, and IAM reader user."""
+    email = (values.get("HEADLESS_OUTPUT_NOTIFY_EMAIL") or "").strip()
+    iam_user = (values.get("HEADLESS_OUTPUT_IAM_USER_NAME") or "").strip()
+    output_bucket = (values.get("S3_OUTPUT_BUCKET_NAME") or "").strip()
+    output_prefix = (values.get("HEADLESS_OUTPUT_S3_PREFIX") or "output/").strip()
+    alarm_name = (values.get("HEADLESS_OUTPUT_ALARM_NAME") or "").strip()
+    secret_name = (values.get("HEADLESS_OUTPUT_IAM_SECRET_NAME") or "").strip()
+
+    print("\nHeadless output notifications:")
+    if email:
+        print(
+            f"  - Confirm the SNS email subscription sent to {email} "
+            "(check spam; status shows Pending until confirmed)."
+        )
+    if output_bucket:
+        print(
+            f"  - CloudWatch alarm fires when objects are uploaded under "
+            f"s3://{output_bucket}/{output_prefix.rstrip('/')}/"
+        )
+    if alarm_name:
+        print(f"  - Alarm name: {alarm_name}")
+    if iam_user:
+        print(
+            f"  - IAM user {iam_user} can list/get/put/delete objects in the "
+            f"output bucket for programmatic result download."
+        )
+    if secret_name:
+        print(
+            f"  - If an access key was created, credentials are stored in "
+            f"Secrets Manager secret {secret_name}."
+        )
+
+
+def provision_headless_output_reader_access_key(
+    values: Dict[str, str],
+    *,
+    region: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Create an IAM access key for the headless output reader user.
+
+    Stores JSON credentials in Secrets Manager when HEADLESS_OUTPUT_IAM_SECRET_NAME
+    is set in cdk_config.env.
+    """
+    from botocore.exceptions import ClientError
+
+    iam_user = (values.get("HEADLESS_OUTPUT_IAM_USER_NAME") or "").strip()
+    if not iam_user:
+        print("Warning: HEADLESS_OUTPUT_IAM_USER_NAME not set; skipping access key.")
+        return None
+
+    aws_region = region or values.get("AWS_REGION") or AWS_REGION
+    iam_client = boto3.client("iam", region_name=aws_region)
+    secret_name = (values.get("HEADLESS_OUTPUT_IAM_SECRET_NAME") or "").strip()
+
+    try:
+        response = iam_client.create_access_key(UserName=iam_user)
+    except ClientError as exc:
+        print(f"Could not create IAM access key for {iam_user}: {exc}")
+        return None
+
+    access_key = response["AccessKey"]
+    payload = json.dumps(
+        {
+            "aws_access_key_id": access_key["AccessKeyId"],
+            "aws_secret_access_key": access_key["SecretAccessKey"],
+        }
+    )
+
+    if secret_name:
+        sm_client = boto3.client("secretsmanager", region_name=aws_region)
+        try:
+            sm_client.create_secret(Name=secret_name, SecretString=payload)
+            print(f"Stored output-reader credentials in Secrets Manager: {secret_name}")
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ResourceExistsException":
+                sm_client.put_secret_value(SecretId=secret_name, SecretString=payload)
+                print(
+                    f"Updated output-reader credentials in Secrets Manager: {secret_name}"
+                )
+            else:
+                print(f"Warning: could not store credentials in Secrets Manager: {exc}")
+                print(f"  AWS_ACCESS_KEY_ID={access_key['AccessKeyId']}")
+                print("  AWS_SECRET_ACCESS_KEY=<shown once in IAM console if needed>")
+    else:
+        print("IAM access key created (store securely):")
+        print(f"  AWS_ACCESS_KEY_ID={access_key['AccessKeyId']}")
+        print(f"  AWS_SECRET_ACCESS_KEY={access_key['SecretAccessKey']}")
+
+    return access_key["AccessKeyId"]
