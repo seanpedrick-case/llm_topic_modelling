@@ -945,7 +945,7 @@ with app:
         if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
             with gr.Accordion("Assign task to cost code", open=True, visible=True):
                 gr.Markdown(
-                    "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
+                    "Please ensure that you have approval from your budget holder before using this app for summarisation tasks that incur a cost."
                 )
                 with gr.Row(equal_height=True):
                     with gr.Column():

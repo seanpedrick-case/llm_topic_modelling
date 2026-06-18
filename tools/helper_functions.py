@@ -23,6 +23,10 @@ from tools.config import (
 )
 
 
+class ColumnNotFoundError(ValueError):
+    """Raised when a requested column name is not present in the loaded dataset."""
+
+
 def empty_output_vars_extract_topics():
     # Empty output objects before processing a new file
 
@@ -213,6 +217,16 @@ def load_in_file(file_path: str, colnames: List[str] = "", excel_sheet: str = ""
 
     col_list = [item for item in col_list if item not in ["", "NA"]]
 
+    missing_cols = [col for col in col_list if col not in file_data.columns]
+    if missing_cols:
+        missing_label = ", ".join(f"'{col}'" for col in missing_cols)
+        available_cols = ", ".join(f"'{col}'" for col in file_data.columns)
+        raise ColumnNotFoundError(
+            "Column not found in data - aborting task: "
+            f"{missing_label} not found in file '{file_name}'. "
+            f"Available columns: {available_cols}"
+        )
+
     for col in col_list:
         file_data[col] = file_data[col].fillna("")
         file_data[col] = (
@@ -246,6 +260,8 @@ def load_in_data_file(
             f"File {file_name} loaded successfully. Number of rows: {len(file_data)}. Total number of batches: {num_batches}"
         )
 
+    except ColumnNotFoundError:
+        raise
     except Exception as e:
         print("Could not load data file due to:", e)
         file_data = pd.DataFrame()

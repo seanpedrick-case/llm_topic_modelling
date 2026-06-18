@@ -8,7 +8,7 @@ from tools.config import (
     AWS_ACCESS_KEY,
     AWS_REGION,
     AWS_SECRET_KEY,
-    DOCUMENT_REDACTION_BUCKET,
+    DOCUMENT_SUMMARISATION_BUCKET,
     OUTPUT_FOLDER,
 )
 
@@ -25,7 +25,7 @@ if AWS_ACCESS_KEY and AWS_SECRET_KEY and AWS_REGION:
 else:
     s3 = boto3.client("s3")
 
-bucket_name = DOCUMENT_REDACTION_BUCKET
+bucket_name = DOCUMENT_SUMMARISATION_BUCKET
 prefix = "usage/"  # 'feedback/' # 'logs/' # Change as needed - top-level folder where logs are stored
 earliest_date = "20250409"  # Earliest date of logs folder retrieved
 latest_date = "20250423"  # Latest date of logs folder retrieved
