@@ -33,7 +33,7 @@ ENV INSTALL_LLAMA_CPP_PYTHON=${INSTALL_LLAMA_CPP_PYTHON}
 
 # Llama CPP Python install requires CUDA 12.4
 RUN if [ "$INSTALL_LLAMA_CPP_PYTHON" = "True" ]; then \
-    pip install --no-cache-dir --target=/install https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp312-cp312-linux_x86_64.whl; \
+    pip install --no-cache-dir --target=/install https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.30-cp312-cp312-linux_x86_64.whl; \
     fi
 
 RUN pip install --no-cache-dir --target=/install -r requirements_lightweight.txt

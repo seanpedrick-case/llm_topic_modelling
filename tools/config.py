@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
 
-# Set or retrieve configuration variables for the redaction app
+# Set or retrieve configuration variables for the summarisation app
 
 
 def ensure_folder_exists(output_folder: str):
@@ -431,31 +431,41 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
 if RUN_AWS_BEDROCK_MODELS == "1":
     amazon_models = [
         "google.gemma-3-12b-it",
-        "anthropic.claude-3-haiku-20240307-v1:0",
-        "anthropic.claude-3-7-sonnet-20250219-v1:0",
-        "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "amazon.nova-micro-v1:0",
+        "google.gemma-3-27b-it",
+        # "anthropic.claude-3-haiku-20240307-v1:0",
+        # "anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "anthropic.claude-sonnet-4-6",
+        "anthropic.claude-opus-4-6-v1",
+        # "amazon.nova-micro-v1:0",
         "amazon.nova-lite-v1:0",
         "amazon.nova-pro-v1:0",
-        "deepseek.v3-v1:0",
+        # "deepseek.v3-v1:0",
         "openai.gpt-oss-20b-1:0",
         "openai.gpt-oss-120b-1:0",
         "mistral.ministral-3-14b-instruct",
+        "mistral.magistral-small-2509",
+        "mistral.devstral-2-123b",
+        "nvidia.nemotron-super-3-120b",
     ]
     model_full_names.extend(amazon_models)
     model_short_names.extend(
         [
             "gemma_3_12b_it",
-            "haiku",
-            "sonnet_3_7",
-            "sonnet_4_5",
-            "nova_micro",
+            "gemma_3_27b_it",
+            # "haiku",
+            # "sonnet_3_7",
+            "sonnet_4_6",
+            "claude_opus_4_6",
+            # "nova_micro",
             "nova_lite",
             "nova_pro",
-            "deepseek_v3",
+            # "deepseek_v3",
             "gpt_oss_20b_aws",
             "gpt_oss_120b_aws",
             "ministral_3_14b_instruct",
+            "magistral_small_2509",
+            "devstral_2_123b",
+            "nemotron_super_3_120b",
         ]
     )
     model_source.extend(["AWS"] * len(amazon_models))
@@ -952,7 +962,7 @@ COST_CODES_PATH = get_or_create_env_var(
 
 S3_COST_CODES_PATH = get_or_create_env_var(
     "S3_COST_CODES_PATH", ""
-)  # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
+)  # COST_CENTRES.csv # This is a path within the DOCUMENT_SUMMARISATION_BUCKET
 
 # A default path in case s3 cost code location is provided but no local cost code location given
 if COST_CODES_PATH:

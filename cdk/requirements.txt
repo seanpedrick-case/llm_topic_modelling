@@ -1,0 +1,6 @@
+aws-cdk-lib==2.257.0
+aws-cdk.aws-servicecatalogappregistry-alpha~=2.257.0a0
+boto3
+pandas
+nodejs
+python-dotenv
