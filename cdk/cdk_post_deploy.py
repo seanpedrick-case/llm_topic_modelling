@@ -1401,11 +1401,8 @@ def provision_headless_output_reader_access_key(
                 print("Updated output-reader credentials in Secrets Manager secret")
             else:
                 print(f"Warning: could not store credentials in Secrets Manager: {exc}")
-                print(f"  AWS_ACCESS_KEY_ID={access_key['AccessKeyId']}")
-                print("  AWS_SECRET_ACCESS_KEY=<shown once in IAM console if needed>")
+                print("IAM access key created (view in IAM console if needed):")
     else:
-        print("IAM access key created (store securely):")
-        print(f"  AWS_ACCESS_KEY_ID={access_key['AccessKeyId']}")
-        print(f"  AWS_SECRET_ACCESS_KEY={access_key['SecretAccessKey']}")
+        print("IAM access key created (view in IAM console if needed):")
 
     return access_key["AccessKeyId"]
