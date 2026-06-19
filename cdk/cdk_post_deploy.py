@@ -1349,8 +1349,8 @@ def print_headless_output_notification_steps(values: Dict[str, str]) -> None:
         )
     if secret_name:
         print(
-            f"  - If an access key was created, credentials are stored in "
-            f"Secrets Manager secret {secret_name}."
+            "  - If an access key was created, credentials are stored in "
+            "the relevantSecrets Manager secret."
         )
 
 
@@ -1394,13 +1394,11 @@ def provision_headless_output_reader_access_key(
         sm_client = boto3.client("secretsmanager", region_name=aws_region)
         try:
             sm_client.create_secret(Name=secret_name, SecretString=payload)
-            print(f"Stored output-reader credentials in Secrets Manager: {secret_name}")
+            print("Stored output-reader credentials in Secrets Manager secret")
         except ClientError as exc:
             if exc.response["Error"]["Code"] == "ResourceExistsException":
                 sm_client.put_secret_value(SecretId=secret_name, SecretString=payload)
-                print(
-                    f"Updated output-reader credentials in Secrets Manager: {secret_name}"
-                )
+                print("Updated output-reader credentials in Secrets Manager secret")
             else:
                 print(f"Warning: could not store credentials in Secrets Manager: {exc}")
                 print(f"  AWS_ACCESS_KEY_ID={access_key['AccessKeyId']}")
