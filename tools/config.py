@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 today_rev = datetime.now().strftime("%Y%m%d")
 HOST_NAME = socket.gethostname()
 
-# Set or retrieve configuration variables for the redaction app
+# Set or retrieve configuration variables for the summarisation app
 
 
 def ensure_folder_exists(output_folder: str):
@@ -952,7 +952,7 @@ COST_CODES_PATH = get_or_create_env_var(
 
 S3_COST_CODES_PATH = get_or_create_env_var(
     "S3_COST_CODES_PATH", ""
-)  # COST_CENTRES.csv # This is a path within the DOCUMENT_REDACTION_BUCKET
+)  # COST_CENTRES.csv # This is a path within the DOCUMENT_SUMMARISATION_BUCKET
 
 # A default path in case s3 cost code location is provided but no local cost code location given
 if COST_CODES_PATH:

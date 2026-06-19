@@ -2,6 +2,7 @@ import argparse
 import csv
 import os
 import re
+import sys
 import time
 import uuid
 from datetime import datetime
@@ -63,6 +64,7 @@ from tools.dedup_summaries import (
     wrapper_summarise_output_topics_per_group,
 )
 from tools.helper_functions import (
+    ColumnNotFoundError,
     load_in_data_file,
     load_in_previous_data_files,
 )
@@ -2070,6 +2072,9 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 "Valid options: 'extract', 'validate', 'deduplicate', 'summarise', 'overall_summary', or 'all_in_one'"
             )
 
+    except ColumnNotFoundError as e:
+        print(str(e))
+        sys.exit(1)
     except Exception as e:
         print(f"\nAn error occurred during the workflow: {e}")
         import traceback
