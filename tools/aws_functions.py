@@ -11,6 +11,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     S3_LOG_BUCKET,
     S3_OUTPUTS_BUCKET,
+    UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS,
 )
 
 # Empty bucket name in case authentication fails
@@ -381,6 +382,78 @@ def export_outputs_to_s3(
 
     # No GUI outputs to update
     return
+
+
+def _normalize_file_paths(file_paths) -> List[str]:
+    """Flatten Gradio file inputs (paths, lists, or file objects) into path strings."""
+    if not file_paths:
+        return []
+    if isinstance(file_paths, str):
+        return [file_paths]
+    if not isinstance(file_paths, list):
+        file_paths = [file_paths]
+
+    result = []
+    for item in file_paths:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, list):
+            result.extend(_normalize_file_paths(item))
+        else:
+            path = getattr(item, "name", None) or str(item)
+            if path:
+                result.append(path)
+    return result
+
+
+def is_prompt_response_log_file(file_path: str) -> bool:
+    """True when file_path is a prompt/response JSON log (*_logs_*.json)."""
+    if not file_path:
+        return False
+    basename = os.path.basename(file_path)
+    return basename.endswith(".json") and "_logs_" in basename
+
+
+def collect_prompt_response_log_paths(log_paths) -> List[str]:
+    """Return existing prompt/response JSON log files from path lists or Gradio file inputs."""
+    seen = set()
+    result = []
+    for path in _normalize_file_paths(log_paths):
+        if path in seen:
+            continue
+        if is_prompt_response_log_file(path) and os.path.exists(path):
+            result.append(path)
+            seen.add(path)
+    return result
+
+
+def export_outputs_to_s3_with_prompt_response_logs(
+    file_list_state,
+    prompt_response_log_paths,
+    s3_output_folder_state_value: str,
+    save_outputs_to_s3_flag: bool,
+    base_file_state=None,
+    s3_bucket: str = S3_OUTPUTS_BUCKET,
+):
+    """
+    Upload output files to S3, optionally including prompt/response JSON logs
+    (*_logs_*.json) when UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS is enabled.
+    """
+    files_to_upload = _normalize_file_paths(file_list_state)
+
+    if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS:
+        for log_path in collect_prompt_response_log_paths(prompt_response_log_paths):
+            if log_path not in files_to_upload:
+                files_to_upload.append(log_path)
+                print(f"Including prompt/response log in S3 upload: {log_path}")
+
+    return export_outputs_to_s3(
+        file_list_state=files_to_upload,
+        s3_output_folder_state_value=s3_output_folder_state_value,
+        save_outputs_to_s3_flag=save_outputs_to_s3_flag,
+        base_file_state=base_file_state,
+        s3_bucket=s3_bucket,
+    )
 
 
 def download_cost_codes_with_error_handling(bucket, key, local_path):

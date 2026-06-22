@@ -11,7 +11,11 @@ import boto3
 import botocore
 import pandas as pd
 
-from tools.aws_functions import download_file_from_s3, export_outputs_to_s3
+from tools.aws_functions import (
+    collect_prompt_response_log_paths,
+    download_file_from_s3,
+    export_outputs_to_s3,
+)
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
 from tools.config import (
     API_URL,
@@ -48,6 +52,7 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
+    UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS,
     UPLOAD_USAGE_LOG_TO_S3_OUTPUTS,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
@@ -229,6 +234,7 @@ def upload_outputs_to_s3_if_enabled(
     s3_bucket: str = S3_OUTPUTS_BUCKET,
     save_outputs_to_s3: bool = None,
     task_usage_log_path: str = None,
+    prompt_response_log_paths=None,
 ):
     """
     Upload output files to S3 if SAVE_OUTPUTS_TO_S3 is enabled.
@@ -241,6 +247,7 @@ def upload_outputs_to_s3_if_enabled(
         s3_bucket: S3 bucket name
         save_outputs_to_s3: Override for SAVE_OUTPUTS_TO_S3 config (if None, uses config value)
         task_usage_log_path: Path to task-specific usage log file to upload (if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS is enabled)
+        prompt_response_log_paths: Prompt/response JSON log paths to upload (if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS is enabled)
     """
     # Use provided value or fall back to config
     if save_outputs_to_s3 is None:
@@ -276,6 +283,12 @@ def upload_outputs_to_s3_if_enabled(
             print(
                 f"Task-specific usage log not found at {task_usage_log_path}, skipping usage log upload."
             )
+
+    if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS and prompt_response_log_paths:
+        for log_path in collect_prompt_response_log_paths(prompt_response_log_paths):
+            if log_path not in valid_files:
+                valid_files.append(log_path)
+                print(f"Including prompt/response log in S3 upload: {log_path}")
 
     if not valid_files:
         print("No valid output files to upload to S3.")
@@ -1275,6 +1288,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 base_file_name=file_name,
                 session_hash=session_hash,
                 task_usage_log_path=task_usage_log_path,
+                prompt_response_log_paths=log_files_output_list_state,
             )
 
         # Task 2: Validate Topics
@@ -1600,9 +1614,8 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 base_file_name=working_data_file_name_textbox,
                 session_hash=session_hash,
                 task_usage_log_path=task_usage_log_path,
+                prompt_response_log_paths=log_files_output,
             )
-
-        # Task 4: Summarise Topics
         elif args.task == "summarise":
             print("--- Starting Topic Summarisation Workflow... ---")
 
@@ -1748,6 +1761,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 base_file_name=working_data_file_name_textbox,
                 session_hash=session_hash,
                 task_usage_log_path=task_usage_log_path,
+                prompt_response_log_paths=log_files_output,
             )
 
         # Task 5: Overall Summary
@@ -2070,6 +2084,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 base_file_name=file_name,
                 session_hash=session_hash,
                 task_usage_log_path=task_usage_log_path,
+                prompt_response_log_paths=log_files_output_list_state,
             )
 
         else:

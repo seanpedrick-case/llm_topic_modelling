@@ -7,7 +7,7 @@ import pandas as pd
 from tools.auth import authenticate_user
 from tools.aws_functions import (
     download_cost_codes_with_error_handling,
-    export_outputs_to_s3,
+    export_outputs_to_s3_with_prompt_response_logs,
     upload_file_to_s3,
 )
 from tools.combine_sheets_into_xlsx import collect_output_csvs_and_create_excel_output
@@ -905,7 +905,7 @@ with app:
 
             in_excel_sheets = gr.Dropdown(
                 multiselect=False,
-                label="Select the Excel sheet of interest.",
+                label="Select the Excel sheet of interest",
                 visible=False,
                 allow_custom_value=True,
             )
@@ -1688,9 +1688,10 @@ with app:
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
-        fn=export_outputs_to_s3,
+        fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
             summary_xlsx_output_files_list,
+            log_files_output_list_state,
             s3_output_folder_state,
             save_outputs_to_s3_checkbox,
             in_data_files,
@@ -1833,9 +1834,10 @@ with app:
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
-        fn=export_outputs_to_s3,
+        fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
             summary_xlsx_output_files_list,
+            log_files_output_list_state,
             s3_output_folder_state,
             save_outputs_to_s3_checkbox,
             in_data_files,
@@ -2124,9 +2126,10 @@ with app:
         ],
         outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
-        fn=export_outputs_to_s3,
+        fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
             summary_xlsx_output_files_list,
+            log_files_output,
             s3_output_folder_state,
             save_outputs_to_s3_checkbox,
             in_data_files,
@@ -2233,9 +2236,10 @@ with app:
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
-        fn=export_outputs_to_s3,
+        fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
             summary_xlsx_output_files_list,
+            log_files_output_list_state,
             s3_output_folder_state,
             save_outputs_to_s3_checkbox,
             in_data_files,
@@ -2419,9 +2423,10 @@ with app:
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
-        fn=export_outputs_to_s3,
+        fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
             summary_xlsx_output_files_list,
+            log_files_output_list_state,
             s3_output_folder_state,
             save_outputs_to_s3_checkbox,
             in_data_files,
@@ -2613,9 +2618,10 @@ with app:
         outputs=[out_xlsx_files, summary_xlsx_output_files_list],
         api_name="export_xlsx",
     ).success(
-        fn=export_outputs_to_s3,
+        fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
             summary_xlsx_output_files_list,
+            log_files_output_list_state,
             s3_output_folder_state,
             save_outputs_to_s3_checkbox,
             in_data_files,
