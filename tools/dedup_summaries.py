@@ -2098,6 +2098,14 @@ def join_unique_summaries(x):
     return "\n".join(unique_summaries)
 
 
+def _rows_for_topic_summarisation(reference_df: pd.DataFrame) -> pd.DataFrame:
+    """Reference rows to feed into per-topic summarisation (excludes 'Not Mentioned')."""
+    if reference_df.empty:
+        return reference_df.copy()
+    filtered = reference_df.loc[reference_df["Sentiment"] != "Not Mentioned"].copy()
+    return filtered if not filtered.empty else reference_df.copy()
+
+
 def sample_reference_table_summaries(
     reference_df: pd.DataFrame,
     random_seed: int,
@@ -2284,11 +2292,7 @@ def sample_reference_table_summaries(
 
         # If no responses/topics qualify, just go ahead with the original reference dataframe
         if all_summaries.empty:
-            sampled_reference_table_df = reference_df
-            # Filter by sentiment only (Response ID is a string in original df, not a count)
-            sampled_reference_table_df = sampled_reference_table_df.loc[
-                sampled_reference_table_df["Sentiment"] != "Not Mentioned"
-            ]
+            sampled_reference_table_df = _rows_for_topic_summarisation(reference_df)
         else:
             # Deduplicate summaries within each group before joining to prevent repeated summaries
 
@@ -2308,11 +2312,24 @@ def sample_reference_table_summaries(
                 )
                 .reset_index()
             )
-            # Filter by sentiment and count (Response ID is now a numeric count after aggregation)
             sampled_reference_table_df = sampled_reference_table_df.loc[
-                (sampled_reference_table_df["Sentiment"] != "Not Mentioned")
-                & (sampled_reference_table_df["Response ID"] > 1)
+                sampled_reference_table_df["Sentiment"] != "Not Mentioned"
             ]
+
+            # Groups whose topic combos only had one response each never enter all_summaries.
+            # Keep them by appending their full reference rows so they are not dropped.
+            if not sampled_reference_table_df.empty:
+                groups_in_sampled = set(sampled_reference_table_df["Group"].unique())
+            else:
+                groups_in_sampled = set()
+            missing_group_rows = _rows_for_topic_summarisation(
+                reference_df.loc[~reference_df["Group"].isin(groups_in_sampled)]
+            )
+            if not missing_group_rows.empty:
+                sampled_reference_table_df = pd.concat(
+                    [sampled_reference_table_df, missing_group_rows],
+                    ignore_index=True,
+                )
 
         print(
             "Sampling stats: "
@@ -3835,8 +3852,8 @@ def wrapper_summarise_output_topics_per_group(
             f"Sampling complete. {len(sampled_reference_table_df)} summaries selected."
         )
 
-    # Get unique group values
-    unique_values = sampled_reference_table_df["Group"].unique()
+    # Summarise every group present in the reference table, not only those that survived sampling
+    unique_values = reference_table_df["Group"].unique()
 
     if len(unique_values) > MAX_GROUPS:
         print(
@@ -3883,8 +3900,18 @@ def wrapper_summarise_output_topics_per_group(
         ].copy()
 
         if filtered_sampled_reference_table_df.empty:
-            print(f"No data for {grouping_col} = {group_value}. Skipping.")
-            continue
+            # Sampling can exclude whole groups when other groups have multi-response topics.
+            # Fall back to the full per-group reference table so small groups still get summarised.
+            filtered_sampled_reference_table_df = _rows_for_topic_summarisation(
+                filtered_reference_table_df
+            )
+            if filtered_sampled_reference_table_df.empty:
+                print(f"No data for {grouping_col} = {group_value}. Skipping.")
+                continue
+            print(
+                f"No sampled summaries for {grouping_col} = {group_value}; "
+                "using full reference table for this group."
+            )
 
         # Create unique file name for this group's outputs
         group_file_name = f"{reference_data_file_name}_{clean_column_name(str(group_value), max_length=15).replace(' ','_')}"
