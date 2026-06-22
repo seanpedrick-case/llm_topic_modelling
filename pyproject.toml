@@ -51,7 +51,7 @@ classifiers = [
 ]
 
 dependencies = [    
-    "gradio<=6.18.0",
+    "gradio<=6.19.0",
     "transformers<=5.12.0",
     "spaces",
     "boto3<=1.42.80",
@@ -94,7 +94,7 @@ llamacpp = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.18.0"
+    "gradio[mcp]<=6.19.0"
 ]
 
 [project.urls]
