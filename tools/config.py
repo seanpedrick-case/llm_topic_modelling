@@ -190,6 +190,9 @@ SAVE_OUTPUTS_TO_S3 = get_or_create_env_var("SAVE_OUTPUTS_TO_S3", "False")
 UPLOAD_USAGE_LOG_TO_S3_OUTPUTS = convert_string_to_boolean(
     get_or_create_env_var("UPLOAD_USAGE_LOG_TO_S3_OUTPUTS", "False")
 )  # Whether to upload usage log to S3 output folder when uploading outputs
+UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS = convert_string_to_boolean(
+    get_or_create_env_var("UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS", "False")
+)  # Whether to upload prompt/response JSON logs (*_logs_*.json) to S3 output folder when uploading outputs
 
 # Output format for the Excel/spreadsheet file (xlsx or ods)
 EXPORT_FORMAT = get_or_create_env_var(
@@ -494,13 +497,12 @@ if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
     inference_server_models = [
         "unnamed-inference-server-model",
-        "qwen_3_4b_it",
-        "qwen_3_4b_think",
         "gpt_oss_20b",
         "gemma_3_12b",
         "ministral_3_14b_it",
         "Qwen 3.5 27b",
         "Qwen 3.5 35b a3b",
+        "Gemma 4 12B",
         "Gemma 4 26b a4b",
         "Gemma 4 31b",
     ]
@@ -634,6 +636,51 @@ GEMMA3_12B_MODEL_FOLDER = get_or_create_env_var(
     "GEMMA3_12B_MODEL_FOLDER", "model/gemma3_12b"
 )
 
+GEMMA4_12B_REPO_ID = get_or_create_env_var(
+    "GEMMA4_12B_REPO_ID", "unsloth/gemma-4-12B-it-qat-GGUF"
+)
+GEMMA4_12B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA4_12B_REPO_TRANSFORMERS_ID", "google/gemma-4-12B-it"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA4_12B_REPO_ID = GEMMA4_12B_REPO_TRANSFORMERS_ID
+GEMMA4_12B_MODEL_FILE = get_or_create_env_var(
+    "GEMMA4_12B_MODEL_FILE", "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf"
+)
+GEMMA4_12B_MODEL_FOLDER = get_or_create_env_var(
+    "GEMMA4_12B_MODEL_FOLDER", "model/gemma4_12b"
+)
+
+GEMMA4_26B_REPO_ID = get_or_create_env_var(
+    "GEMMA4_26B_REPO_ID", "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
+)
+GEMMA4_26B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA4_26B_REPO_TRANSFORMERS_ID", "google/gemma-4-26B-A4B-it"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA4_26B_REPO_ID = GEMMA4_26B_REPO_TRANSFORMERS_ID
+GEMMA4_26B_MODEL_FILE = get_or_create_env_var(
+    "GEMMA4_26B_MODEL_FILE", "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf"
+)
+GEMMA4_26B_MODEL_FOLDER = get_or_create_env_var(
+    "GEMMA4_26B_MODEL_FOLDER", "model/gemma4_26b"
+)
+
+GEMMA4_31B_REPO_ID = get_or_create_env_var(
+    "GEMMA4_31B_REPO_ID", "unsloth/gemma-4-31B-it-qat-GGUF"
+)
+GEMMA4_31B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
+    "GEMMA4_31B_REPO_TRANSFORMERS_ID", "unsloth/gemma-4-31B-it-unsloth-bnb-4bit"
+)
+if USE_LLAMA_CPP == "False":
+    GEMMA4_31B_REPO_ID = GEMMA4_31B_REPO_TRANSFORMERS_ID
+GEMMA4_31B_MODEL_FILE = get_or_create_env_var(
+    "GEMMA4_31B_MODEL_FILE", "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf"
+)
+GEMMA4_31B_MODEL_FOLDER = get_or_create_env_var(
+    "GEMMA4_31B_MODEL_FOLDER", "model/gemma4_31b"
+)
+
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
 GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var(
     "GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit"
@@ -704,6 +751,24 @@ elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 12B":
     LOCAL_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
     MULTIMODAL_PROMPT_FORMAT = "True"
 
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 4 12B":
+    LOCAL_REPO_ID = GEMMA4_12B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA4_12B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA4_12B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 4 26B":
+    LOCAL_REPO_ID = GEMMA4_26B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA4_26B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA4_26B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
+
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 4 31B":
+    LOCAL_REPO_ID = GEMMA4_31B_REPO_ID
+    LOCAL_MODEL_FILE = GEMMA4_31B_MODEL_FILE
+    LOCAL_MODEL_FOLDER = GEMMA4_31B_MODEL_FOLDER
+    MULTIMODAL_PROMPT_FORMAT = "True"
+
 elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
     LOCAL_REPO_ID = QWEN3_4B_REPO_ID
     LOCAL_MODEL_FILE = QWEN3_4B_MODEL_FILE
@@ -744,6 +809,18 @@ if CHOSEN_LOCAL_MODEL_TYPE == "Gemma 3 4B":
     )
 elif CHOSEN_LOCAL_MODEL_TYPE == "Qwen 3 4B":
     ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "unsloth/Qwen3-0.6B")
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 4 12B":
+    ASSISTANT_MODEL = get_or_create_env_var(
+        "ASSISTANT_MODEL", "unsloth/gemma-4-12B-it-qat-GGUF"
+    )
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 4 26B":
+    ASSISTANT_MODEL = get_or_create_env_var(
+        "ASSISTANT_MODEL", "unsloth/gemma-4-26B-A4B-it-qat-GGUF"
+    )
+elif CHOSEN_LOCAL_MODEL_TYPE == "Gemma 4 31B":
+    ASSISTANT_MODEL = get_or_create_env_var(
+        "ASSISTANT_MODEL", "unsloth/gemma-4-31B-it-qat-GGUF"
+    )
 
 DRAFT_MODEL_LOC = get_or_create_env_var("DRAFT_MODEL_LOC", ".cache/llama.cpp/")
 
@@ -754,6 +831,19 @@ GEMMA3_DRAFT_MODEL_LOC = get_or_create_env_var(
 GEMMA3_4B_DRAFT_MODEL_LOC = get_or_create_env_var(
     "GEMMA3_4B_DRAFT_MODEL_LOC",
     DRAFT_MODEL_LOC + "unsloth_gemma-3-4b-it-qat-GGUF_gemma-3-4b-it-qat-Q4_K_M.gguf",
+)
+
+GEMMA4_12B_DRAFT_MODEL_LOC = get_or_create_env_var(
+    "GEMMA4_12B_DRAFT_MODEL_LOC",
+    DRAFT_MODEL_LOC + "mtp-gemma-4-12B-it.gguf",
+)
+GEMMA4_26B_DRAFT_MODEL_LOC = get_or_create_env_var(
+    "GEMMA4_26B_DRAFT_MODEL_LOC",
+    DRAFT_MODEL_LOC + "mtp-gemma-4-26B-A4B-it.gguf",
+)
+GEMMA4_31B_DRAFT_MODEL_LOC = get_or_create_env_var(
+    "GEMMA4_31B_DRAFT_MODEL_LOC",
+    DRAFT_MODEL_LOC + "mtp-gemma-4-31B-it.gguf",
 )
 
 QWEN3_DRAFT_MODEL_LOC = get_or_create_env_var(
@@ -920,6 +1010,10 @@ DIRECT_MODE_RANDOM_SEED = get_or_create_env_var(
 DIRECT_MODE_CREATE_XLSX_OUTPUT = get_or_create_env_var(
     "DIRECT_MODE_CREATE_XLSX_OUTPUT", "True"
 )
+DIRECT_MODE_CREATE_TOPICS_CSV = get_or_create_env_var(
+    "DIRECT_MODE_CREATE_TOPICS_CSV", "True"
+)
+DIRECT_MODE_SAMPLE_FRACTION = get_or_create_env_var("DIRECT_MODE_SAMPLE_FRACTION", "20")
 DIRECT_MODE_S3_UPLOAD_ONLY_XLSX = convert_string_to_boolean(
     get_or_create_env_var("DIRECT_MODE_S3_UPLOAD_ONLY_XLSX", "False")
 )

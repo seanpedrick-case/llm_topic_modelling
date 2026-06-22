@@ -4,7 +4,7 @@ emoji: 📚
 colorFrom: purple
 colorTo: yellow
 sdk: gradio
-sdk_version: 6.16.0
+sdk_version: 6.19.0
 app_file: app.py
 pinned: true
 license: agpl-3.0
@@ -13,7 +13,7 @@ short_description: Extract topics from open text data with LLMs
 
 # Large language model topic modelling
 
-Version: 0.12.0
+Version: 0.13.0
 
 Extract topics and summarise outputs using Large Language Models (LLMs), either local, Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets on the main app page, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
 
@@ -119,9 +119,7 @@ If you do want to install llama-cpp-python in app, first try the following comma
 pip install .[llamacpp]
 ```
 
-This will install the CPU version of llama-cpp-python. If you want GPU support, first I would try using pip install with specific wheels for your system, e.g. for Linux: See files in https://github.com/abetlen/llama-cpp-python/releases/tag/v0.3.16-cu124 . If you are still struggling, see here for more details on installation here: https://llama-cpp-python.readthedocs.io/en/latest
-
-**NOTE:** A sister repository contains [llama-cpp-python 3.16 wheels for Python version 3.11/10](https://github.com/seanpedrick-case/llama-cpp-python-whl-builder/releases/tag/v0.1.0) so that users can avoid having to build the package from source. I also have a guide to building the package on a Windows system [here](https://github.com/seanpedrick-case/llm_topic_modelling/blob/main/windows_install_llama-cpp-python.txt).
+This will install the CPU version of llama-cpp-python. If you want GPU support, first I would try using pip install with specific wheels for your system: See files in https://github.com/abetlen/llama-cpp-python/releases . If you are still struggling, see here for more details on installation here: https://llama-cpp-python.readthedocs.io/en/latest
 
 #### Install mcp version of gradio
 
@@ -152,7 +150,7 @@ NOTE: If default llama-cpp-python installation does not work when installing fro
 
 ### Step 4: Verify CUDA compatibility (if using a GPU environment)
 
-Install the relevant toolkit for CUDA 12.4 from here: https://developer.nvidia.com/cuda-12-4-0-download-archive
+Install the relevant toolkit for CUDA from here: https://developer.nvidia.com/
 
 Restart your computer
 

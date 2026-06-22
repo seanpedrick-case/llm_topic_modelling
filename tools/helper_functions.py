@@ -578,6 +578,15 @@ def convert_reference_table_to_pivot_table(
         "Not assessed - ", ""
     ).str.replace("- Not assessed", "")
 
+    leading_cols = [
+        col
+        for col in ["Original Response ID", "Response"]
+        if col in pivot_table.columns
+    ]
+    if leading_cols:
+        other_cols = [col for col in pivot_table.columns if col not in leading_cols]
+        pivot_table = pivot_table[leading_cols + other_cols]
+
     return pivot_table
 
 
@@ -1481,6 +1490,151 @@ def generate_zero_shot_topics_df(
         )
 
         return zero_shot_topics_df
+
+
+def create_candidate_topics_df_from_topic_summary(
+    topic_summary_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Extract unique General topic / Subtopic pairs from a topic summary dataframe.
+
+    Deduplicates across Group and Sentiment so the output can be reused as a
+    zero-shot topics input file (same column format as generate_zero_shot_topics_df).
+    """
+    if topic_summary_df is None or topic_summary_df.empty:
+        return pd.DataFrame(columns=["General topic", "Subtopic"])
+
+    df = topic_summary_df.copy()
+
+    if "General topic" not in df.columns and "Main heading" in df.columns:
+        df = df.rename(columns={"Main heading": "General topic"})
+    if "Subtopic" not in df.columns and "Subheading" in df.columns:
+        df = df.rename(columns={"Subheading": "Subtopic"})
+
+    if "General topic" not in df.columns and "Subtopic" not in df.columns:
+        print(
+            "Warning: topic summary has no General topic / Subtopic columns; "
+            "cannot create suggested topics CSV."
+        )
+        return pd.DataFrame(columns=["General topic", "Subtopic"])
+
+    if "General topic" not in df.columns:
+        df["General topic"] = ""
+    if "Subtopic" not in df.columns:
+        df["Subtopic"] = ""
+
+    out_df = df[["General topic", "Subtopic"]].copy()
+    out_df = out_df.drop_duplicates(subset=["General topic", "Subtopic"], keep="first")
+    out_df = out_df.sort_values(["General topic", "Subtopic"], ascending=[True, True])
+    return out_df.reset_index(drop=True)
+
+
+def write_candidate_topics_csv(
+    topic_summary_df: pd.DataFrame,
+    output_path: str,
+) -> str:
+    """Write a suggested-topics CSV from a topic summary dataframe."""
+    topics_df = create_candidate_topics_df_from_topic_summary(topic_summary_df)
+    if topics_df.empty:
+        return ""
+
+    topics_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Suggested topics CSV saved as '{output_path}'")
+    return output_path
+
+
+def subsample_responses_for_topic_discovery(
+    file_data: pd.DataFrame,
+    sample_fraction: float,
+    random_seed: int,
+    group_col: str | None = None,
+    min_rows_per_group: int = 1,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Randomly subsample rows for topic discovery.
+
+    When group_col is set and present in file_data, sampling is stratified per group.
+    Otherwise a single random sample is taken from the full dataset.
+    """
+    if file_data is None or file_data.empty:
+        raise ValueError("Cannot subsample empty data.")
+
+    if sample_fraction <= 0 or sample_fraction > 1:
+        raise ValueError(
+            f"sample_fraction must be between 0 and 1 (exclusive of 0), got {sample_fraction}"
+        )
+
+    original_rows = len(file_data)
+    df = file_data.copy()
+    df["_discovery_original_row_index"] = df.index
+    per_group_counts: dict = {}
+
+    use_group_col = (
+        group_col
+        and str(group_col).strip()
+        and group_col in df.columns
+        and group_col != "group_col"
+    )
+
+    if use_group_col:
+        sampled_parts = []
+        for group_value, group_df in df.groupby(group_col, dropna=False):
+            n_sample = max(
+                min_rows_per_group, math.ceil(len(group_df) * sample_fraction)
+            )
+            n_sample = min(n_sample, len(group_df))
+            part = group_df.sample(n=n_sample, random_state=random_seed)
+            per_group_counts[str(group_value)] = {
+                "original": len(group_df),
+                "sampled": n_sample,
+            }
+            sampled_parts.append(part)
+        sampled_df = pd.concat(sampled_parts).sort_index()
+    else:
+        n_sample = max(1, math.ceil(original_rows * sample_fraction))
+        n_sample = min(n_sample, original_rows)
+        sampled_df = df.sample(n=n_sample, random_state=random_seed).sort_index()
+        per_group_counts = {"All": {"original": original_rows, "sampled": n_sample}}
+
+    if sampled_df.empty:
+        raise ValueError("Subsample produced no rows.")
+
+    metadata = {
+        "original_rows": original_rows,
+        "sampled_rows": len(sampled_df),
+        "sample_fraction": sample_fraction,
+        "random_seed": random_seed,
+        "per_group_counts": per_group_counts,
+    }
+    return sampled_df, metadata
+
+
+def write_topic_discovery_manifest_csv(
+    sampled_df: pd.DataFrame,
+    output_path: str,
+    group_col: str | None = None,
+) -> str:
+    """Write a manifest CSV listing which rows were included in topic discovery."""
+    if sampled_df is None or sampled_df.empty:
+        return ""
+
+    manifest_cols = ["_discovery_original_row_index"]
+    if (
+        group_col
+        and str(group_col).strip()
+        and group_col in sampled_df.columns
+        and group_col != "group_col"
+    ):
+        manifest_cols.append(group_col)
+
+    manifest_df = sampled_df[manifest_cols].copy()
+    manifest_df.rename(
+        columns={"_discovery_original_row_index": "Original row index"},
+        inplace=True,
+    )
+    manifest_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Topic discovery manifest saved as '{output_path}'")
+    return output_path
 
 
 def update_model_choice(model_source):

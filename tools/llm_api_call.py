@@ -60,7 +60,10 @@ from tools.helper_functions import (
     normalize_topic_name_for_llm,
     put_columns_in_df,
     read_file,
+    subsample_responses_for_topic_discovery,
     wrap_text,
+    write_candidate_topics_csv,
+    write_topic_discovery_manifest_csv,
 )
 from tools.llm_funcs import (
     calculate_tokens_from_metadata,
@@ -5430,6 +5433,363 @@ def wrapper_extract_topics_per_column_value(
         acc_number_of_calls,
         out_message,
         acc_logged_content,
+    )
+
+
+def discover_topics_from_sample(
+    grouping_col: str,
+    in_data_file: Any,
+    file_data: pd.DataFrame,
+    original_file_name: str,
+    total_number_of_batches: int,
+    in_api_key: str,
+    temperature: float,
+    chosen_cols: List[str],
+    model_choice: str,
+    candidate_topics: gr.FileData = None,
+    sample_fraction_percent: float = 20,
+    random_seed: int = LLM_SEED,
+    context_textbox: str = "",
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
+    in_excel_sheets: List[str] = list(),
+    force_single_topic_radio: str = "No",
+    produce_structured_summary_radio: str = "No",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
+    hf_api_key_textbox: str = "",
+    azure_api_key_textbox: str = "",
+    azure_endpoint_textbox: str = "",
+    output_folder: str = OUTPUT_FOLDER,
+    initial_table_prompt: str = "",
+    initial_table_system_prompt: str = "",
+    add_existing_topics_system_prompt: str = "",
+    add_existing_topics_prompt: str = "",
+    number_of_prompts_used: int = 1,
+    batch_size: int = 5,
+    additional_instructions_summary_format: str = "",
+    additional_validation_issues_provided: str = "",
+    show_previous_table: str = "Yes",
+    api_url: str = None,
+    force_single_topic_prompt: str = "",
+    max_tokens: int = LLM_MAX_NEW_TOKENS,
+    model_name_map: dict = model_name_map,
+    max_time_for_loop: int = max_time_for_loop,
+    reasoning_suffix: str = REASONING_SUFFIX,
+    CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
+    output_debug_files: str = output_debug_files,
+    model: object = None,
+    tokenizer: object = None,
+    assistant_model: object = None,
+    max_rows: int = max_rows,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
+    progress=Progress(track_tqdm=True),
+) -> Tuple:
+    """
+    Run topic extraction on a random subsample and write a suggested-topics CSV
+    for reuse in a full-data analysis.
+    """
+    ensure_model_in_map(model_choice, model_name_map)
+
+    warnings: list[str] = []
+    if produce_structured_summary_radio == "Yes":
+        raise ValueError(
+            "Topic discovery cannot run with structured summaries enabled. "
+            "Set 'Ask the model to produce structured summaries' to No."
+        )
+
+    if candidate_topics is not None:
+        has_candidate = False
+        if isinstance(candidate_topics, list):
+            has_candidate = bool(candidate_topics)
+        elif isinstance(candidate_topics, str):
+            has_candidate = bool(candidate_topics.strip())
+        elif getattr(candidate_topics, "name", None):
+            has_candidate = True
+        if has_candidate:
+            warnings.append(
+                "Uploaded candidate topics were ignored for this discovery run."
+            )
+
+    try:
+        sample_fraction_percent = float(sample_fraction_percent)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"sample_fraction_percent must be a number between 1 and 100, got {sample_fraction_percent!r}"
+        ) from exc
+
+    if sample_fraction_percent <= 0 or sample_fraction_percent > 100:
+        raise ValueError(
+            f"sample_fraction_percent must be between 1 and 100, got {sample_fraction_percent}"
+        )
+
+    sample_fraction = sample_fraction_percent / 100.0
+    random_seed = int(random_seed)
+
+    if file_data.empty:
+        (
+            in_colnames_drop,
+            in_excel_sheets,
+            file_name,
+            join_colnames,
+            join_colnames_drop,
+        ) = put_columns_in_df(in_data_file)
+        file_data, file_name, total_number_of_batches = load_in_data_file(
+            in_data_file, chosen_cols, batch_size, in_excel_sheets
+        )
+    else:
+        file_name = original_file_name
+
+    if file_data.empty:
+        raise ValueError("No data available for topic discovery.")
+
+    original_row_count = len(file_data)
+    group_col_for_sampling = grouping_col if grouping_col else None
+
+    sampled_df, sample_metadata = subsample_responses_for_topic_discovery(
+        file_data=file_data,
+        sample_fraction=sample_fraction,
+        random_seed=random_seed,
+        group_col=group_col_for_sampling,
+    )
+
+    manifest_df = sampled_df.copy()
+    sampled_df = sampled_df.drop(
+        columns=["_discovery_original_row_index"], errors="ignore"
+    )
+
+    wrapper_results = wrapper_extract_topics_per_column_value(
+        grouping_col=grouping_col,
+        in_data_file=in_data_file,
+        file_data=sampled_df,
+        initial_existing_topics_table=pd.DataFrame(),
+        initial_existing_reference_df=pd.DataFrame(),
+        initial_existing_topic_summary_df=pd.DataFrame(),
+        initial_unique_table_df_display_table_markdown="",
+        original_file_name=file_name,
+        total_number_of_batches=max(
+            1, (len(sampled_df) + batch_size - 1) // batch_size
+        ),
+        in_api_key=in_api_key,
+        temperature=temperature,
+        chosen_cols=chosen_cols,
+        model_choice=model_choice,
+        candidate_topics=None,
+        initial_first_loop_state=True,
+        initial_all_metadata_content_str="",
+        initial_latest_batch_completed=0,
+        initial_time_taken=0,
+        initial_table_prompt=initial_table_prompt,
+        initial_table_system_prompt=initial_table_system_prompt,
+        add_existing_topics_system_prompt=add_existing_topics_system_prompt,
+        add_existing_topics_prompt=add_existing_topics_prompt,
+        number_of_prompts_used=number_of_prompts_used,
+        batch_size=batch_size,
+        context_textbox=context_textbox,
+        sentiment_checkbox=sentiment_checkbox,
+        force_zero_shot_radio=force_zero_shot_radio,
+        in_excel_sheets=in_excel_sheets,
+        force_single_topic_radio=force_single_topic_radio,
+        produce_structured_summary_radio="No",
+        aws_access_key_textbox=aws_access_key_textbox,
+        aws_secret_key_textbox=aws_secret_key_textbox,
+        aws_region_textbox=aws_region_textbox,
+        hf_api_key_textbox=hf_api_key_textbox,
+        azure_api_key_textbox=azure_api_key_textbox,
+        azure_endpoint_textbox=azure_endpoint_textbox,
+        output_folder=output_folder,
+        existing_logged_content=list(),
+        additional_instructions_summary_format=additional_instructions_summary_format,
+        additional_validation_issues_provided=additional_validation_issues_provided,
+        show_previous_table=show_previous_table,
+        api_url=api_url,
+        force_single_topic_prompt=force_single_topic_prompt,
+        max_tokens=max_tokens,
+        model_name_map=model_name_map,
+        max_time_for_loop=max_time_for_loop,
+        reasoning_suffix=reasoning_suffix,
+        CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
+        output_debug_files=output_debug_files,
+        model=model,
+        tokenizer=tokenizer,
+        assistant_model=assistant_model,
+        max_rows=max_rows,
+        max_topics_number=max_topics_number,
+        progress=progress,
+    )
+
+    acc_topic_summary_df = wrapper_results[2]
+    chosen_col_str = (
+        chosen_cols[0]
+        if isinstance(chosen_cols, list) and chosen_cols
+        else str(chosen_cols) if chosen_cols else ""
+    )
+    file_name_cleaned = clean_column_name(
+        file_name, max_length=20, front_characters=True
+    )
+    in_column_cleaned = clean_column_name(chosen_col_str, max_length=20)
+    model_choice_clean_short = clean_column_name(
+        model_name_map[model_choice]["short_name"],
+        max_length=20,
+        front_characters=False,
+    )
+    pct_label = int(round(sample_fraction_percent))
+
+    discovery_base = (
+        f"{file_name_cleaned}_col_{in_column_cleaned}_{model_choice_clean_short}"
+        f"_discovery_sample{pct_label}"
+    )
+    discovery_topics_csv_path = output_folder + discovery_base + "_suggested_topics.csv"
+    discovery_manifest_csv_path = output_folder + discovery_base + "_manifest.csv"
+
+    discovery_csv_path = write_candidate_topics_csv(
+        acc_topic_summary_df, discovery_topics_csv_path
+    )
+    if not discovery_csv_path:
+        raise ValueError(
+            "Topic discovery completed but no General topic / Subtopic pairs were found."
+        )
+
+    write_topic_discovery_manifest_csv(
+        manifest_df,
+        discovery_manifest_csv_path,
+        group_col=group_col_for_sampling,
+    )
+
+    discovery_message = (
+        f"Topic discovery complete: {sample_metadata['sampled_rows']} of "
+        f"{original_row_count} responses sampled ({pct_label}%, seed {random_seed}). "
+        "Upload the suggested topics CSV and run a full extraction with suggested topics."
+    )
+    if warnings:
+        discovery_message = " ".join(warnings) + " " + discovery_message
+
+    out_message = wrapper_results[-2]
+    if isinstance(out_message, str):
+        combined_message = discovery_message + " " + out_message
+    else:
+        combined_message = discovery_message
+
+    acc_out_file_paths = list(wrapper_results[4])
+    for extra_path in [discovery_csv_path, discovery_manifest_csv_path]:
+        if extra_path not in acc_out_file_paths:
+            acc_out_file_paths.append(extra_path)
+
+    return (
+        wrapper_results[0],
+        wrapper_results[1],
+        wrapper_results[2],
+        wrapper_results[3],
+        acc_out_file_paths,
+        acc_out_file_paths,
+        wrapper_results[6],
+        wrapper_results[7],
+        wrapper_results[8],
+        wrapper_results[9],
+        wrapper_results[10],
+        acc_out_file_paths,
+        acc_out_file_paths,
+        wrapper_results[13],
+        acc_out_file_paths,
+        wrapper_results[15],
+        wrapper_results[16],
+        wrapper_results[17],
+        wrapper_results[18],
+        wrapper_results[19],
+        combined_message,
+        wrapper_results[21],
+        discovery_csv_path,
+    )
+
+
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def discover_topics_from_sample_wrapper(
+    grouping_col: str,
+    in_data_file: Any,
+    file_data: pd.DataFrame,
+    original_file_name: str,
+    total_number_of_batches: int,
+    in_api_key: str,
+    temperature: float,
+    chosen_cols: List[str],
+    model_choice: str,
+    candidate_topics: gr.FileData = None,
+    sample_fraction_percent: float = 20,
+    random_seed: int = LLM_SEED,
+    context_textbox: str = "",
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
+    in_excel_sheets: List[str] = list(),
+    force_single_topic_radio: str = "No",
+    produce_structured_summary_radio: str = "No",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
+    hf_api_key_textbox: str = "",
+    azure_api_key_textbox: str = "",
+    azure_endpoint_textbox: str = "",
+    output_folder: str = OUTPUT_FOLDER,
+    initial_table_prompt: str = "",
+    initial_table_system_prompt: str = "",
+    add_existing_topics_system_prompt: str = "",
+    add_existing_topics_prompt: str = "",
+    number_of_prompts_used: int = 1,
+    batch_size: int = 5,
+    additional_instructions_summary_format: str = "",
+    additional_validation_issues_provided: str = "",
+    show_previous_table: str = "Yes",
+    api_url: str = None,
+    max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
+    progress=Progress(track_tqdm=True),
+) -> Tuple:
+    """Gradio wrapper for discover_topics_from_sample with app-compatible outputs."""
+    results = discover_topics_from_sample(
+        grouping_col=grouping_col,
+        in_data_file=in_data_file,
+        file_data=file_data,
+        original_file_name=original_file_name,
+        total_number_of_batches=total_number_of_batches,
+        in_api_key=in_api_key,
+        temperature=temperature,
+        chosen_cols=chosen_cols,
+        model_choice=model_choice,
+        candidate_topics=candidate_topics,
+        sample_fraction_percent=sample_fraction_percent,
+        random_seed=random_seed,
+        context_textbox=context_textbox,
+        sentiment_checkbox=sentiment_checkbox,
+        force_zero_shot_radio=force_zero_shot_radio,
+        in_excel_sheets=in_excel_sheets,
+        force_single_topic_radio=force_single_topic_radio,
+        produce_structured_summary_radio=produce_structured_summary_radio,
+        aws_access_key_textbox=aws_access_key_textbox,
+        aws_secret_key_textbox=aws_secret_key_textbox,
+        aws_region_textbox=aws_region_textbox,
+        hf_api_key_textbox=hf_api_key_textbox,
+        azure_api_key_textbox=azure_api_key_textbox,
+        azure_endpoint_textbox=azure_endpoint_textbox,
+        output_folder=output_folder,
+        initial_table_prompt=initial_table_prompt,
+        initial_table_system_prompt=initial_table_system_prompt,
+        add_existing_topics_system_prompt=add_existing_topics_system_prompt,
+        add_existing_topics_prompt=add_existing_topics_prompt,
+        number_of_prompts_used=number_of_prompts_used,
+        batch_size=batch_size,
+        additional_instructions_summary_format=additional_instructions_summary_format,
+        additional_validation_issues_provided=additional_validation_issues_provided,
+        show_previous_table=show_previous_table,
+        api_url=api_url,
+        max_topics_number=max_topics_number,
+        progress=progress,
+    )
+
+    discovery_csv_path = results[-1]
+    extract_outputs = results[:-1]
+
+    return (
+        *extract_outputs,
+        discovery_csv_path,
     )
 
 

@@ -4,13 +4,21 @@ from typing import List
 import boto3
 
 from tools.config import (
+    ACCESS_LOGS_FOLDER,
     AWS_ACCESS_KEY,
     AWS_REGION,
     AWS_SECRET_KEY,
+    DIRECT_MODE_OUTPUT_DIR,
+    FEEDBACK_LOGS_FOLDER,
+    GRADIO_TEMP_DIR,
+    INPUT_FOLDER,
+    OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
     S3_LOG_BUCKET,
     S3_OUTPUTS_BUCKET,
+    UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS,
+    USAGE_LOGS_FOLDER,
 )
 
 # Empty bucket name in case authentication fails
@@ -381,6 +389,128 @@ def export_outputs_to_s3(
 
     # No GUI outputs to update
     return
+
+
+def _normalize_file_paths(file_paths) -> List[str]:
+    """Flatten Gradio file inputs (paths, lists, or file objects) into path strings."""
+    if not file_paths:
+        return []
+    if isinstance(file_paths, str):
+        return [file_paths]
+    if not isinstance(file_paths, list):
+        file_paths = [file_paths]
+
+    result = []
+    for item in file_paths:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, list):
+            result.extend(_normalize_file_paths(item))
+        else:
+            path = getattr(item, "name", None) or str(item)
+            if path:
+                result.append(path)
+    return result
+
+
+def _get_safe_local_path_roots() -> List[str]:
+    """Build allowlisted directory roots for local file access (resolved realpaths)."""
+    roots = {
+        OUTPUT_FOLDER,
+        DIRECT_MODE_OUTPUT_DIR,
+        GRADIO_TEMP_DIR,
+        INPUT_FOLDER,
+        USAGE_LOGS_FOLDER,
+        FEEDBACK_LOGS_FOLDER,
+        ACCESS_LOGS_FOLDER,
+    }
+    resolved = []
+    for root in roots:
+        if root:
+            resolved.append(os.path.realpath(root))
+    return resolved
+
+
+_SAFE_LOCAL_PATH_ROOTS: List[str] | None = None
+
+
+def _safe_local_path_roots() -> List[str]:
+    global _SAFE_LOCAL_PATH_ROOTS
+    if _SAFE_LOCAL_PATH_ROOTS is None:
+        _SAFE_LOCAL_PATH_ROOTS = _get_safe_local_path_roots()
+    return _SAFE_LOCAL_PATH_ROOTS
+
+
+def _resolve_safe_local_path(path: str) -> str | None:
+    """Return canonical local path if inside an allowlisted root, else None."""
+    if not path or not isinstance(path, str):
+        return None
+    try:
+        real_path = os.path.realpath(path)
+    except (OSError, ValueError):
+        return None
+    for root_real in _safe_local_path_roots():
+        try:
+            if os.path.commonpath([real_path, root_real]) == root_real:
+                return real_path
+        except ValueError:
+            # Different drives on Windows or invalid path combinations
+            continue
+    return None
+
+
+def is_prompt_response_log_file(file_path: str) -> bool:
+    """True when file_path is a prompt/response JSON log (*_logs_*.json)."""
+    if not file_path:
+        return False
+    basename = os.path.basename(file_path)
+    return basename.endswith(".json") and "_logs_" in basename
+
+
+def collect_prompt_response_log_paths(log_paths) -> List[str]:
+    """Return existing prompt/response JSON log files from path lists or Gradio file inputs."""
+    seen = set()
+    result = []
+    for path in _normalize_file_paths(log_paths):
+        safe_path = _resolve_safe_local_path(path)
+        if not safe_path:
+            print(f"Skipping prompt/response log outside allowed directories: {path}")
+            continue
+        if safe_path in seen:
+            continue
+        if is_prompt_response_log_file(safe_path) and os.path.exists(safe_path):
+            result.append(safe_path)
+            seen.add(safe_path)
+    return result
+
+
+def export_outputs_to_s3_with_prompt_response_logs(
+    file_list_state,
+    prompt_response_log_paths,
+    s3_output_folder_state_value: str,
+    save_outputs_to_s3_flag: bool,
+    base_file_state=None,
+    s3_bucket: str = S3_OUTPUTS_BUCKET,
+):
+    """
+    Upload output files to S3, optionally including prompt/response JSON logs
+    (*_logs_*.json) when UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS is enabled.
+    """
+    files_to_upload = _normalize_file_paths(file_list_state)
+
+    if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS:
+        for log_path in collect_prompt_response_log_paths(prompt_response_log_paths):
+            if log_path not in files_to_upload:
+                files_to_upload.append(log_path)
+                print(f"Including prompt/response log in S3 upload: {log_path}")
+
+    return export_outputs_to_s3(
+        file_list_state=files_to_upload,
+        s3_output_folder_state_value=s3_output_folder_state_value,
+        save_outputs_to_s3_flag=save_outputs_to_s3_flag,
+        base_file_state=base_file_state,
+        s3_bucket=s3_bucket,
+    )
 
 
 def download_cost_codes_with_error_handling(bucket, key, local_path):
