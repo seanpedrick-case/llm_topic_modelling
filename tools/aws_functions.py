@@ -4,14 +4,21 @@ from typing import List
 import boto3
 
 from tools.config import (
+    ACCESS_LOGS_FOLDER,
     AWS_ACCESS_KEY,
     AWS_REGION,
     AWS_SECRET_KEY,
+    DIRECT_MODE_OUTPUT_DIR,
+    FEEDBACK_LOGS_FOLDER,
+    GRADIO_TEMP_DIR,
+    INPUT_FOLDER,
+    OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
     S3_LOG_BUCKET,
     S3_OUTPUTS_BUCKET,
     UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS,
+    USAGE_LOGS_FOLDER,
 )
 
 # Empty bucket name in case authentication fails
@@ -406,6 +413,52 @@ def _normalize_file_paths(file_paths) -> List[str]:
     return result
 
 
+def _get_safe_local_path_roots() -> List[str]:
+    """Build allowlisted directory roots for local file access (resolved realpaths)."""
+    roots = {
+        OUTPUT_FOLDER,
+        DIRECT_MODE_OUTPUT_DIR,
+        GRADIO_TEMP_DIR,
+        INPUT_FOLDER,
+        USAGE_LOGS_FOLDER,
+        FEEDBACK_LOGS_FOLDER,
+        ACCESS_LOGS_FOLDER,
+    }
+    resolved = []
+    for root in roots:
+        if root:
+            resolved.append(os.path.realpath(root))
+    return resolved
+
+
+_SAFE_LOCAL_PATH_ROOTS: List[str] | None = None
+
+
+def _safe_local_path_roots() -> List[str]:
+    global _SAFE_LOCAL_PATH_ROOTS
+    if _SAFE_LOCAL_PATH_ROOTS is None:
+        _SAFE_LOCAL_PATH_ROOTS = _get_safe_local_path_roots()
+    return _SAFE_LOCAL_PATH_ROOTS
+
+
+def _resolve_safe_local_path(path: str) -> str | None:
+    """Return canonical local path if inside an allowlisted root, else None."""
+    if not path or not isinstance(path, str):
+        return None
+    try:
+        real_path = os.path.realpath(path)
+    except (OSError, ValueError):
+        return None
+    for root_real in _safe_local_path_roots():
+        try:
+            if os.path.commonpath([real_path, root_real]) == root_real:
+                return real_path
+        except ValueError:
+            # Different drives on Windows or invalid path combinations
+            continue
+    return None
+
+
 def is_prompt_response_log_file(file_path: str) -> bool:
     """True when file_path is a prompt/response JSON log (*_logs_*.json)."""
     if not file_path:
@@ -419,11 +472,15 @@ def collect_prompt_response_log_paths(log_paths) -> List[str]:
     seen = set()
     result = []
     for path in _normalize_file_paths(log_paths):
-        if path in seen:
+        safe_path = _resolve_safe_local_path(path)
+        if not safe_path:
+            print(f"Skipping prompt/response log outside allowed directories: {path}")
             continue
-        if is_prompt_response_log_file(path) and os.path.exists(path):
-            result.append(path)
-            seen.add(path)
+        if safe_path in seen:
+            continue
+        if is_prompt_response_log_file(safe_path) and os.path.exists(safe_path):
+            result.append(safe_path)
+            seen.add(safe_path)
     return result
 
 
