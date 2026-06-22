@@ -578,6 +578,15 @@ def convert_reference_table_to_pivot_table(
         "Not assessed - ", ""
     ).str.replace("- Not assessed", "")
 
+    leading_cols = [
+        col
+        for col in ["Original Response ID", "Response"]
+        if col in pivot_table.columns
+    ]
+    if leading_cols:
+        other_cols = [col for col in pivot_table.columns if col not in leading_cols]
+        pivot_table = pivot_table[leading_cols + other_cols]
+
     return pivot_table
 
 

@@ -1684,6 +1684,7 @@ with app:
             model_name_map_state,
             output_folder_state,
             produce_structured_summary_radio,
+            candidate_topics,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -1828,6 +1829,7 @@ with app:
             model_name_map_state,
             output_folder_state,
             produce_structured_summary_radio,
+            candidate_topics,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2118,6 +2120,7 @@ with app:
             model_name_map_state,
             output_folder_state,
             produce_structured_summary_radio,
+            candidate_topics,
         ],
         outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2226,6 +2229,7 @@ with app:
             model_name_map_state,
             output_folder_state,
             produce_structured_summary_radio,
+            candidate_topics,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2411,6 +2415,7 @@ with app:
             model_name_map_state,
             output_folder_state,
             produce_structured_summary_radio,
+            candidate_topics,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2603,6 +2608,7 @@ with app:
             model_name_map_state,
             output_folder_state,
             produce_structured_summary_radio,
+            candidate_topics,
         ],
         outputs=[out_xlsx_files, summary_xlsx_output_files_list],
         api_name="export_xlsx",

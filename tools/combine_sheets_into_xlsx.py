@@ -173,6 +173,50 @@ def convert_xlsx_to_ods(
         return xlsx_path
 
 
+def _resolve_candidate_topics_file_name(candidate_topics) -> str:
+    """Return basename of the suggested topics file, or empty if not provided."""
+    if candidate_topics is None:
+        return ""
+
+    if isinstance(candidate_topics, list):
+        if not candidate_topics:
+            return ""
+        candidate_topics = candidate_topics[0]
+
+    if isinstance(candidate_topics, str):
+        path = candidate_topics.strip()
+        if not path:
+            return ""
+        return os.path.basename(path)
+
+    path = getattr(candidate_topics, "name", None)
+    if path:
+        return os.path.basename(str(path))
+
+    return ""
+
+
+def _resolve_excel_sheet_display_name(
+    file_path: str, excel_sheets: Union[str, List[str], None]
+) -> str:
+    """Return the Excel sheet name for cover-sheet display, or empty if not applicable."""
+    if os.path.splitext(file_path)[1].lower() != ".xlsx":
+        return ""
+
+    if excel_sheets:
+        if isinstance(excel_sheets, list):
+            sheet_names = [str(s).strip() for s in excel_sheets if str(s).strip()]
+            if sheet_names:
+                return ", ".join(sheet_names)
+        elif str(excel_sheets).strip():
+            return str(excel_sheets).strip()
+
+    try:
+        return pd.ExcelFile(file_path).sheet_names[0]
+    except Exception:
+        return ""
+
+
 def add_cover_sheet(
     wb: Workbook,
     intro_paragraphs: list[str],
@@ -189,6 +233,8 @@ def add_cover_sheet(
     file_name: str,
     column_name: str,
     number_of_responses_with_topic_assignment: int,
+    excel_sheet_name: str = "",
+    candidate_topics_file_name: str = "",
     custom_title: str = "Cover sheet",
 ):
     ws = wb.create_sheet(title=custom_title, index=0)
@@ -217,18 +263,26 @@ def add_cover_sheet(
         "Date Excel file created": date.today().strftime("%Y-%m-%d"),
         "File name": file_name,
         "Column name": column_name,
-        "Model name": model_name,
-        "Analysis date": analysis_date,
-        # "Analysis cost": analysis_cost,
-        "Number of responses": number_of_responses,
-        "Number of responses with text": number_of_responses_with_text,
-        "Number of responses with text five plus words": number_of_responses_with_text_five_plus_words,
-        "Number of responses with at least one assigned topic": number_of_responses_with_topic_assignment,
-        "Number of LLM calls": llm_call_number,
-        "Total number of input tokens from LLM calls": input_tokens,
-        "Total number of output tokens from LLM calls": output_tokens,
-        "Total time taken for all LLM calls (seconds)": round(float(time_taken), 1),
     }
+    if excel_sheet_name:
+        metadata["Excel sheet name"] = excel_sheet_name
+    if candidate_topics_file_name:
+        metadata["Suggested topics file name"] = candidate_topics_file_name
+    metadata.update(
+        {
+            "Model name": model_name,
+            "Analysis date": analysis_date,
+            # "Analysis cost": analysis_cost,
+            "Number of responses": number_of_responses,
+            "Number of responses with text": number_of_responses_with_text,
+            "Number of responses with text five plus words": number_of_responses_with_text_five_plus_words,
+            "Number of responses with at least one assigned topic": number_of_responses_with_topic_assignment,
+            "Number of LLM calls": llm_call_number,
+            "Total number of input tokens from LLM calls": input_tokens,
+            "Total number of output tokens from LLM calls": output_tokens,
+            "Total time taken for all LLM calls (seconds)": round(float(time_taken), 1),
+        }
+    )
 
     # Define which metadata fields should have number formatting with thousand separators
     number_format_fields = {
@@ -291,6 +345,8 @@ def csvs_to_excel(
     column_name: str = "",
     number_of_responses_with_topic_assignment: int = 0,
     file_name: str = "",
+    excel_sheet_name: str = "",
+    candidate_topics_file_name: str = "",
     unique_reference_numbers: list = [],
 ):
     if intro_text is None:
@@ -416,6 +472,8 @@ def csvs_to_excel(
         file_name=file_name,
         column_name=column_name,
         number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment,
+        excel_sheet_name=excel_sheet_name,
+        candidate_topics_file_name=candidate_topics_file_name,
     )
 
     wb.save(output_filename)
@@ -451,6 +509,7 @@ def collect_output_csvs_and_create_excel_output(
     model_name_map: dict = dict(),
     output_folder: str = OUTPUT_FOLDER,
     structured_summaries: str = "No",
+    candidate_topics=None,
 ):
     """
     Collect together output CSVs from various output boxes and combine them into a single output Excel file.
@@ -470,6 +529,7 @@ def collect_output_csvs_and_create_excel_output(
         model_name_map (dict, optional): A dictionary mapping model choices to their display names. Defaults to {}.
         output_folder (str, optional): The directory where the output Excel file will be saved. Defaults to OUTPUT_FOLDER.
         structured_summaries (str, optional): Indicates whether structured summaries are being produced ("Yes" or "No"). Defaults to "No".
+        candidate_topics (optional): Suggested topics file uploaded by the user (path string or Gradio FileData).
 
     Returns:
         tuple: A tuple containing:
@@ -493,6 +553,10 @@ def collect_output_csvs_and_create_excel_output(
 
     today_date = datetime.today().strftime("%Y-%m-%d")
     original_data_file_path = os.path.abspath(in_data_files[0])
+    excel_sheet_display_name = _resolve_excel_sheet_display_name(
+        original_data_file_path, excel_sheets
+    )
+    candidate_topics_file_name = _resolve_candidate_topics_file_name(candidate_topics)
 
     csv_files = list()
     sheet_names = list()
@@ -604,12 +668,12 @@ def collect_output_csvs_and_create_excel_output(
         reference_pivot_table_csv_path = (
             output_folder + "reference_pivot_df_for_xlsx.csv"
         )
-        # Reorder columns to ensure 'Original response ID' comes before 'Response'
+        # Reorder columns to ensure 'Original Response ID' comes before 'Response'
         cols = list(reference_pivot_table.columns)
-        if "Original response ID" in cols and "Response" in cols:
-            cols.remove("Original response ID")
+        if "Original Response ID" in cols and "Response" in cols:
+            cols.remove("Original Response ID")
             cols.remove("Response")
-            cols = ["Original response ID", "Response"] + cols
+            cols = ["Original Response ID", "Response"] + cols
             reference_pivot_table = reference_pivot_table[cols]
         reference_pivot_table.to_csv(reference_pivot_table_csv_path, index=None)
         temp_csv_files_for_cleanup.append(reference_pivot_table_csv_path)
@@ -743,9 +807,14 @@ def collect_output_csvs_and_create_excel_output(
         chosen_cols = str(chosen_cols) if chosen_cols else ""
 
     # Intro page text
+    excel_sheet_intro = (
+        f", from Excel sheet '{excel_sheet_display_name}'"
+        if excel_sheet_display_name
+        else ""
+    )
     intro_text = [
         "This workbook contains outputs from the Large Language Model (LLM) thematic analysis of open text data. Each sheet corresponds to a different CSV report included in the analysis.",
-        f"The file analysed was {short_file_name}, the column analysed was '{chosen_cols}' and the data was grouped by column '{group}'."
+        f"The file analysed was {short_file_name}, the column analysed was '{chosen_cols}'{excel_sheet_intro} and the data was grouped by column '{group}'."
         " Please contact the app administrator if you need any explanation on how to use the results."
         "LLMs are not 100% accurate and may produce biased or harmful outputs. All outputs from this analysis **need to be checked by a human** to check for harmful outputs, false information, and bias.",
     ]
@@ -861,6 +930,8 @@ def collect_output_csvs_and_create_excel_output(
         column_name=chosen_col_str,
         number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment,
         file_name=short_file_name,
+        excel_sheet_name=excel_sheet_display_name,
+        candidate_topics_file_name=candidate_topics_file_name,
         unique_reference_numbers=unique_reference_numbers,
     )
 

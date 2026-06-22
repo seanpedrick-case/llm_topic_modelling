@@ -1255,6 +1255,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
+                        candidate_topics=args.candidate_topics,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1409,6 +1410,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
+                        candidate_topics=args.candidate_topics,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1580,6 +1582,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
+                        candidate_topics=args.candidate_topics,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1727,6 +1730,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
+                        candidate_topics=args.candidate_topics,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1848,6 +1852,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
+                        candidate_topics=args.candidate_topics,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2044,6 +2049,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         model_name_map=model_name_map,
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
+                        candidate_topics=args.candidate_topics,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
