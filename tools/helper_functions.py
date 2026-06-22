@@ -1492,6 +1492,57 @@ def generate_zero_shot_topics_df(
         return zero_shot_topics_df
 
 
+def create_candidate_topics_df_from_topic_summary(
+    topic_summary_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Extract unique General topic / Subtopic pairs from a topic summary dataframe.
+
+    Deduplicates across Group and Sentiment so the output can be reused as a
+    zero-shot topics input file (same column format as generate_zero_shot_topics_df).
+    """
+    if topic_summary_df is None or topic_summary_df.empty:
+        return pd.DataFrame(columns=["General topic", "Subtopic"])
+
+    df = topic_summary_df.copy()
+
+    if "General topic" not in df.columns and "Main heading" in df.columns:
+        df = df.rename(columns={"Main heading": "General topic"})
+    if "Subtopic" not in df.columns and "Subheading" in df.columns:
+        df = df.rename(columns={"Subheading": "Subtopic"})
+
+    if "General topic" not in df.columns and "Subtopic" not in df.columns:
+        print(
+            "Warning: topic summary has no General topic / Subtopic columns; "
+            "cannot create suggested topics CSV."
+        )
+        return pd.DataFrame(columns=["General topic", "Subtopic"])
+
+    if "General topic" not in df.columns:
+        df["General topic"] = ""
+    if "Subtopic" not in df.columns:
+        df["Subtopic"] = ""
+
+    out_df = df[["General topic", "Subtopic"]].copy()
+    out_df = out_df.drop_duplicates(subset=["General topic", "Subtopic"], keep="first")
+    out_df = out_df.sort_values(["General topic", "Subtopic"], ascending=[True, True])
+    return out_df.reset_index(drop=True)
+
+
+def write_candidate_topics_csv(
+    topic_summary_df: pd.DataFrame,
+    output_path: str,
+) -> str:
+    """Write a suggested-topics CSV from a topic summary dataframe."""
+    topics_df = create_candidate_topics_df_from_topic_summary(topic_summary_df)
+    if topics_df.empty:
+        return ""
+
+    topics_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Suggested topics CSV saved as '{output_path}'")
+    return output_path
+
+
 def update_model_choice(model_source):
     # Filter models by source and return the first matching model name
     matching_models = [

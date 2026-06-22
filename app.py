@@ -33,6 +33,7 @@ from tools.config import (
     DIRECT_MODE_BATCH_SIZE,
     DIRECT_MODE_CANDIDATE_TOPICS,
     DIRECT_MODE_CONTEXT,
+    DIRECT_MODE_CREATE_TOPICS_CSV,
     DIRECT_MODE_CREATE_XLSX_OUTPUT,
     DIRECT_MODE_DEDUP_METHOD,
     DIRECT_MODE_DEFAULT_COST_CODE,
@@ -204,7 +205,7 @@ else:
         visible=False,
     )
 topic_extraction_output_files_xlsx = gr.File(
-    label="Overall summary xlsx file. CSV outputs are available on the 'Advanced' tab.",
+    label="Overall summary xlsx file and suggested topics CSV (when enabled). CSV outputs are available on the 'Advanced' tab.",
     scale=1,
     interactive=False,
     file_count="multiple",
@@ -217,6 +218,11 @@ candidate_topics = gr.File(
     height=FILE_INPUT_HEIGHT,
     label="Input topics from file (csv). File should have at least one column with a header, and all topic names below this. Using the headers 'General topic' and/or 'Subtopic' will allow for these columns to be suggested to the model. If a third column is present, it will be assumed to be a topic description.",
     file_count="single",
+)
+create_topics_csv_radio = gr.Radio(
+    label="Create suggested topics CSV from analysis results (unique General topic and Subtopic pairs, for reuse in future analyses)",
+    value="Yes",
+    choices=["Yes", "No"],
 )
 produce_structured_summary_radio = gr.Radio(
     label="Ask the model to produce structured summaries using the suggested topics as headers rather than extract topics",
@@ -916,6 +922,7 @@ with app:
 
         with gr.Accordion("Provide list of suggested topics", open=False):
             candidate_topics.render()
+            create_topics_csv_radio.render()
             with gr.Row(equal_height=True):
                 force_zero_shot_radio = gr.Radio(
                     label="Force responses into suggested topics",
@@ -1685,6 +1692,7 @@ with app:
             output_folder_state,
             produce_structured_summary_radio,
             candidate_topics,
+            create_topics_csv_radio,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -1831,6 +1839,7 @@ with app:
             output_folder_state,
             produce_structured_summary_radio,
             candidate_topics,
+            create_topics_csv_radio,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2123,6 +2132,7 @@ with app:
             output_folder_state,
             produce_structured_summary_radio,
             candidate_topics,
+            create_topics_csv_radio,
         ],
         outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2233,6 +2243,7 @@ with app:
             output_folder_state,
             produce_structured_summary_radio,
             candidate_topics,
+            create_topics_csv_radio,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2420,6 +2431,7 @@ with app:
             output_folder_state,
             produce_structured_summary_radio,
             candidate_topics,
+            create_topics_csv_radio,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
     ).success(
@@ -2614,6 +2626,7 @@ with app:
             output_folder_state,
             produce_structured_summary_radio,
             candidate_topics,
+            create_topics_csv_radio,
         ],
         outputs=[out_xlsx_files, summary_xlsx_output_files_list],
         api_name="export_xlsx",
@@ -2956,6 +2969,7 @@ if __name__ == "__main__":
             "random_seed": int(DIRECT_MODE_RANDOM_SEED),
             # Output Format Arguments
             "create_xlsx_output": DIRECT_MODE_CREATE_XLSX_OUTPUT == "True",
+            "create_topics_csv": DIRECT_MODE_CREATE_TOPICS_CSV == "True",
             # Logging Arguments
             "save_logs_to_csv": SAVE_LOGS_TO_CSV,
             "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,

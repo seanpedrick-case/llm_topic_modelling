@@ -953,6 +953,9 @@ DIRECT_MODE_RANDOM_SEED = get_or_create_env_var(
 DIRECT_MODE_CREATE_XLSX_OUTPUT = get_or_create_env_var(
     "DIRECT_MODE_CREATE_XLSX_OUTPUT", "True"
 )
+DIRECT_MODE_CREATE_TOPICS_CSV = get_or_create_env_var(
+    "DIRECT_MODE_CREATE_TOPICS_CSV", "True"
+)
 DIRECT_MODE_S3_UPLOAD_ONLY_XLSX = convert_string_to_boolean(
     get_or_create_env_var("DIRECT_MODE_S3_UPLOAD_ONLY_XLSX", "False")
 )

@@ -943,6 +943,13 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         default=True,
         help="Disable creation of Excel (.xlsx) output file. By default, Excel output is created.",
     )
+    output_group.add_argument(
+        "--no_topics_csv",
+        dest="create_topics_csv",
+        action="store_false",
+        default=True,
+        help="Disable creation of suggested topics CSV alongside Excel output. By default, the CSV is created when Excel output is created.",
+    )
 
     # --- Logging Arguments ---
     logging_group = parser.add_argument_group("Logging Options")
@@ -1269,6 +1276,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
+                        create_topics_csv="Yes" if args.create_topics_csv else "No",
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1425,6 +1433,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
+                        create_topics_csv="Yes" if args.create_topics_csv else "No",
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1597,6 +1606,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
+                        create_topics_csv="Yes" if args.create_topics_csv else "No",
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1744,6 +1754,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
+                        create_topics_csv="Yes" if args.create_topics_csv else "No",
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1867,6 +1878,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
+                        create_topics_csv="Yes" if args.create_topics_csv else "No",
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2064,6 +2076,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         output_folder=args.output_dir,
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
+                        create_topics_csv="Yes" if args.create_topics_csv else "No",
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")

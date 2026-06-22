@@ -19,6 +19,7 @@ from tools.helper_functions import (
     ensure_model_in_map,
     get_basic_response_data,
     load_in_data_file,
+    write_candidate_topics_csv,
 )
 
 
@@ -510,6 +511,7 @@ def collect_output_csvs_and_create_excel_output(
     output_folder: str = OUTPUT_FOLDER,
     structured_summaries: str = "No",
     candidate_topics=None,
+    create_topics_csv: str = "Yes",
 ):
     """
     Collect together output CSVs from various output boxes and combine them into a single output Excel file.
@@ -530,11 +532,13 @@ def collect_output_csvs_and_create_excel_output(
         output_folder (str, optional): The directory where the output Excel file will be saved. Defaults to OUTPUT_FOLDER.
         structured_summaries (str, optional): Indicates whether structured summaries are being produced ("Yes" or "No"). Defaults to "No".
         candidate_topics (optional): Suggested topics file uploaded by the user (path string or Gradio FileData).
+        create_topics_csv (str, optional): Whether to write a suggested-topics CSV with unique
+            General topic / Subtopic pairs from the analysis. Defaults to "Yes".
 
     Returns:
         tuple: A tuple containing:
-            - list: A list of paths to the generated Excel output files.
-            - list: A duplicate of the list of paths to the generated Excel output files (for UI compatibility).
+            - list: Paths to generated output files (xlsx and, when requested, suggested topics CSV).
+            - list: Duplicate of the first list (for UI compatibility).
     """
     # Use passed model_name_map if provided and not empty, otherwise use global one
     if not model_name_map:
@@ -936,6 +940,22 @@ def collect_output_csvs_and_create_excel_output(
     )
 
     xlsx_output_filenames = [xlsx_output_filename]
+    topics_csv_filenames = []
+
+    if create_topics_csv in (True, "Yes") and not master_unique_topics_df_state.empty:
+        topics_csv_filename = (
+            output_folder
+            + file_path_details
+            + ("_structured_summaries" if structured_summaries else "_theme_analysis")
+            + "_suggested_topics.csv"
+        )
+        written_path = write_candidate_topics_csv(
+            master_unique_topics_df_state, topics_csv_filename
+        )
+        if written_path:
+            topics_csv_filenames.append(written_path)
+
+    all_output_filenames = xlsx_output_filenames + topics_csv_filenames
 
     # Delete all intermediate '_for_xlsx.csv' files
     for csv_file in temp_csv_files_for_cleanup:
@@ -945,4 +965,4 @@ def collect_output_csvs_and_create_excel_output(
         except Exception as e:
             print(f"Could not delete temporary CSV file '{csv_file}' due to: {e}")
 
-    return xlsx_output_filenames, xlsx_output_filenames
+    return all_output_filenames, all_output_filenames
