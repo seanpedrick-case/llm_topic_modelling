@@ -54,7 +54,7 @@ dependencies = [
     "gradio<=6.19.0",
     "transformers<=5.12.0",
     "spaces",
-    "boto3<=1.42.80",
+    "boto3<=1.43.35",
     "pandas<=2.3.3",
     "pyarrow<=23.0.1",
     "openpyxl<=3.1.5",
@@ -81,15 +81,15 @@ torch = [
     "torchvision",
     "accelerate",
     "bitsandbytes",
-    "unsloth<=2026.4.4",
-    "unsloth_zoo<=2026.4.4",
+    "unsloth<=2026.6.9",
+    "unsloth_zoo<=2026.6.9",
     "timm",
     "xformers"
 ]
 
 # Support for llama-cpp-python is experimental - I have not directly tested the latest versions of llamacpp against the app
 llamacpp = [
-    "llama-cpp-python>=0.3.25",
+    "llama-cpp-python>=0.3.31",
 ]
 
 # Run Gradio as an mcp server

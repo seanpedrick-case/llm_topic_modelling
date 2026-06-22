@@ -75,6 +75,7 @@ from tools.helper_functions import (
 )
 from tools.llm_api_call import (
     all_in_one_pipeline,
+    discover_topics_from_sample,
     validate_topics_wrapper,
     wrapper_extract_topics_per_column_value,
 )
@@ -632,6 +633,9 @@ python cli_topics.py --task extract --input_file example_data/combined_case_note
 ## Extract topics with candidate topics (zero-shot):
 python cli_topics.py --task extract --input_file example_data/dummy_consultation_response.csv --text_column "Response text" --candidate_topics example_data/dummy_consultation_response_themes.csv
 
+## Discover topics from a 20% random sample (then upload the suggested topics CSV for a full run):
+python cli_topics.py --task discover --input_file example_data/dummy_consultation_response.csv --text_column "Response text" --sample_fraction 20 --random_seed 42
+
 # Topic Validation
 
 ## Validate previously extracted topics:
@@ -671,6 +675,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         "--task",
         choices=[
             "extract",
+            "discover",
             "validate",
             "deduplicate",
             "summarise",
@@ -678,7 +683,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             "all_in_one",
         ],
         default="extract",
-        help="Task to perform: extract (topic extraction), validate (validate topics), deduplicate (deduplicate topics), summarise (summarise topics), overall_summary (create overall summary), or all_in_one (complete pipeline).",
+        help="Task to perform: extract (topic extraction), discover (topic discovery from random sample), validate (validate topics), deduplicate (deduplicate topics), summarise (summarise topics), overall_summary (create overall summary), or all_in_one (complete pipeline).",
     )
 
     # --- General Arguments ---
@@ -852,6 +857,14 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         type=int,
         default=MAXIMUM_ALLOWED_TOPICS,
         help=f"Maximum number of topics before triggering LLM-based deduplication. Default: {MAXIMUM_ALLOWED_TOPICS}",
+    )
+
+    discover_group = parser.add_argument_group("Topic Discovery Options")
+    discover_group.add_argument(
+        "--sample_fraction",
+        type=float,
+        default=20,
+        help="Percentage of responses to sample for topic discovery (1-100). Default: 20",
     )
 
     # --- Validation Arguments ---
@@ -1106,7 +1119,10 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     # --- Route to the Correct Workflow Based on Task ---
 
     # Validate input_file requirement for tasks that need it
-    if args.task in ["extract", "validate", "all_in_one"] and not args.input_file:
+    if (
+        args.task in ["extract", "discover", "validate", "all_in_one"]
+        and not args.input_file
+    ):
         print(f"Error: --input_file is required for '{args.task}' task.")
         return
 
@@ -1117,7 +1133,10 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         print(f"Error: --previous_output_files is required for '{args.task}' task.")
         return
 
-    if args.task in ["extract", "validate", "all_in_one"] and not args.text_column:
+    if (
+        args.task in ["extract", "discover", "validate", "all_in_one"]
+        and not args.text_column
+    ):
         print(f"Error: --text_column is required for '{args.task}' task.")
         return
 
@@ -1291,6 +1310,135 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             )
             if xlsx_files:
                 all_output_files.extend(xlsx_files)
+            upload_outputs_to_s3_if_enabled(
+                output_files=all_output_files,
+                base_file_name=file_name,
+                session_hash=session_hash,
+                task_usage_log_path=task_usage_log_path,
+                prompt_response_log_paths=log_files_output_list_state,
+            )
+
+        # Task 1b: Discover topics from random sample
+        elif args.task == "discover":
+            print("--- Starting Topic Discovery Workflow... ---")
+
+            if isinstance(args.input_file, str):
+                args.input_file = [args.input_file]
+
+            file_data, file_name, total_number_of_batches = load_in_data_file(
+                file_paths=args.input_file,
+                in_colnames=[args.text_column],
+                batch_size=args.batch_size,
+                in_excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
+            )
+
+            (
+                display_markdown,
+                master_topic_df_state,
+                master_unique_topics_df_state,
+                master_reference_df_state,
+                topic_extraction_output_files,
+                text_output_file_list_state,
+                latest_batch_completed,
+                log_files_output,
+                log_files_output_list_state,
+                conversation_metadata_textbox,
+                estimated_time_taken_number,
+                deduplication_input_files,
+                summarisation_input_files,
+                modifiable_unique_topics_df_state,
+                modification_input_files,
+                in_join_files,
+                missing_df_state,
+                input_tokens_num,
+                output_tokens_num,
+                number_of_calls_num,
+                output_messages_textbox,
+                logged_content_df,
+                discovery_csv_path,
+            ) = discover_topics_from_sample(
+                grouping_col=args.group_by,
+                in_data_file=args.input_file,
+                file_data=file_data,
+                original_file_name=file_name,
+                total_number_of_batches=total_number_of_batches,
+                in_api_key=args.google_api_key,
+                temperature=args.temperature,
+                chosen_cols=[args.text_column],
+                model_choice=args.model_choice,
+                candidate_topics=args.candidate_topics,
+                sample_fraction_percent=args.sample_fraction,
+                random_seed=args.random_seed,
+                context_textbox=args.context,
+                sentiment_checkbox=args.sentiment,
+                force_zero_shot_radio=args.force_zero_shot,
+                in_excel_sheets=args.excel_sheets,
+                force_single_topic_radio=args.force_single_topic,
+                produce_structured_summary_radio=args.produce_structured_summary,
+                aws_access_key_textbox=args.aws_access_key,
+                aws_secret_key_textbox=args.aws_secret_key,
+                aws_region_textbox=args.aws_region,
+                hf_api_key_textbox=args.hf_token,
+                azure_api_key_textbox=args.azure_api_key,
+                azure_endpoint_textbox=args.azure_endpoint,
+                output_folder=args.output_dir,
+                initial_table_prompt=initial_table_prompt,
+                initial_table_system_prompt=initial_table_system_prompt,
+                add_existing_topics_system_prompt=add_existing_topics_system_prompt,
+                add_existing_topics_prompt=add_existing_topics_prompt,
+                number_of_prompts_used=1,
+                batch_size=args.batch_size,
+                additional_instructions_summary_format=args.additional_summary_instructions,
+                additional_validation_issues_provided="",
+                show_previous_table="Yes",
+                api_url=args.api_url if args.api_url else API_URL,
+                max_tokens=args.max_tokens,
+                model_name_map=model_name_map,
+                max_time_for_loop=99999,
+                reasoning_suffix="",
+                CHOSEN_LOCAL_MODEL_TYPE="",
+                output_debug_files=str(args.output_debug_files),
+                model=None,
+                tokenizer=None,
+                assistant_model=None,
+                max_rows=999999,
+            )
+
+            end_time = time.time()
+            processing_time = end_time - start_time
+
+            print("\n--- Topic Discovery Complete ---")
+            print(output_messages_textbox)
+            print(f"Processing time: {processing_time:.2f} seconds")
+            print(f"\nSuggested topics CSV: {discovery_csv_path}")
+            print(f"\nOutput files saved to: {args.output_dir}")
+            if topic_extraction_output_files:
+                print("Generated Files:", sorted(topic_extraction_output_files))
+
+            task_usage_log_path = write_usage_log(
+                session_hash=session_hash,
+                file_name=file_name,
+                text_column=args.text_column,
+                model_choice=args.model_choice,
+                conversation_metadata="",
+                input_tokens=input_tokens_num or 0,
+                output_tokens=output_tokens_num or 0,
+                number_of_calls=number_of_calls_num or 0,
+                estimated_time_taken=estimated_time_taken_number or processing_time,
+                cost_code=args.cost_code,
+                save_to_csv=args.save_logs_to_csv,
+                save_to_dynamodb=args.save_logs_to_dynamodb,
+                output_folder=args.output_dir,
+            )
+
+            all_output_files = (
+                list(topic_extraction_output_files)
+                if topic_extraction_output_files
+                else []
+            )
+            if discovery_csv_path and discovery_csv_path not in all_output_files:
+                all_output_files.append(discovery_csv_path)
+
             upload_outputs_to_s3_if_enabled(
                 output_files=all_output_files,
                 base_file_name=file_name,

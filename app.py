@@ -53,6 +53,7 @@ from tools.config import (
     DIRECT_MODE_PREVIOUS_OUTPUT_FILES,
     DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
     DIRECT_MODE_RANDOM_SEED,
+    DIRECT_MODE_SAMPLE_FRACTION,
     DIRECT_MODE_SAMPLE_REFERENCE_TABLE,
     DIRECT_MODE_SENTIMENT,
     DIRECT_MODE_SHOW_PREVIOUS_TABLE,
@@ -152,6 +153,7 @@ from tools.helper_functions import (
 from tools.llm_api_call import (
     all_in_one_pipeline,
     deduplicate_topics_llm_wrapper,
+    discover_topics_from_sample_wrapper,
     modify_existing_output_tables,
     validate_topics_wrapper,
     wrapper_extract_topics_per_column_value,
@@ -223,6 +225,24 @@ create_topics_csv_radio = gr.Radio(
     label="Create suggested topics CSV from analysis results (unique General topic and Subtopic pairs, for reuse in future analyses)",
     value="Yes",
     choices=["Yes", "No"],
+)
+topic_discovery_sample_fraction = gr.Number(
+    label="Sample percentage for topic discovery (1–100)",
+    value=20,
+    precision=0,
+    minimum=1,
+    maximum=100,
+)
+topic_discovery_random_seed = gr.Number(
+    label="Random seed for topic discovery sample",
+    value=LLM_SEED,
+    precision=0,
+)
+discover_topics_output_file = gr.File(
+    label="Suggested topics CSV from sample discovery",
+    scale=1,
+    interactive=False,
+    file_count="single",
 )
 produce_structured_summary_radio = gr.Radio(
     label="Ask the model to produce structured summaries using the suggested topics as headers rather than extract topics",
@@ -903,7 +923,10 @@ with app:
             )
 
             model_source.change(
-                fn=update_model_choice, inputs=[model_source], outputs=[model_choice]
+                fn=update_model_choice,
+                inputs=[model_source],
+                outputs=[model_choice],
+                api_visibility="undocumented",
             )
 
         with gr.Accordion("Upload xlsx, csv, or parquet file", open=True):
@@ -923,6 +946,19 @@ with app:
         with gr.Accordion("Provide list of suggested topics", open=False):
             candidate_topics.render()
             create_topics_csv_radio.render()
+            with gr.Accordion("Discover topics from a random sample", open=False):
+                gr.Markdown(
+                    "Run topic extraction on a random subsample to build a suggested topics CSV. "
+                    "Upload that file above and run a full extraction on all responses with suggested topics."
+                )
+                with gr.Row(equal_height=True):
+                    topic_discovery_sample_fraction.render()
+                    topic_discovery_random_seed.render()
+                discover_topics_btn = gr.Button(
+                    "Discover topics from sample", variant="secondary"
+                )
+                discover_topics_output_file.render()
+
             with gr.Row(equal_height=True):
                 force_zero_shot_radio = gr.Radio(
                     label="Force responses into suggested topics",
@@ -1513,6 +1549,7 @@ with app:
             join_colnames,
             in_group_col,
         ],
+        api_visibility="undocumented",
     )
 
     # Click on cost code dataframe/dropdown fills in cost code textbox
@@ -1525,17 +1562,20 @@ with app:
             df_select_callback_cost,
             inputs=[cost_code_dataframe],
             outputs=[cost_code_choice_drop],
+            api_visibility="undocumented",
         )
         reset_cost_code_dataframe_button.click(
             reset_base_dataframe,
             inputs=[cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
+            api_visibility="undocumented",
         )
 
         cost_code_choice_drop.select(
             update_cost_code_dataframe_from_dropdown_select,
             inputs=[cost_code_choice_drop, cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
+            api_visibility="undocumented",
         )
 
     # Extract topics
@@ -1561,6 +1601,7 @@ with app:
             overall_summarisation_input_files,
             overall_summary_output_files,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
         inputs=[
@@ -1568,6 +1609,7 @@ with app:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_data_file,
         inputs=[in_data_files, in_colnames, batch_size_number, in_excel_sheets],
@@ -1695,6 +1737,7 @@ with app:
             create_topics_csv_radio,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
@@ -1705,6 +1748,7 @@ with app:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     )
 
     # Validate topics
@@ -1715,6 +1759,7 @@ with app:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_data_file,
         inputs=[in_data_files, in_colnames, batch_size_number, in_excel_sheets],
@@ -1723,6 +1768,7 @@ with app:
             working_data_file_name_textbox,
             total_number_of_batches,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_previous_data_files,
         inputs=[topic_extraction_output_files],
@@ -1734,6 +1780,7 @@ with app:
             working_data_file_name_textbox,
             unique_topics_table_file_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=validate_topics_wrapper,
         inputs=[
@@ -1820,7 +1867,7 @@ with app:
         ],
         None,
         preprocess=False,
-        api_name="usage_logs_validation",
+        api_name="undocumented",
     ).then(
         collect_output_csvs_and_create_excel_output,
         inputs=[
@@ -1842,6 +1889,7 @@ with app:
             create_topics_csv_radio,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
@@ -1852,6 +1900,7 @@ with app:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     )
 
     ###
@@ -1869,6 +1918,7 @@ with app:
             unique_topics_table_file_name_textbox,
             text_output_modify_file_list_state,
         ],
+        api_visibility="undocumented",
     )
 
     # Modify output table with custom topic names
@@ -1892,6 +1942,7 @@ with app:
             unique_topics_table_file_name_textbox,
             summarised_output_markdown,
         ],
+        api_visibility="undocumented",
     )
 
     # When button pressed, deduplicate data
@@ -1906,6 +1957,7 @@ with app:
             working_data_file_name_textbox,
             unique_topics_table_file_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         deduplicate_topics,
         inputs=[
@@ -1943,6 +1995,7 @@ with app:
             working_data_file_name_textbox,
             unique_topics_table_file_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         deduplicate_topics_llm_wrapper,
         inputs=[
@@ -2020,6 +2073,7 @@ with app:
             latest_summary_completed_num,
             overall_summarisation_input_files,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
         inputs=[
@@ -2027,6 +2081,7 @@ with app:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_previous_data_files,
         inputs=[summarisation_input_files],
@@ -2038,6 +2093,7 @@ with app:
             working_data_file_name_textbox,
             unique_topics_table_file_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         wrapper_summarise_output_topics_per_group,
         inputs=[
@@ -2114,6 +2170,7 @@ with app:
         ],
         None,
         preprocess=False,
+        api_visibility="undocumented",
     ).then(
         collect_output_csvs_and_create_excel_output,
         inputs=[
@@ -2135,6 +2192,7 @@ with app:
             create_topics_csv_radio,
         ],
         outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
@@ -2145,6 +2203,7 @@ with app:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     )
     # success(sample_reference_table_summaries, inputs=[master_reference_df_state, random_seed, sample_reference_table_checkbox], outputs=[summary_reference_table_sample_state, summarised_references_markdown], api_name="sample_summaries").\
 
@@ -2156,6 +2215,7 @@ with app:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_previous_data_files,
         inputs=[overall_summarisation_input_files],
@@ -2167,6 +2227,7 @@ with app:
             working_data_file_name_textbox,
             unique_topics_table_file_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         overall_summary,
         inputs=[
@@ -2225,6 +2286,7 @@ with app:
         ],
         None,
         preprocess=False,
+        api_visibility="undocumented",
     ).then(
         collect_output_csvs_and_create_excel_output,
         inputs=[
@@ -2246,6 +2308,7 @@ with app:
             create_topics_csv_radio,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
@@ -2256,6 +2319,117 @@ with app:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
+    )
+
+    # Discover topics from random sample (extract-only on subsample)
+    discover_topics_btn.click(
+        fn=empty_output_vars_extract_topics,
+        inputs=None,
+        outputs=[
+            master_topic_df_state,
+            master_unique_topics_df_state,
+            master_reference_df_state,
+            topic_extraction_output_files,
+            text_output_file_list_state,
+            latest_batch_completed,
+            log_files_output,
+            log_files_output_list_state,
+            conversation_metadata_textbox,
+            estimated_time_taken_number,
+            file_data_state,
+            working_data_file_name_textbox,
+            display_topic_table_markdown,
+            summary_output_files,
+            summarisation_input_files,
+            overall_summarisation_input_files,
+            overall_summary_output_files,
+        ],
+        api_visibility="undocumented",
+    ).success(
+        fn=enforce_cost_codes,
+        inputs=[
+            enforce_cost_code_textbox,
+            cost_code_choice_drop,
+            cost_code_dataframe_base,
+        ],
+        api_visibility="undocumented",
+    ).success(
+        load_in_data_file,
+        inputs=[in_data_files, in_colnames, batch_size_number, in_excel_sheets],
+        outputs=[
+            file_data_state,
+            working_data_file_name_textbox,
+            total_number_of_batches,
+        ],
+        api_visibility="undocumented",
+    ).success(
+        fn=discover_topics_from_sample_wrapper,
+        inputs=[
+            in_group_col,
+            in_data_files,
+            file_data_state,
+            original_data_file_name_textbox,
+            total_number_of_batches,
+            google_api_key_textbox,
+            temperature_slide,
+            in_colnames,
+            model_choice,
+            candidate_topics,
+            topic_discovery_sample_fraction,
+            topic_discovery_random_seed,
+            context_textbox,
+            sentiment_checkbox,
+            force_zero_shot_radio,
+            in_excel_sheets,
+            force_single_topic_radio,
+            produce_structured_summary_radio,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
+            hf_api_key_textbox,
+            azure_api_key_textbox,
+            azure_endpoint_textbox,
+            output_folder_state,
+            initial_table_prompt_textbox,
+            system_prompt_textbox,
+            add_to_existing_topics_system_prompt_textbox,
+            add_to_existing_topics_prompt_textbox,
+            number_of_prompts,
+            batch_size_number,
+            additional_summary_instructions_textbox,
+            additional_validation_issues_textbox,
+            show_previous_table_radio,
+            api_url_textbox,
+            max_topics_number,
+        ],
+        outputs=[
+            display_topic_table_markdown,
+            master_topic_df_state,
+            master_unique_topics_df_state,
+            master_reference_df_state,
+            topic_extraction_output_files,
+            text_output_file_list_state,
+            latest_batch_completed,
+            log_files_output,
+            log_files_output_list_state,
+            conversation_metadata_textbox,
+            estimated_time_taken_number,
+            deduplication_input_files,
+            summarisation_input_files,
+            modifiable_unique_topics_df_state,
+            modification_input_files,
+            in_join_files,
+            missing_df_state,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            output_messages_textbox,
+            logged_content_df,
+            discover_topics_output_file,
+        ],
+        api_name="discover_topics_from_sample",
+        show_progress_on=[output_messages_textbox, discover_topics_output_file],
     )
 
     # All in one button
@@ -2282,6 +2456,7 @@ with app:
             overall_summarisation_input_files,
             overall_summary_output_files,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
         inputs=[
@@ -2289,6 +2464,7 @@ with app:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_data_file,
         inputs=[in_data_files, in_colnames, batch_size_number, in_excel_sheets],
@@ -2297,7 +2473,7 @@ with app:
             working_data_file_name_textbox,
             total_number_of_batches,
         ],
-        api_name="load_data",
+        api_visibility="undocumented",
     ).success(
         fn=all_in_one_pipeline,
         inputs=[
@@ -2413,6 +2589,7 @@ with app:
         ],
         None,
         preprocess=False,
+        api_visibility="undocumented",
     ).then(
         collect_output_csvs_and_create_excel_output,
         inputs=[
@@ -2434,6 +2611,7 @@ with app:
             create_topics_csv_radio,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3_with_prompt_response_logs,
         inputs=[
@@ -2444,10 +2622,12 @@ with app:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
         move_overall_summary_output_files_to_front_page,
         inputs=[summary_xlsx_output_files_list],
         outputs=[topic_extraction_output_files_xlsx],
+        api_visibility="undocumented",
     )
 
     ###
@@ -2463,6 +2643,7 @@ with app:
             working_data_file_name_textbox,
             total_number_of_batches,
         ],
+        api_visibility="undocumented",
     ).success(
         load_in_previous_data_files,
         inputs=[in_previous_data_files],
@@ -2474,6 +2655,7 @@ with app:
             working_data_file_name_textbox,
             unique_topics_table_file_name_textbox,
         ],
+        api_visibility="undocumented",
     )
 
     ###
@@ -2494,6 +2676,7 @@ with app:
             log_prompt_markdown,
             log_response_markdown,
         ],
+        api_visibility="undocumented",
     )
 
     # Update display when any filter changes
@@ -2516,6 +2699,7 @@ with app:
             log_validated_dropdown,
         ],
         outputs=[log_prompt_markdown, log_response_markdown],
+        api_visibility="undocumented",
     )
 
     log_task_type_dropdown.change(
@@ -2529,6 +2713,7 @@ with app:
             log_validated_dropdown,
         ],
         outputs=[log_prompt_markdown, log_response_markdown],
+        api_visibility="undocumented",
     )
 
     log_group_dropdown.change(
@@ -2542,6 +2727,7 @@ with app:
             log_validated_dropdown,
         ],
         outputs=[log_prompt_markdown, log_response_markdown],
+        api_visibility="undocumented",
     )
 
     log_model_choice_dropdown.change(
@@ -2555,6 +2741,7 @@ with app:
             log_validated_dropdown,
         ],
         outputs=[log_prompt_markdown, log_response_markdown],
+        api_visibility="undocumented",
     )
 
     log_validated_dropdown.change(
@@ -2568,11 +2755,15 @@ with app:
             log_validated_dropdown,
         ],
         outputs=[log_prompt_markdown, log_response_markdown],
+        api_visibility="undocumented",
     )
 
     # Legacy view_table handler (kept for backward compatibility)
     in_view_table.upload(
-        view_table, inputs=[in_view_table], outputs=[view_table_markdown]
+        view_table,
+        inputs=[in_view_table],
+        outputs=[view_table_markdown],
+        api_visibility="undocumented",
     )
 
     ###
@@ -2588,6 +2779,7 @@ with app:
         fn=load_in_previous_reference_file,
         inputs=[in_join_files],
         outputs=[master_reference_df_state, reference_df_data_file_name_textbox],
+        api_visibility="undocumented",
     ).success(
         load_in_data_file,
         inputs=[in_data_files, in_colnames, batch_size_number, in_excel_sheets],
@@ -2596,6 +2788,7 @@ with app:
             working_data_file_name_textbox,
             total_number_of_batches,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=join_cols_onto_reference_df,
         inputs=[
@@ -2605,6 +2798,7 @@ with app:
             reference_df_data_file_name_textbox,
         ],
         outputs=[master_reference_df_state_joined, out_join_files],
+        api_visibility="undocumented",
     )
 
     # Export to xlsx file
@@ -2640,6 +2834,7 @@ with app:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     )
 
     # If relevant environment variable is set, load in the default cost code file from S3 or locally
@@ -2672,6 +2867,7 @@ with app:
                     cost_code_dataframe_base,
                     cost_code_choice_drop,
                 ],
+                api_visibility="undocumented",
             )
             print("Successfully loaded cost codes from S3")
         elif os.path.exists(COST_CODES_PATH):
@@ -2690,6 +2886,7 @@ with app:
                     cost_code_dataframe_base,
                     cost_code_choice_drop,
                 ],
+                api_visibility="undocumented",
             )
         else:
             print("Could not load in cost code data")
@@ -2708,6 +2905,7 @@ with app:
             session_hash_textbox,
             input_folder_state,
         ],
+        api_visibility="undocumented",
     )
 
     # Log usernames and times of access to file (to know who is using the app when running on AWS)
@@ -2726,6 +2924,7 @@ with app:
         [session_hash_textbox],
         None,
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_file_to_s3,
         inputs=[
@@ -2737,6 +2936,7 @@ with app:
             aws_region_textbox,
         ],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     )
 
     # Log usage when making a query
@@ -2773,6 +2973,7 @@ with app:
             aws_region_textbox,
         ],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     )
 
     # User submitted feedback
@@ -2810,6 +3011,7 @@ with app:
         ],
         None,
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_file_to_s3,
         inputs=[
@@ -2821,6 +3023,7 @@ with app:
             aws_region_textbox,
         ],
         outputs=[data_further_details_text],
+        api_visibility="undocumented",
     )
 
 ###
@@ -2970,6 +3173,7 @@ if __name__ == "__main__":
             # Output Format Arguments
             "create_xlsx_output": DIRECT_MODE_CREATE_XLSX_OUTPUT == "True",
             "create_topics_csv": DIRECT_MODE_CREATE_TOPICS_CSV == "True",
+            "sample_fraction": float(DIRECT_MODE_SAMPLE_FRACTION),
             # Logging Arguments
             "save_logs_to_csv": SAVE_LOGS_TO_CSV,
             "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,

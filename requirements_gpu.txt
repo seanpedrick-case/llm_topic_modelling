@@ -2,7 +2,7 @@ gradio<=6.19.0
 transformers<=5.12.0
 spaces
 pandas<=2.3.3
-boto3<=1.42.80
+boto3<=1.43.35
 pyarrow<=23.0.1
 openpyxl<=3.1.5
 pyexcel<=0.7.4
@@ -18,12 +18,12 @@ python-dotenv<=1.2.2
 # Torch/Unsloth
 # Latest compatible with CUDA 12.4
 torch<=2.9.1 --extra-index-url https://download.pytorch.org/whl/cu128
-unsloth[cu128-torch290]<=2026.4.4 # Refer here for more details on installation: https://pypi.org/project/unsloth
-unsloth_zoo<=2026.4.4
+unsloth[cu128-torch290]<=2026.6.9 # Refer here for more details on installation: https://pypi.org/project/unsloth
+unsloth_zoo<=2026.6.9
 # Additional for Windows and CUDA 12.4 older GPUS (RTX 3x or similar):
 #triton-windows<3.3
 timm
 # Llama CPP Python
-llama-cpp-python>=0.3.25 -C cmake.args="-DGGML_CUDA=on"
+llama-cpp-python>=0.3.31 -C cmake.args="-DGGML_CUDA=on"
 #llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git -C cmake.args="-DGGML_CUDA=on"
 # If above doesn't work, try specific wheels for your system, see files in https://github.com/JamePeng/llama-cpp-python/releases for different python versions
