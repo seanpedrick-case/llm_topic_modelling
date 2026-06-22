@@ -23,8 +23,8 @@ torch<=2.9.1 --extra-index-url https://download.pytorch.org/whl/cu128
 unsloth<=2026.6.9
 unsloth_zoo<=2026.6.9
 timm
-# llama-cpp-python direct wheel link for GPU compatible version 3.25 for use with Python 3.10 and Hugging Face
-https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.25-cu125/llama_cpp_python-0.3.31-py3-none-linux_x86_64.whl
+# llama-cpp-python direct wheel link for GPU compatible version 3.31 for use with Python 3.10 and Hugging Face
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.31-cu125/llama_cpp_python-0.3.31-py3-none-manylinux_2_35_x86_64.whl
 #https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.17-cu128-Basic-linux-20251202/llama_cpp_python-0.3.17-cp310-cp310-linux_x86_64.whl
 #https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.16-cu124/llama_cpp_python-0.3.16-cp310-cp310-linux_x86_64.whl
 
