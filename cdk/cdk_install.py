@@ -30,6 +30,11 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc --yes
     python cdk_install.py --profile production --headless --vpc-name my-vpc --yes
 
+    # Optional scheduled DynamoDB usage log export to S3
+    python cdk_install.py --profile demo --vpc-name my-vpc --yes \\
+        --dynamo-usage-log-export --dynamo-export-schedule-time 06:00 \\
+        --dynamo-export-schedule-days weekdays
+
     # Headless with S3 output email alerts + IAM reader user
     python cdk_install.py --profile headless --vpc-name my-vpc --yes \\
         --headless-output-notifications \\
@@ -1265,6 +1270,11 @@ class InstallAnswers:
     enable_headless_output_notifications: bool = False
     headless_output_notify_email: str = ""
     headless_output_iam_user_name: str = ""
+    enable_dynamo_usage_log_export: bool = False
+    dynamo_export_schedule_time: str = "06:00"
+    dynamo_export_schedule_days: str = "daily"
+    dynamo_export_s3_key: str = ""
+    dynamo_export_date_attribute: str = "timestamp"
     ecs_memory: str = "8192"
     pi_alb_routing: str = "path"
     pi_alb_path_prefix: str = "/agent"
@@ -1809,6 +1819,113 @@ def validate_notify_email(email: str) -> Optional[str]:
     return None
 
 
+DYNAMO_EXPORT_SCHEDULE_DAY_PRESETS = {
+    "daily": "*",
+    "weekdays": "MON-FRI",
+    "weekends": "SAT-SUN",
+}
+
+
+def default_dynamo_export_s3_key() -> str:
+    return "reports/dynamodb-usage/dynamodb_logs_export.csv"
+
+
+def parse_schedule_time_hhmm(raw: str) -> Tuple[int, int]:
+    match = re.match(r"^(\d{1,2}):(\d{2})$", (raw or "").strip())
+    if not match:
+        raise ValueError(
+            "Schedule time must use HH:MM in 24-hour UTC format, e.g. 06:00."
+        )
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if hour > 23 or minute > 59:
+        raise ValueError("Schedule time hour must be 0-23 and minute 0-59.")
+    return hour, minute
+
+
+def validate_schedule_time_hhmm(raw: str) -> Optional[str]:
+    try:
+        parse_schedule_time_hhmm(raw)
+        return None
+    except ValueError as exc:
+        return str(exc)
+
+
+def build_dynamo_export_cron_expression(
+    hour: int, minute: int, days_preset: str
+) -> str:
+    """Build an EventBridge cron expression (UTC)."""
+    dow = DYNAMO_EXPORT_SCHEDULE_DAY_PRESETS.get(
+        (days_preset or "").strip().lower(), (days_preset or "*").strip().upper()
+    )
+    return f"cron({minute} {hour} ? * {dow} *)"
+
+
+def prompt_dynamo_usage_log_export_options(
+    answers: "InstallAnswers",
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    if getattr(args, "dynamo_usage_log_export", False):
+        answers.enable_dynamo_usage_log_export = True
+    elif getattr(args, "no_dynamo_usage_log_export", False):
+        answers.enable_dynamo_usage_log_export = False
+    elif interactive:
+        answers.enable_dynamo_usage_log_export = ask_yes_no(
+            "Enable scheduled DynamoDB usage log export to S3 (EventBridge)?",
+            default=False,
+        )
+    else:
+        return
+
+    if not answers.enable_dynamo_usage_log_export:
+        return
+
+    if getattr(args, "dynamo_export_schedule_time", "").strip():
+        answers.dynamo_export_schedule_time = args.dynamo_export_schedule_time.strip()
+    elif interactive:
+        while True:
+            raw = ask(
+                "Export schedule time (UTC, HH:MM)",
+                answers.dynamo_export_schedule_time,
+            )
+            err = validate_schedule_time_hhmm(raw)
+            if not err:
+                answers.dynamo_export_schedule_time = raw
+                break
+            print(err)
+
+    if getattr(args, "dynamo_export_schedule_days", "").strip():
+        answers.dynamo_export_schedule_days = (
+            args.dynamo_export_schedule_days.strip().lower()
+        )
+    elif interactive:
+        idx = ask_choice(
+            "Run export on which days?",
+            ["Every day", "Weekdays (Mon-Fri)", "Weekends (Sat-Sun)"],
+            default_index=0,
+        )
+        answers.dynamo_export_schedule_days = ["daily", "weekdays", "weekends"][idx]
+
+    default_key = answers.dynamo_export_s3_key or default_dynamo_export_s3_key()
+    if getattr(args, "dynamo_export_s3_key", "").strip():
+        answers.dynamo_export_s3_key = args.dynamo_export_s3_key.strip()
+    elif interactive:
+        answers.dynamo_export_s3_key = (
+            ask("S3 object key for the CSV export", default_key).strip() or default_key
+        )
+
+    if getattr(args, "dynamo_export_date_attribute", "").strip():
+        answers.dynamo_export_date_attribute = args.dynamo_export_date_attribute.strip()
+    elif interactive:
+        raw = ask(
+            "DynamoDB date attribute for filtering",
+            answers.dynamo_export_date_attribute,
+        )
+        if raw.strip():
+            answers.dynamo_export_date_attribute = raw.strip()
+
+
 def validate_install_answers(answers: "InstallAnswers") -> List[str]:
     errors: List[str] = []
     msg = headless_profile_error(answers)
@@ -1822,6 +1939,18 @@ def validate_install_answers(answers: "InstallAnswers") -> List[str]:
         email_error = validate_notify_email(answers.headless_output_notify_email)
         if email_error:
             errors.append(email_error)
+    if answers.enable_dynamo_usage_log_export:
+        time_error = validate_schedule_time_hhmm(answers.dynamo_export_schedule_time)
+        if time_error:
+            errors.append(time_error)
+        days = (answers.dynamo_export_schedule_days or "").strip().lower()
+        if days not in DYNAMO_EXPORT_SCHEDULE_DAY_PRESETS:
+            errors.append(
+                "DynamoDB export schedule days must be one of: "
+                + ", ".join(DYNAMO_EXPORT_SCHEDULE_DAY_PRESETS)
+            )
+        if not (answers.dynamo_export_s3_key.strip() or default_dynamo_export_s3_key()):
+            errors.append("DynamoDB export S3 object key is required.")
     return errors
 
 
@@ -1922,6 +2051,22 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
                     "HEADLESS_OUTPUT_IAM_USER_NAME": iam_user,
                 }
             )
+
+    if answers.enable_dynamo_usage_log_export:
+        hour, minute = parse_schedule_time_hhmm(answers.dynamo_export_schedule_time)
+        s3_key = answers.dynamo_export_s3_key.strip() or default_dynamo_export_s3_key()
+        values.update(
+            {
+                "ENABLE_DYNAMODB_USAGE_LOG_EXPORT": "True",
+                "DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE": build_dynamo_export_cron_expression(
+                    hour, minute, answers.dynamo_export_schedule_days
+                ),
+                "DYNAMODB_USAGE_LOG_EXPORT_S3_KEY": s3_key,
+                "DYNAMODB_USAGE_LOG_EXPORT_DATE_ATTRIBUTE": (
+                    answers.dynamo_export_date_attribute.strip() or "timestamp"
+                ),
+            }
+        )
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
     if answers.pi_enabled:
@@ -2125,6 +2270,23 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
         )
         if email_error:
             errors.append(email_error)
+
+    if values.get("ENABLE_DYNAMODB_USAGE_LOG_EXPORT") == "True":
+        if values.get("SAVE_LOGS_TO_DYNAMODB") != "True":
+            errors.append(
+                "ENABLE_DYNAMODB_USAGE_LOG_EXPORT requires SAVE_LOGS_TO_DYNAMODB=True."
+            )
+        schedule = (values.get("DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE") or "").strip()
+        if not schedule.startswith("cron(") and not schedule.startswith("rate("):
+            errors.append(
+                "DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE must be an EventBridge "
+                f"cron(...) or rate(...) expression; got {schedule!r}."
+            )
+        if not (values.get("DYNAMODB_USAGE_LOG_EXPORT_S3_KEY") or "").strip():
+            errors.append(
+                "DYNAMODB_USAGE_LOG_EXPORT_S3_KEY is required when "
+                "ENABLE_DYNAMODB_USAGE_LOG_EXPORT=True."
+            )
 
     pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
     if pi_ecs:
@@ -3414,6 +3576,8 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         if mem:
             answers.ecs_memory = mem
 
+    prompt_dynamo_usage_log_export_options(answers, args, interactive=interactive)
+
     configure_app_config_options(answers, args, interactive=interactive)
 
     answers.python_path = args.python
@@ -3531,6 +3695,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--headless-output-iam-user",
         help="IAM user name for programmatic download of headless S3 outputs",
+    )
+    p.add_argument(
+        "--dynamo-usage-log-export",
+        action="store_true",
+        help="Enable scheduled DynamoDB usage log export Lambda (EventBridge)",
+    )
+    p.add_argument(
+        "--no-dynamo-usage-log-export",
+        action="store_true",
+        help="Disable DynamoDB usage log export in interactive installs",
+    )
+    p.add_argument(
+        "--dynamo-export-schedule-time",
+        metavar="HH:MM",
+        help="UTC schedule time for DynamoDB usage log export (default: 06:00)",
+    )
+    p.add_argument(
+        "--dynamo-export-schedule-days",
+        choices=tuple(DYNAMO_EXPORT_SCHEDULE_DAY_PRESETS),
+        help="Days to run DynamoDB usage log export (default: daily)",
+    )
+    p.add_argument(
+        "--dynamo-export-s3-key",
+        help="S3 object key for the exported CSV (default: reports/dynamodb-usage/...)",
+    )
+    p.add_argument(
+        "--dynamo-export-date-attribute",
+        help="DynamoDB attribute used for date filtering (default: timestamp)",
     )
     p.add_argument(
         "--create-headless-output-access-key",

@@ -82,7 +82,7 @@ def get_config_from_env(context=None):
     if not region and context is not None:
         region = _get_region_from_context(context) or ""
     if not region:
-        region = "FILL IN DEFAULT REGION HERE"
+        region = "eu-west-2"
 
     from_date = None
     to_date = None
@@ -110,7 +110,6 @@ def get_config_from_env(context=None):
     }
 
 
-# Helper function to convert Decimal to float or int
 def convert_types(item):
     new_item = {}
     for key, value in item.items():
@@ -254,14 +253,12 @@ def run_export(config):
     }
 
     if csv_string:
-        # Optional: write to local path (e.g. /tmp in Lambda)
         try:
             export_to_csv_file(items, local_output_path, fields_to_drop=[])
             result["local_path"] = local_output_path
         except Exception as e:
             result["local_write_error"] = str(e)
 
-        # Upload to S3 if bucket and key are set
         if s3_output_bucket and s3_output_key:
             s3 = boto3.client("s3", region_name=region or None)
             s3.put_object(
@@ -288,7 +285,6 @@ def lambda_handler(event, context):
     """
     config = get_config_from_env(context=context)
 
-    # Optional: allow event to override env-based config
     if isinstance(event, dict):
         if event.get("table_name"):
             config["table_name"] = event["table_name"]
@@ -314,7 +310,6 @@ def lambda_handler(event, context):
 
 
 if __name__ == "__main__":
-    # Allow running locally with env vars set
     import json
 
     result = lambda_handler({}, None)

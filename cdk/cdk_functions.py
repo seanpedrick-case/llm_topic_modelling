@@ -24,10 +24,13 @@ from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
+from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elb
 from aws_cdk import aws_elasticloadbalancingv2_actions as elb_act
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
@@ -912,11 +915,76 @@ def get_secret_kms_key_arn(
     return f"arn:aws:kms:{region}:{account_id}:key/{kms_key_id}"
 
 
+ECS_TASK_ROLE_S3_ACTIONS = [
+    "s3:GetObject*",
+    "s3:GetBucket*",
+    "s3:PutObject",
+    "s3:DeleteObject",
+    "s3:List*",
+]
+
+
+def build_ecs_task_role_s3_statement(*, sid: str, bucket_name: str) -> Dict[str, Any]:
+    """Scoped S3 access for one bucket (identity policy on the ECS task role)."""
+    return {
+        "Sid": sid,
+        "Effect": "Allow",
+        "Action": list(ECS_TASK_ROLE_S3_ACTIONS),
+        "Resource": [
+            f"arn:aws:s3:::{bucket_name}",
+            f"arn:aws:s3:::{bucket_name}/*",
+        ],
+    }
+
+
+def build_ecs_task_role_inline_policy(
+    *,
+    output_bucket_name: str,
+    log_config_bucket_name: Optional[str] = None,
+    shared_kms_key_arn: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Task role inline policy: STS, scoped S3 buckets, optional shared CMK for S3."""
+    statements: List[Dict[str, Any]] = [
+        {
+            "Sid": "STSCallerIdentity",
+            "Effect": "Allow",
+            "Action": ["sts:GetCallerIdentity"],
+            "Resource": "*",
+        },
+        build_ecs_task_role_s3_statement(
+            sid="S3Output",
+            bucket_name=output_bucket_name,
+        ),
+    ]
+    if log_config_bucket_name:
+        statements.append(
+            build_ecs_task_role_s3_statement(
+                sid="S3LogConfig",
+                bucket_name=log_config_bucket_name,
+            )
+        )
+    if shared_kms_key_arn:
+        statements.append(
+            {
+                "Sid": "KMSS3Access",
+                "Effect": "Allow",
+                "Action": [
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
+                "Resource": shared_kms_key_arn,
+            }
+        )
+    return {"Version": "2012-10-17", "Statement": statements}
+
+
 def build_ecs_task_role_kms_policy(
     *,
     shared_kms_key_arn: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Task role: shared CMK for S3 bucket encryption (when USE_CUSTOM_KMS_KEY=1)."""
+    """Task role KMS-only policy (tests / legacy callers without S3 bucket names)."""
     statements: List[Dict[str, Any]] = [
         {
             "Sid": "STSCallerIdentity",
@@ -930,7 +998,12 @@ def build_ecs_task_role_kms_policy(
             {
                 "Sid": "KMSS3Access",
                 "Effect": "Allow",
-                "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
+                "Action": [
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
                 "Resource": shared_kms_key_arn,
             }
         )
@@ -3464,6 +3537,99 @@ def create_s3_batch_ecs_trigger_lambda(
     )
 
     return batch_fn
+
+
+def create_dynamo_usage_log_export_lambda(
+    scope: Construct,
+    logical_id: str,
+    *,
+    function_name: Optional[str],
+    lambda_asset_path: str,
+    dynamodb_table: dynamodb.ITable,
+    output_bucket: s3.IBucket,
+    s3_output_key: str,
+    schedule_expression: str,
+    dynamodb_table_name: str,
+    date_attribute: str = "timestamp",
+    output_filename: str = "dynamodb_logs_export.csv",
+    shared_kms_key_arn: Optional[str] = None,
+) -> lambda_.Function:
+    """
+    Scheduled Lambda: scan usage-log DynamoDB table, export CSV, upload to S3.
+
+    Triggered by EventBridge on ``schedule_expression`` (cron or rate).
+    """
+    lambda_role = iam.Role(
+        scope,
+        f"{logical_id}Role",
+        assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+        managed_policies=[
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
+            )
+        ],
+    )
+    dynamodb_table.grant_read_data(lambda_role)
+    output_bucket.grant_put(lambda_role, s3_output_key)
+    if shared_kms_key_arn:
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
+                resources=[shared_kms_key_arn],
+            )
+        )
+
+    fn_kwargs: Dict[str, Any] = {
+        "runtime": lambda_.Runtime.PYTHON_3_12,
+        "handler": "lambda_function.lambda_handler",
+        "code": lambda_.Code.from_asset(lambda_asset_path),
+        "role": lambda_role,
+        "timeout": Duration.minutes(15),
+        "memory_size": 512,
+        "environment": {
+            "DYNAMODB_TABLE_NAME": dynamodb_table_name,
+            "USAGE_LOG_DYNAMODB_TABLE_NAME": dynamodb_table_name,
+            "OUTPUT_FOLDER": "/tmp",
+            "OUTPUT_FILENAME": output_filename,
+            "DATE_ATTRIBUTE": date_attribute,
+            "S3_OUTPUT_BUCKET": output_bucket.bucket_name,
+            "S3_OUTPUT_KEY": s3_output_key,
+        },
+    }
+    if function_name:
+        fn_kwargs["function_name"] = function_name
+
+    export_fn = lambda_.Function(scope, logical_id, **fn_kwargs)
+
+    events.Rule(
+        scope,
+        f"{logical_id}Schedule",
+        schedule=events.Schedule.expression(schedule_expression),
+        description=(
+            "Export DynamoDB usage logs to CSV in S3 " f"({schedule_expression})"
+        ),
+        targets=[targets.LambdaFunction(export_fn)],
+    )
+
+    CfnOutput(
+        scope,
+        f"{logical_id}LambdaArn",
+        value=export_fn.function_arn,
+        description="Lambda ARN for scheduled DynamoDB usage log export to S3",
+    )
+    CfnOutput(
+        scope,
+        f"{logical_id}S3Uri",
+        value=f"s3://{output_bucket.bucket_name}/{s3_output_key}",
+        description="S3 URI for the scheduled DynamoDB usage log CSV export",
+    )
+
+    return export_fn
 
 
 def sanitize_headless_metric_filter_id(raw: str) -> str:

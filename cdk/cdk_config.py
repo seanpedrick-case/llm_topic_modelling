@@ -216,7 +216,7 @@ NAT_GATEWAY_NAME = get_or_create_env_var("NAT_GATEWAY_NAME", f"{CDK_PREFIX}NatGa
 # IAM roles — managed policy *names* (AWS managed) and JSON policy *files* (inline statements)
 AWS_MANAGED_TASK_ROLES_LIST = get_or_create_env_var(
     "AWS_MANAGED_TASK_ROLES_LIST",
-    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockLimitedAccess"]',
+    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockLimitedAccess"]',
 )
 ECS_EXECUTION_ROLE_MANAGED_POLICIES = get_or_create_env_var(
     "ECS_EXECUTION_ROLE_MANAGED_POLICIES",
@@ -561,6 +561,45 @@ FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
     "USAGE_LOG_DYNAMODB_TABLE_NAME", f"{CDK_PREFIX}dynamodb-usage-logs".lower()
 )
+
+# Optional scheduled export of usage-log DynamoDB table to CSV in S3 (EventBridge -> Lambda).
+ENABLE_DYNAMODB_USAGE_LOG_EXPORT = get_or_create_env_var(
+    "ENABLE_DYNAMODB_USAGE_LOG_EXPORT", "False"
+)
+DYNAMODB_USAGE_LOG_EXPORT_LAMBDA_NAME = get_or_create_env_var(
+    "DYNAMODB_USAGE_LOG_EXPORT_LAMBDA_NAME",
+    f"{CDK_PREFIX}DynamoUsageLogExport".lower().replace("_", "-"),
+)
+DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE = get_or_create_env_var(
+    "DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE", "cron(0 6 ? * * *)"
+)
+DYNAMODB_USAGE_LOG_EXPORT_S3_KEY = get_or_create_env_var(
+    "DYNAMODB_USAGE_LOG_EXPORT_S3_KEY",
+    "reports/dynamodb-usage/dynamodb_logs_export.csv",
+)
+DYNAMODB_USAGE_LOG_EXPORT_DATE_ATTRIBUTE = get_or_create_env_var(
+    "DYNAMODB_USAGE_LOG_EXPORT_DATE_ATTRIBUTE", "timestamp"
+)
+DYNAMODB_USAGE_LOG_EXPORT_OUTPUT_FILENAME = get_or_create_env_var(
+    "DYNAMODB_USAGE_LOG_EXPORT_OUTPUT_FILENAME", "dynamodb_logs_export.csv"
+)
+
+if ENABLE_DYNAMODB_USAGE_LOG_EXPORT == "True":
+    if SAVE_LOGS_TO_DYNAMODB != "True":
+        raise ValueError(
+            "ENABLE_DYNAMODB_USAGE_LOG_EXPORT=True requires SAVE_LOGS_TO_DYNAMODB=True."
+        )
+    schedule = (DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE or "").strip()
+    if not schedule.startswith("cron(") and not schedule.startswith("rate("):
+        raise ValueError(
+            "DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE must be an EventBridge cron(...) or "
+            f"rate(...) expression; got {schedule!r}."
+        )
+    if not (DYNAMODB_USAGE_LOG_EXPORT_S3_KEY or "").strip():
+        raise ValueError(
+            "DYNAMODB_USAGE_LOG_EXPORT_S3_KEY is required when "
+            "ENABLE_DYNAMODB_USAGE_LOG_EXPORT=True."
+        )
 
 ###
 # APP OPTIONS
