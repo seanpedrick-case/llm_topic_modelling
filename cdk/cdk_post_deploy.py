@@ -1207,9 +1207,16 @@ def seed_headless_batch_s3_layout(
     example_env_local_path: str,
     example_env_basename: str = "example_headless_env_file.env",
     aws_region: str = AWS_REGION,
+    log_bucket: str = "",
+    default_params_key: str = "general-config/app_defaults.env",
+    app_defaults_local_path: str = "",
+    s3_outputs_bucket_name: str = "",
 ) -> None:
     """
     Ensure headless batch prefixes and example job .env exist on the output bucket.
+
+    When ``log_bucket`` is set, also ensure durable ``app_defaults.env`` exists on
+    the log/config bucket (so it is not deleted by output-bucket lifecycle rules).
 
     Idempotent: existing keys are left unchanged (safe to run from quickstart).
     """
@@ -1241,15 +1248,56 @@ def seed_headless_batch_s3_layout(
     example_key = f"{env_prefix_norm}{example_env_basename}"
     if _s3_object_exists(s3_client, output_bucket, example_key):
         print(f"Example job .env already present: s3://{output_bucket}/{example_key}")
-        return
-
-    if not os.path.isfile(example_env_local_path):
+    elif not os.path.isfile(example_env_local_path):
         print(f"Skipping example job .env upload: {example_env_local_path} not found.")
+    else:
+        with open(example_env_local_path, "rb") as handle:
+            s3_client.put_object(
+                Bucket=output_bucket, Key=example_key, Body=handle.read()
+            )
+        print(f"Uploaded example job .env to s3://{output_bucket}/{example_key}")
+
+    if not log_bucket:
         return
 
-    with open(example_env_local_path, "rb") as handle:
-        s3_client.put_object(Bucket=output_bucket, Key=example_key, Body=handle.read())
-    print(f"Uploaded example job .env to s3://{output_bucket}/{example_key}")
+    defaults_key = (default_params_key or "general-config/app_defaults.env").lstrip("/")
+    if _s3_object_exists(s3_client, log_bucket, defaults_key):
+        print(f"app_defaults.env already present: s3://{log_bucket}/{defaults_key}")
+        return
+
+    defaults_path = app_defaults_local_path
+    if not defaults_path:
+        defaults_path = os.path.join(
+            os.path.dirname(__file__),
+            "config",
+            "headless_s3_seed",
+            "general-config",
+            "app_defaults.env",
+        )
+
+    # Prefer rendered content (fills S3_OUTPUTS_BUCKET) when seed helpers are available.
+    body: Optional[bytes] = None
+    try:
+        from cdk_functions import build_headless_app_defaults_env_content
+
+        seed_dir = os.path.join(os.path.dirname(__file__), "config", "headless_s3_seed")
+        rendered = build_headless_app_defaults_env_content(
+            seed_dir,
+            s3_outputs_bucket_name=s3_outputs_bucket_name or output_bucket,
+        )
+        body = rendered.encode("utf-8")
+    except Exception as exc:
+        print(f"Warning: could not render app_defaults.env ({exc}); using local file.")
+
+    if body is None:
+        if not os.path.isfile(defaults_path):
+            print(f"Skipping app_defaults.env upload: {defaults_path} not found.")
+            return
+        with open(defaults_path, "rb") as handle:
+            body = handle.read()
+
+    s3_client.put_object(Bucket=log_bucket, Key=defaults_key, Body=body)
+    print(f"Uploaded app_defaults.env to s3://{log_bucket}/{defaults_key}")
 
 
 def print_headless_deployment_next_steps(
@@ -1261,8 +1309,14 @@ def print_headless_deployment_next_steps(
     """Print user-facing next steps after headless deploy + quickstart."""
     aws_region = region or values.get("AWS_REGION") or AWS_REGION
     output_bucket = (values.get("S3_OUTPUT_BUCKET_NAME") or "").strip()
+    log_bucket = (values.get("S3_LOG_CONFIG_BUCKET_NAME") or "").strip()
     input_prefix = (values.get("S3_BATCH_INPUT_PREFIX") or "input/").strip("/")
     config_prefix = (values.get("S3_BATCH_ENV_PREFIX") or "input/config/").strip("/")
+    defaults_key = (
+        (values.get("S3_BATCH_DEFAULT_PARAMS_KEY") or "general-config/app_defaults.env")
+        .strip()
+        .lstrip("/")
+    )
 
     lambda_name = (values.get("S3_BATCH_LAMBDA_FUNCTION_NAME") or "").strip()
     if not lambda_name:
@@ -1288,6 +1342,11 @@ def print_headless_deployment_next_steps(
         if output_bucket
         else "<output-bucket>/output/<session-folder>/"
     )
+    defaults_uri = (
+        f"s3://{log_bucket}/{defaults_key}"
+        if log_bucket
+        else f"<log-bucket>/{defaults_key}"
+    )
     example_name = "example_headless_env_file.env"
 
     print("\nDone. Next steps:")
@@ -1304,6 +1363,10 @@ def print_headless_deployment_next_steps(
         "tools/config.py and cli_topics.py."
     )
     print(f"  - Upload your job .env file to {config_uri}")
+    print(
+        f"  - Durable batch defaults (app_defaults.env) live at {defaults_uri} "
+        "on the log/config bucket (not deleted by the output bucket lifecycle rule)."
+    )
     print(
         f"  - AWS Lambda function {lambda_name} will start an ECS task to run "
         "topic modelling according to your job .env (RUN_DIRECT_MODE=1)."

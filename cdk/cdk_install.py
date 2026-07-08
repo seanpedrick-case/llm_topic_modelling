@@ -39,6 +39,17 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc --yes \\
         --headless-output-notifications \\
         --headless-notify-email analyst@example.com
+
+    # Enable Bedrock model invocation logging (S3 log bucket + CloudWatch)
+    python cdk_install.py --profile headless --vpc-name my-vpc --yes \\
+        --bedrock-model-invocation-logging
+
+    # Prefer Resource Groups + tags; leave AppRegistry off (default)
+    python cdk_install.py --profile production --vpc-name my-vpc --yes \\
+        --application-resource-group --application-name my-prefix-llm-topic-modeller
+
+    # Opt in to legacy AppRegistry / myApplications (existing customers only)
+    python cdk_install.py --profile demo --vpc-name my-vpc --yes --appregistry
 """
 
 from __future__ import annotations
@@ -82,7 +93,8 @@ DEMO_PRESET: Dict[str, str] = {
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "True",
+    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPLICATION_RESOURCE_GROUP": "True",
     "ACM_SSL_CERTIFICATE_ARN": "",
     "SSL_CERTIFICATE_DOMAIN": "",
 }
@@ -92,7 +104,8 @@ PRODUCTION_PRESET: Dict[str, str] = {
     "USE_CLOUDFRONT": "True",
     "RUN_USEAST_STACK": "True",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "True",
-    "ENABLE_APPREGISTRY": "True",
+    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPLICATION_RESOURCE_GROUP": "True",
 }
 
 HEADLESS_PRESET: Dict[str, str] = {
@@ -101,7 +114,8 @@ HEADLESS_PRESET: Dict[str, str] = {
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "True",
+    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPLICATION_RESOURCE_GROUP": "True",
     "ENABLE_HEADLESS_DEPLOYMENT": "True",
     "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
     "COGNITO_AUTH": "False",
@@ -1275,6 +1289,14 @@ class InstallAnswers:
     dynamo_export_schedule_days: str = "daily"
     dynamo_export_s3_key: str = ""
     dynamo_export_date_attribute: str = "timestamp"
+    enable_bedrock_model_invocation_logging: bool = False
+    bedrock_invocation_s3_prefix: str = "bedrock-logs"
+    bedrock_invocation_log_group_name: str = ""
+    bedrock_invocation_log_retention_days: str = "90"
+    enable_appregistry: bool = False
+    enable_application_resource_group: bool = True
+    application_name: str = ""
+    application_tag_key: str = "Application"
     ecs_memory: str = "8192"
     pi_alb_routing: str = "path"
     pi_alb_path_prefix: str = "/agent"
@@ -1926,6 +1948,170 @@ def prompt_dynamo_usage_log_export_options(
             answers.dynamo_export_date_attribute = raw.strip()
 
 
+def default_bedrock_invocation_log_group_name(cdk_prefix: str) -> str:
+    """Default CloudWatch log group for Bedrock model invocation logging."""
+    prefix = (cdk_prefix or "").strip()
+    return f"/aws/bedrock/{prefix}model-invocations".rstrip("/")
+
+
+def prompt_bedrock_model_invocation_logging_options(
+    answers: "InstallAnswers",
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    """
+    Configure account/Region Bedrock model invocation logging to S3 + CloudWatch.
+
+    Writes ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING and related keys into cdk_config.env.
+    """
+    if getattr(args, "bedrock_model_invocation_logging", False):
+        answers.enable_bedrock_model_invocation_logging = True
+    elif getattr(args, "no_bedrock_model_invocation_logging", False):
+        answers.enable_bedrock_model_invocation_logging = False
+    elif interactive:
+        default_on = answers_use_headless(answers)
+        answers.enable_bedrock_model_invocation_logging = ask_yes_no(
+            "Enable Amazon Bedrock model invocation logging "
+            "(S3 log bucket + CloudWatch; account/Region-level setting)?",
+            default=default_on,
+        )
+    else:
+        return
+
+    if not answers.enable_bedrock_model_invocation_logging:
+        return
+
+    default_prefix = answers.bedrock_invocation_s3_prefix or "bedrock-logs"
+    if getattr(args, "bedrock_invocation_s3_prefix", "").strip():
+        answers.bedrock_invocation_s3_prefix = (
+            args.bedrock_invocation_s3_prefix.strip().strip("/")
+        )
+    elif interactive:
+        answers.bedrock_invocation_s3_prefix = (
+            ask(
+                "S3 key prefix for Bedrock invocation logs (on the log/config bucket)",
+                default_prefix,
+            )
+            .strip()
+            .strip("/")
+            or default_prefix
+        )
+    else:
+        answers.bedrock_invocation_s3_prefix = default_prefix
+
+    default_log_group = (
+        answers.bedrock_invocation_log_group_name.strip()
+        or default_bedrock_invocation_log_group_name(answers.cdk_prefix)
+    )
+    if getattr(args, "bedrock_invocation_log_group", "").strip():
+        answers.bedrock_invocation_log_group_name = (
+            args.bedrock_invocation_log_group.strip()
+        )
+    elif interactive:
+        answers.bedrock_invocation_log_group_name = (
+            ask(
+                "CloudWatch log group for Bedrock invocation logs", default_log_group
+            ).strip()
+            or default_log_group
+        )
+    else:
+        answers.bedrock_invocation_log_group_name = default_log_group
+
+    default_retention = answers.bedrock_invocation_log_retention_days or "90"
+    if getattr(args, "bedrock_invocation_log_retention_days", None) is not None:
+        answers.bedrock_invocation_log_retention_days = str(
+            args.bedrock_invocation_log_retention_days
+        ).strip()
+    elif interactive:
+        while True:
+            raw = ask(
+                "CloudWatch log retention (days)",
+                default_retention,
+            ).strip()
+            try:
+                days = int(raw)
+                if days <= 0:
+                    raise ValueError
+                answers.bedrock_invocation_log_retention_days = str(days)
+                break
+            except ValueError:
+                print("Enter a positive whole number of days (e.g. 90).")
+    else:
+        answers.bedrock_invocation_log_retention_days = default_retention
+
+
+def default_application_name(cdk_prefix: str) -> str:
+    """Default Application tag value / Resource Group identity from CDK_PREFIX."""
+    return f"{(cdk_prefix or '').strip()}llm-topic-modeller"
+
+
+def prompt_application_tagging_and_appregistry_options(
+    answers: "InstallAnswers",
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    """
+    Configure application tags / Resource Groups (preferred) and legacy AppRegistry.
+
+    AppRegistry / myApplications closes to new customers after 30 Jul 2026.
+    """
+    if getattr(args, "appregistry", False):
+        answers.enable_appregistry = True
+    elif getattr(args, "no_appregistry", False):
+        answers.enable_appregistry = False
+    elif interactive:
+        answers.enable_appregistry = ask_yes_no(
+            "Enable legacy AppRegistry / myApplications stack "
+            "(opt-in; new customers cut off after 30 Jul 2026)?",
+            default=False,
+        )
+    # else: keep InstallAnswers default (False)
+
+    if getattr(args, "application_resource_group", False):
+        answers.enable_application_resource_group = True
+    elif getattr(args, "no_application_resource_group", False):
+        answers.enable_application_resource_group = False
+    elif interactive:
+        answers.enable_application_resource_group = ask_yes_no(
+            "Tag all CDK-managed resources and create a Resource Group for this app "
+            "(recommended for monitoring without AppRegistry)?",
+            default=True,
+        )
+    # else: keep default True
+
+    if not answers.enable_application_resource_group:
+        return
+
+    default_tag_key = (answers.application_tag_key or "Application").strip() or (
+        "Application"
+    )
+    if getattr(args, "application_tag_key", "").strip():
+        answers.application_tag_key = args.application_tag_key.strip()
+    elif interactive:
+        answers.application_tag_key = (
+            ask("Application tag key", default_tag_key).strip() or default_tag_key
+        )
+    else:
+        answers.application_tag_key = default_tag_key
+
+    default_name = answers.application_name.strip() or default_application_name(
+        answers.cdk_prefix
+    )
+    if getattr(args, "application_name", "").strip():
+        answers.application_name = args.application_name.strip()
+    elif interactive:
+        answers.application_name = (
+            ask(
+                "Application name (tag value / Resource Group filter)", default_name
+            ).strip()
+            or default_name
+        )
+    else:
+        answers.application_name = default_name
+
+
 def validate_install_answers(answers: "InstallAnswers") -> List[str]:
     errors: List[str] = []
     msg = headless_profile_error(answers)
@@ -1951,6 +2137,38 @@ def validate_install_answers(answers: "InstallAnswers") -> List[str]:
             )
         if not (answers.dynamo_export_s3_key.strip() or default_dynamo_export_s3_key()):
             errors.append("DynamoDB export S3 object key is required.")
+    if answers.enable_bedrock_model_invocation_logging:
+        if not (answers.bedrock_invocation_s3_prefix or "").strip():
+            errors.append(
+                "Bedrock model invocation logging requires an S3 key prefix "
+                "(bedrock_invocation_s3_prefix)."
+            )
+        log_group = (answers.bedrock_invocation_log_group_name or "").strip()
+        if not log_group:
+            errors.append(
+                "Bedrock model invocation logging requires a CloudWatch log group name."
+            )
+        try:
+            retention = int(
+                (answers.bedrock_invocation_log_retention_days or "90").strip()
+            )
+            if retention <= 0:
+                raise ValueError
+        except ValueError:
+            errors.append(
+                "Bedrock invocation log retention days must be a positive integer."
+            )
+    if answers.enable_application_resource_group:
+        app_name = answers.application_name.strip() or default_application_name(
+            answers.cdk_prefix
+        )
+        if not app_name:
+            errors.append(
+                "Application Resource Group requires an application name "
+                "(APPLICATION_NAME)."
+            )
+        if not (answers.application_tag_key or "").strip():
+            errors.append("Application Resource Group requires an application tag key.")
     return errors
 
 
@@ -2068,6 +2286,44 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             }
         )
 
+    if answers.enable_bedrock_model_invocation_logging:
+        values.update(
+            {
+                "ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING": "True",
+                "BEDROCK_MODEL_INVOCATION_S3_PREFIX": (
+                    answers.bedrock_invocation_s3_prefix.strip().strip("/")
+                    or "bedrock-logs"
+                ),
+                "BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME": (
+                    answers.bedrock_invocation_log_group_name.strip()
+                    or default_bedrock_invocation_log_group_name(answers.cdk_prefix)
+                ),
+                "BEDROCK_MODEL_INVOCATION_LOG_RETENTION_DAYS": (
+                    answers.bedrock_invocation_log_retention_days.strip() or "90"
+                ),
+            }
+        )
+
+    # Application tags + Resource Groups (preferred); AppRegistry is legacy opt-in.
+    # Always write tagging identity so Tags.of(app) has stable values even when
+    # Resource Group creation is disabled.
+    app_name = answers.application_name.strip() or default_application_name(
+        answers.cdk_prefix
+    )
+    tag_key = (answers.application_tag_key or "Application").strip() or "Application"
+    values["APPLICATION_NAME"] = app_name
+    values["APPLICATION_TAG_KEY"] = tag_key
+    values["APPLICATION_RESOURCE_GROUP_NAME"] = f"{app_name}-resources"
+    values["ENABLE_APPLICATION_RESOURCE_GROUP"] = (
+        "True" if answers.enable_application_resource_group else "False"
+    )
+    values["ENABLE_APPREGISTRY"] = "True" if answers.enable_appregistry else "False"
+    if answers.enable_appregistry:
+        values["APPREGISTRY_STACK_NAME"] = (
+            f"{answers.cdk_prefix}{APPREGISTRY_STACK_SUFFIX}"
+        )
+        values["APPREGISTRY_APPLICATION_NAME"] = app_name
+
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
     if answers.pi_enabled:
         values.update(
@@ -2128,11 +2384,6 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             apply_subnet_tier_env(
                 values, answers, tier="private", mode=answers.private_subnet_mode
             )
-
-    if values.get("ENABLE_APPREGISTRY") == "True":
-        values["APPREGISTRY_STACK_NAME"] = (
-            f"{answers.cdk_prefix}{APPREGISTRY_STACK_SUFFIX}"
-        )
 
     # Pi agent is not supported in llm_topic_modeller yet (stack code retained for future).
     values["ENABLE_PI_AGENT_EXPRESS_SERVICE"] = "False"
@@ -2489,6 +2740,10 @@ def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> 
         "USE_CLOUDFRONT",
         "ENABLE_HEADLESS_DEPLOYMENT",
         "ENABLE_S3_BATCH_ECS_TRIGGER",
+        "ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING",
+        "ENABLE_APPREGISTRY",
+        "ENABLE_APPLICATION_RESOURCE_GROUP",
+        "APPLICATION_NAME",
         "ENABLE_RESOURCE_DELETE_PROTECTION",
         "VPC_NAME",
         "NEW_VPC_CIDR",
@@ -3303,9 +3558,6 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.custom_overrides["ENABLE_RESOURCE_DELETE_PROTECTION"] = (
             "True" if ask_yes_no("Enable delete protection?", True) else "False"
         )
-        answers.custom_overrides["ENABLE_APPREGISTRY"] = (
-            "True" if ask_yes_no("Enable AppRegistry?", True) else "False"
-        )
         if getattr(args, "headless", False):
             if answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") == "True":
                 raise SystemExit(
@@ -3577,6 +3829,12 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             answers.ecs_memory = mem
 
     prompt_dynamo_usage_log_export_options(answers, args, interactive=interactive)
+    prompt_bedrock_model_invocation_logging_options(
+        answers, args, interactive=interactive
+    )
+    prompt_application_tagging_and_appregistry_options(
+        answers, args, interactive=interactive
+    )
 
     configure_app_config_options(answers, args, interactive=interactive)
 
@@ -3723,6 +3981,72 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dynamo-export-date-attribute",
         help="DynamoDB attribute used for date filtering (default: timestamp)",
+    )
+    p.add_argument(
+        "--bedrock-model-invocation-logging",
+        action="store_true",
+        help=(
+            "Enable Bedrock model invocation logging to the S3 log/config bucket "
+            "and CloudWatch Logs (account/Region-level)"
+        ),
+    )
+    p.add_argument(
+        "--no-bedrock-model-invocation-logging",
+        action="store_true",
+        help="Disable Bedrock model invocation logging in interactive installs",
+    )
+    p.add_argument(
+        "--bedrock-invocation-s3-prefix",
+        default="",
+        help="S3 key prefix for Bedrock invocation logs (default: bedrock-logs)",
+    )
+    p.add_argument(
+        "--bedrock-invocation-log-group",
+        default="",
+        help="CloudWatch log group for Bedrock invocation logs",
+    )
+    p.add_argument(
+        "--bedrock-invocation-log-retention-days",
+        type=int,
+        default=None,
+        metavar="DAYS",
+        help="CloudWatch retention for Bedrock invocation logs (default: 90)",
+    )
+    p.add_argument(
+        "--appregistry",
+        action="store_true",
+        help=(
+            "Enable legacy AppRegistry / myApplications stack "
+            "(opt-in; new customers cut off after 30 Jul 2026)"
+        ),
+    )
+    p.add_argument(
+        "--no-appregistry",
+        action="store_true",
+        help="Disable AppRegistry (default)",
+    )
+    p.add_argument(
+        "--application-resource-group",
+        action="store_true",
+        help=(
+            "Tag CDK-managed resources and create a tag-based AWS Resource Group "
+            "(default on)"
+        ),
+    )
+    p.add_argument(
+        "--no-application-resource-group",
+        action="store_true",
+        help="Disable application Resource Group creation",
+    )
+    p.add_argument(
+        "--application-name",
+        default="",
+        help="Application tag value / Resource Group filter (default: {CDK_PREFIX}llm-topic-modeller)",
+    )
+    p.add_argument(
+        "--application-tag-key",
+        default="",
+        help="Application tag key applied to CDK-managed resources (default: Application)",
     )
     p.add_argument(
         "--create-headless-output-access-key",

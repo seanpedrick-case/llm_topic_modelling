@@ -24,34 +24,29 @@ def test_assign_public_ip_reads_env(monkeypatch):
 
 
 def test_build_environment_merges_job_and_default_env(monkeypatch):
+    get_object_buckets = []
+
     mod = _load_lambda_module("batch_lambda_merge")
+
+    def fake_get_object(*, Bucket, Key):
+        get_object_buckets.append((Bucket, Key))
+        body = (
+            b"RUN_DIRECT_MODE=1\n" b"DIRECT_MODE_INPUT_FILE=job.xlsx\n"
+            if Key.endswith("job.env")
+            else b"RUN_AWS_FUNCTIONS=1\n"
+        )
+        return {
+            "Body": type(
+                "Body",
+                (),
+                {"read": staticmethod(lambda: body)},
+            )()
+        }
+
     monkeypatch.setattr(
         mod,
         "s3",
-        type(
-            "S3",
-            (),
-            {
-                "get_object": staticmethod(
-                    lambda Bucket, Key: {
-                        "Body": type(
-                            "Body",
-                            (),
-                            {
-                                "read": staticmethod(
-                                    lambda: (
-                                        b"RUN_DIRECT_MODE=1\n"
-                                        b"DIRECT_MODE_INPUT_FILE=job.xlsx\n"
-                                        if Key.endswith("job.env")
-                                        else b"RUN_AWS_FUNCTIONS=1\n"
-                                    )
-                                )
-                            },
-                        )()
-                    }
-                ),
-            },
-        )(),
+        type("S3", (), {"get_object": staticmethod(fake_get_object)})(),
     )
     monkeypatch.setattr(
         mod,
@@ -64,6 +59,7 @@ def test_build_environment_merges_job_and_default_env(monkeypatch):
     )
 
     mod.BUCKET = "output-bucket"
+    mod.LOG_BUCKET = "log-config-bucket"
     mod.INPUT_PREFIX = "input/"
     mod.ENV_PREFIX = "input/config/"
     mod.ENV_SUFFIX = ".env"
@@ -87,3 +83,15 @@ def test_build_environment_merges_job_and_default_env(monkeypatch):
     result = mod.lambda_handler(event, None)
     assert result["runs"]
     assert result["runs"][0]["envCount"] >= 2
+    assert (
+        "log-config-bucket",
+        "general-config/app_defaults.env",
+    ) in get_object_buckets
+    assert ("output-bucket", "input/config/job.env") in get_object_buckets
+
+
+def test_log_bucket_falls_back_to_bucket_when_unset(monkeypatch):
+    monkeypatch.delenv("LOG_BUCKET", raising=False)
+    monkeypatch.setenv("BUCKET", "only-output-bucket")
+    mod = _load_lambda_module("batch_lambda_log_fallback")
+    assert mod.LOG_BUCKET == "only-output-bucket"

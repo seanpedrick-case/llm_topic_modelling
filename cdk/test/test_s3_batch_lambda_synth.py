@@ -102,6 +102,21 @@ def test_s3_batch_lambda_synth_resources():
     env_vars = batch_lambda["Properties"]["Environment"]["Variables"]
     assert env_vars.get("DEFAULT_TASK_TYPE") == "extract"
     assert env_vars.get("BUCKET")
+    assert env_vars.get("LOG_BUCKET")
     assert "RUN_DIRECT_MODE" not in env_vars
     assert env_vars.get("ENV_PREFIX") == "input/config/"
     assert env_vars.get("ECS_ASSIGN_PUBLIC_IP") == "DISABLED"
+
+    # BUCKET is the output bucket; LOG_BUCKET is the separate config/log bucket.
+    output_bucket_logical = next(
+        name
+        for name, r in resources.items()
+        if r["Type"] == "AWS::S3::Bucket" and "OutputBucket" in name
+    )
+    config_bucket_logical = next(
+        name
+        for name, r in resources.items()
+        if r["Type"] == "AWS::S3::Bucket" and "ConfigBucket" in name
+    )
+    assert env_vars["BUCKET"] == {"Ref": output_bucket_logical}
+    assert env_vars["LOG_BUCKET"] == {"Ref": config_bucket_logical}

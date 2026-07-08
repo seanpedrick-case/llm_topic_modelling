@@ -88,9 +88,42 @@ def test_build_env_values_demo():
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
     assert values["USE_CLOUDFRONT"] == "False"
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
+    assert values["ENABLE_APPREGISTRY"] == "False"
+    assert values["ENABLE_APPLICATION_RESOURCE_GROUP"] == "True"
+    assert values["APPLICATION_TAG_KEY"] == "Application"
+    assert values["APPLICATION_NAME"].endswith("llm-topic-modeller")
+    assert values["APPLICATION_RESOURCE_GROUP_NAME"].endswith(
+        "llm-topic-modeller-resources"
+    )
     assert values["VPC_NAME"] == "test-vpc"
     assert values["CONTEXT_FILE"] == "precheck.context.json"
     assert values["CDK_FOLDER"].endswith("/cdk/")
+
+
+def test_build_env_values_appregistry_opt_in():
+    answers = _demo_answers()
+    answers.enable_appregistry = True
+    answers.application_name = "demo-llm-topic-modeller"
+    values = inst.build_env_values(answers)
+    assert values["ENABLE_APPREGISTRY"] == "True"
+    assert values["APPREGISTRY_STACK_NAME"].endswith("AppRegistryStack")
+    assert values["APPREGISTRY_APPLICATION_NAME"] == "demo-llm-topic-modeller"
+
+
+def test_build_env_values_disable_application_resource_group():
+    answers = _headless_answers()
+    answers.enable_application_resource_group = False
+    values = inst.build_env_values(answers)
+    assert values["ENABLE_APPLICATION_RESOURCE_GROUP"] == "False"
+    assert values["APPLICATION_NAME"]
+    assert values["ENABLE_APPREGISTRY"] == "False"
+
+
+def test_default_application_name():
+    assert (
+        inst.default_application_name("Demo-Summarisation-")
+        == "Demo-Summarisation-llm-topic-modeller"
+    )
 
 
 def test_build_env_values_production():
@@ -101,7 +134,10 @@ def test_build_env_values_production():
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "True"
     assert values["ACM_SSL_CERTIFICATE_ARN"].startswith("arn:aws:acm:")
     assert values["SSL_CERTIFICATE_DOMAIN"] == "summarisation.example.com"
-    assert values["APPREGISTRY_STACK_NAME"] == "Test-Summarisation-AppRegistryStack"
+    assert values["ENABLE_APPREGISTRY"] == "False"
+    assert "APPREGISTRY_STACK_NAME" not in values
+    assert values["ENABLE_APPLICATION_RESOURCE_GROUP"] == "True"
+    assert values["APPLICATION_NAME"] == "Test-Summarisation-llm-topic-modeller"
 
 
 def test_build_env_values_uses_custom_s3_bucket_names():
@@ -226,6 +262,41 @@ def test_build_env_values_headless():
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
     assert values["S3_LOG_CONFIG_BUCKET_NAME"] == "headless-summarisation-s3-logs"
     assert values["S3_OUTPUT_BUCKET_NAME"] == "headless-summarisation-s3-output"
+    assert "ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING" not in values
+
+
+def test_build_env_values_bedrock_model_invocation_logging():
+    answers = _headless_answers()
+    answers.enable_bedrock_model_invocation_logging = True
+    answers.bedrock_invocation_s3_prefix = "bedrock-logs"
+    answers.bedrock_invocation_log_group_name = (
+        "/aws/bedrock/headless-model-invocations"
+    )
+    answers.bedrock_invocation_log_retention_days = "30"
+    values = inst.build_env_values(answers)
+    assert values["ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING"] == "True"
+    assert values["BEDROCK_MODEL_INVOCATION_S3_PREFIX"] == "bedrock-logs"
+    assert (
+        values["BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME"]
+        == "/aws/bedrock/headless-model-invocations"
+    )
+    assert values["BEDROCK_MODEL_INVOCATION_LOG_RETENTION_DAYS"] == "30"
+
+
+def test_validate_install_answers_bedrock_logging_requires_prefix():
+    answers = _headless_answers()
+    answers.enable_bedrock_model_invocation_logging = True
+    answers.bedrock_invocation_s3_prefix = ""
+    answers.bedrock_invocation_log_group_name = "/aws/bedrock/test"
+    errors = inst.validate_install_answers(answers)
+    assert any("S3 key prefix" in err for err in errors)
+
+
+def test_default_bedrock_invocation_log_group_name():
+    assert (
+        inst.default_bedrock_invocation_log_group_name("Headless-Summarisation-")
+        == "/aws/bedrock/Headless-Summarisation-model-invocations"
+    )
 
 
 def test_validate_env_values_rejects_bare_s3_bucket_names():

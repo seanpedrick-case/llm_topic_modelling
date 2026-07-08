@@ -122,10 +122,30 @@ ENABLE_RESOURCE_DELETE_PROTECTION = get_or_create_env_var(
     "ENABLE_RESOURCE_DELETE_PROTECTION", "True"
 )
 
-# AWS Console myApplications (Service Catalog AppRegistry)
-ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "True")
+# Application tagging + Resource Groups (preferred monitoring model).
+# AppRegistry / myApplications closes to new customers after 30 Jul 2026;
+# use these tags and a tag-based Resource Group instead.
+APPLICATION_TAG_KEY = get_or_create_env_var("APPLICATION_TAG_KEY", "Application")
+APPLICATION_NAME = get_or_create_env_var(
+    "APPLICATION_NAME", f"{CDK_PREFIX}llm-topic-modeller"
+)
+APPLICATION_REPOSITORY_URL = get_or_create_env_var(
+    "APPLICATION_REPOSITORY_URL",
+    "https://github.com/seanpedrick-case/llm_topic_modeller.git",
+)
+ENABLE_APPLICATION_RESOURCE_GROUP = get_or_create_env_var(
+    "ENABLE_APPLICATION_RESOURCE_GROUP", "True"
+)
+APPLICATION_RESOURCE_GROUP_NAME = get_or_create_env_var(
+    "APPLICATION_RESOURCE_GROUP_NAME", f"{APPLICATION_NAME}-resources"
+)
+
+# Legacy AWS Console myApplications (Service Catalog AppRegistry) — opt-in only.
+# New AppRegistry customers cannot sign up after 30 Jul 2026; existing customers
+# may keep using it. Prefer APPLICATION_* tags + Resource Groups above.
+ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "False")
 APPREGISTRY_APPLICATION_NAME = get_or_create_env_var(
-    "APPREGISTRY_APPLICATION_NAME", f"{CDK_PREFIX}llm-topic-modeller"
+    "APPREGISTRY_APPLICATION_NAME", APPLICATION_NAME
 )
 APPREGISTRY_DESCRIPTION = get_or_create_env_var(
     "APPREGISTRY_DESCRIPTION",
@@ -140,7 +160,7 @@ APPREGISTRY_ATTRIBUTE_GROUP_NAME = get_or_create_env_var(
 )
 APPREGISTRY_REPOSITORY_URL = get_or_create_env_var(
     "APPREGISTRY_REPOSITORY_URL",
-    "https://github.com/seanpedrick-case/llm_topic_modeller.git",
+    APPLICATION_REPOSITORY_URL,
 )
 
 _precheck_context_file = get_or_create_env_var("CONTEXT_FILE", "precheck.context.json")
@@ -670,6 +690,8 @@ S3_BATCH_ENV_PREFIX = get_or_create_env_var("S3_BATCH_ENV_PREFIX", "input/config
 S3_BATCH_ENV_SUFFIX = get_or_create_env_var("S3_BATCH_ENV_SUFFIX", ".env")
 S3_BATCH_INPUT_PREFIX = get_or_create_env_var("S3_BATCH_INPUT_PREFIX", "input/")
 S3_BATCH_CONFIG_PREFIX = get_or_create_env_var("S3_BATCH_CONFIG_PREFIX", "")
+# Durable batch defaults live on the log/config bucket (S3_LOG_CONFIG_BUCKET_NAME),
+# not the output bucket, which has an object-expiration lifecycle rule.
 S3_BATCH_GENERAL_ENV_PREFIX = get_or_create_env_var(
     "S3_BATCH_GENERAL_ENV_PREFIX", "general-config/"
 )
@@ -699,6 +721,34 @@ if ENABLE_HEADLESS_DEPLOYMENT == "True":
         raise ValueError(
             "ENABLE_HEADLESS_DEPLOYMENT=True is incompatible with USE_CLOUDFRONT=True."
         )
+
+# Account-level Bedrock model invocation logging (S3 + CloudWatch) for this Region.
+# Uses a CDK custom resource (no CloudFormation L1 for PutModelInvocationLoggingConfiguration).
+ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING = get_or_create_env_var(
+    "ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING", "False"
+)
+BEDROCK_MODEL_INVOCATION_S3_PREFIX = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_S3_PREFIX", "bedrock-logs"
+)
+BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME",
+    f"/aws/bedrock/{CDK_PREFIX}model-invocations".rstrip("/"),
+)
+BEDROCK_MODEL_INVOCATION_LOG_RETENTION_DAYS = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_LOG_RETENTION_DAYS", "90"
+)
+BEDROCK_MODEL_INVOCATION_TEXT_ENABLED = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_TEXT_ENABLED", "True"
+)
+BEDROCK_MODEL_INVOCATION_IMAGE_ENABLED = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_IMAGE_ENABLED", "True"
+)
+BEDROCK_MODEL_INVOCATION_EMBEDDING_ENABLED = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_EMBEDDING_ENABLED", "True"
+)
+BEDROCK_MODEL_INVOCATION_VIDEO_ENABLED = get_or_create_env_var(
+    "BEDROCK_MODEL_INVOCATION_VIDEO_ENABLED", "True"
+)
 
 # Optional headless follow-on: S3 output PutRequests alarm -> SNS email + IAM user for downloads.
 ENABLE_HEADLESS_OUTPUT_NOTIFICATIONS = get_or_create_env_var(

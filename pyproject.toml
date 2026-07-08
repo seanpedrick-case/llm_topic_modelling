@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.13.0"
+version = "0.14.0"
 description = "Generate thematic summaries from open text in tabular data files with a large language model."
 requires-python = ">=3.10"
 readme = "README.md"
@@ -14,6 +14,7 @@ authors = [
 maintainers = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]
+license = "MIT"
 keywords = [
     "topic-modelling",
     "topic-modeling",
