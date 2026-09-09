@@ -4,7 +4,7 @@ transformers<=5.30.0
 spaces
 boto3<=1.43.90
 pandas<=3.0.5
-pyarrow<=23.0.1
+pyarrow<=25.0.1
 openpyxl<=3.1.5
 pyexcel<=0.7.4
 markdown<=3.10.2
@@ -18,13 +18,13 @@ rapidfuzz<=3.14.5
 python-dotenv<=1.2.2
 # GPU (for huggingface instance)
 # Torch/Unsloth and llama-cpp-python
-# Latest compatible with CUDA 12.4
+# Latest compatible with CUDA 12.8
 torch<=2.14.0 --extra-index-url https://download.pytorch.org/whl/cu128
 unsloth<=2026.9.4
 unsloth_zoo<=2026.9.4
 timm
-# llama-cpp-python direct wheel link for GPU compatible version 3.35 for use with Python 3.10 and Hugging Face
-https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35-cu130/llama_cpp_python-0.3.35-py3-none-manylinux_2_35_x86_64.whl
+# llama-cpp-python direct wheel link for GPU compatible version for use with Python 3.10 and Hugging Face
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.31-cu130/llama_cpp_python-0.3.31-py3-none-manylinux_2_35_x86_64.whl
 
 
 
