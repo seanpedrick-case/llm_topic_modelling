@@ -82,8 +82,8 @@ torch = [
     "torchvision",
     "accelerate",
     "bitsandbytes",
-    "unsloth<=2026.6.9",
-    "unsloth_zoo<=2026.6.9",
+    "unsloth<=2026.9.4",
+    "unsloth_zoo<=2026.9.4",
     "timm",
     "xformers"
 ]

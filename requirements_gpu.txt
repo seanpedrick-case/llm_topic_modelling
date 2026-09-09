@@ -18,12 +18,12 @@ python-dotenv<=1.2.2
 # Torch/Unsloth
 # Latest compatible with CUDA 12.4
 torch<=2.14.0 --extra-index-url https://download.pytorch.org/whl/cu128
-unsloth[cu128-torch290]<=2026.6.9 # Refer here for more details on installation: https://pypi.org/project/unsloth
-unsloth_zoo<=2026.6.9
+unsloth[cu128-torch290]<=2026.9.4 # Refer here for more details on installation: https://pypi.org/project/unsloth
+unsloth_zoo<=2026.9.4
 # Additional for Windows and CUDA 12.4 older GPUS (RTX 3x or similar):
 #triton-windows<3.3
 timm
 # Llama CPP Python
 llama-cpp-python>=0.3.35 -C cmake.args="-DGGML_CUDA=on"
-#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.31-cu125/llama_cpp_python-0.3.35-py3-none-manylinux_2_35_x86_64.whl
+#https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35-cu130/llama_cpp_python-0.3.35-py3-none-manylinux_2_35_x86_64.whl
 # Try other options at https://github.com/abetlen/llama-cpp-python/releases if the above doesn't work
