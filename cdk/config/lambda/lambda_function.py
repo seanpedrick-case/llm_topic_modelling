@@ -8,6 +8,9 @@ s3 = boto3.client("s3")
 
 # Move static config to Lambda env vars for easier ops
 BUCKET = os.environ.get("BUCKET", "lambeth-llm-topic-modelling")
+# Durable config (app_defaults.env) lives on the log/config bucket so it is not
+# deleted by the output bucket object-expiration lifecycle rule.
+LOG_BUCKET = os.environ.get("LOG_BUCKET") or BUCKET
 INPUT_PREFIX = os.environ.get("INPUT_PREFIX", "input/")
 ENV_PREFIX = os.environ.get("ENV_PREFIX", f"{INPUT_PREFIX}config/")
 GENERAL_ENV_PREFIX = os.environ.get("GENERAL_ENV_PREFIX", "general-config/")
@@ -103,12 +106,14 @@ def _build_environment_array(*env_dicts):
 def lambda_handler(event, context):
     runs = []
 
-    # Parse default env file with default config
-    # Fetch the default .env file content from S3
-    default_obj = s3.get_object(Bucket=BUCKET, Key=DEFAULT_PARAMS_KEY)
+    # Parse default env file with default config.
+    # Read from LOG_BUCKET (log/config bucket) so app_defaults.env survives
+    # output-bucket lifecycle expiration.
+    print(f"Loading default params from s3://{LOG_BUCKET}/{DEFAULT_PARAMS_KEY}")
+    default_obj = s3.get_object(Bucket=LOG_BUCKET, Key=DEFAULT_PARAMS_KEY)
     default_dotenv_bytes = default_obj["Body"].read()
 
-    # Parse .env → dict of env vars
+    # Parse .env → dict of env vars (input paths still resolve against output BUCKET)
     default_file_env = _parse_dotenv(default_dotenv_bytes, BUCKET, INPUT_PREFIX)
 
     for record in event.get("Records", []):

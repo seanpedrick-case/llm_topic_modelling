@@ -1,4 +1,9 @@
-"""AWS Console myApplications (Service Catalog AppRegistry) integration."""
+"""Legacy AWS Console myApplications (Service Catalog AppRegistry) integration.
+
+Opt-in only (ENABLE_APPREGISTRY=True). Preferred monitoring uses application tags
+and AWS Resource Groups (see cdk_application_tags.py). AppRegistry closes to new
+customers after 30 July 2026.
+"""
 
 from aws_cdk import App, Environment
 from aws_cdk.aws_servicecatalogappregistry_alpha import (

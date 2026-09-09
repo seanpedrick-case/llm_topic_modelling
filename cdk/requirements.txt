@@ -1,4 +1,6 @@
 aws-cdk-lib==2.257.0
+# Optional: only needed when ENABLE_APPREGISTRY=True (legacy myApplications; new-
+# customer cut-off 30 Jul 2026). Can be removed once the AppRegistry path is retired.
 aws-cdk.aws-servicecatalogappregistry-alpha~=2.257.0a0
 boto3
 pandas

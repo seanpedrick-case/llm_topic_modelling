@@ -356,8 +356,10 @@ def test_print_headless_deployment_next_steps(capsys):
         {
             "AWS_REGION": "eu-west-2",
             "S3_OUTPUT_BUCKET_NAME": "my-output-bucket",
+            "S3_LOG_CONFIG_BUCKET_NAME": "my-log-bucket",
             "S3_BATCH_INPUT_PREFIX": "input/",
             "S3_BATCH_ENV_PREFIX": "input/config/",
+            "S3_BATCH_DEFAULT_PARAMS_KEY": "general-config/app_defaults.env",
             "S3_BATCH_LAMBDA_FUNCTION_NAME": "Headless-Summarisation-S3BatchEcsTrigger",
             "ECS_LOG_GROUP_NAME": "/ecs/headless-summarisation-ecsservice-logs",
         }
@@ -371,6 +373,7 @@ def test_print_headless_deployment_next_steps(capsys):
     assert "s3://my-output-bucket/input/config/" in out
     assert "Headless-Summarisation-S3BatchEcsTrigger" in out
     assert "s3://my-output-bucket/output/<session-folder>/" in out
+    assert "s3://my-log-bucket/general-config/app_defaults.env" in out
     assert "tools/config.py" in out
 
 
@@ -379,6 +382,8 @@ def test_seed_headless_batch_s3_layout_creates_prefixes(tmp_path):
 
     example = tmp_path / "example_headless_env_file.env"
     example.write_text("DIRECT_MODE_TASK=redact\n", encoding="utf-8")
+    defaults = tmp_path / "app_defaults.env"
+    defaults.write_text("RUN_DIRECT_MODE=1\nS3_OUTPUTS_BUCKET=\n", encoding="utf-8")
 
     missing = ClientError(
         {"Error": {"Code": "404", "Message": "Not Found"}},
@@ -391,12 +396,16 @@ def test_seed_headless_batch_s3_layout_creates_prefixes(tmp_path):
         post.seed_headless_batch_s3_layout(
             "my-bucket",
             example_env_local_path=str(example),
+            log_bucket="my-log-bucket",
+            app_defaults_local_path=str(defaults),
+            s3_outputs_bucket_name="my-bucket",
             aws_region="eu-west-2",
         )
 
     put_calls = s3.put_object.call_args_list
-    assert len(put_calls) == 3
-    keys = [call.kwargs["Key"] for call in put_calls]
-    assert "input/" in keys
-    assert "input/config/" in keys
-    assert "input/config/example_headless_env_file.env" in keys
+    assert len(put_calls) == 4
+    keys_by_bucket = [(call.kwargs["Bucket"], call.kwargs["Key"]) for call in put_calls]
+    assert ("my-bucket", "input/") in keys_by_bucket
+    assert ("my-bucket", "input/config/") in keys_by_bucket
+    assert ("my-bucket", "input/config/example_headless_env_file.env") in keys_by_bucket
+    assert ("my-log-bucket", "general-config/app_defaults.env") in keys_by_bucket

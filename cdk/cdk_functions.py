@@ -24,11 +24,15 @@ from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
+from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elb
 from aws_cdk import aws_elasticloadbalancingv2_actions as elb_act
+from aws_cdk import aws_events as events
+from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_kms as kms
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
@@ -912,11 +916,76 @@ def get_secret_kms_key_arn(
     return f"arn:aws:kms:{region}:{account_id}:key/{kms_key_id}"
 
 
+ECS_TASK_ROLE_S3_ACTIONS = [
+    "s3:GetObject*",
+    "s3:GetBucket*",
+    "s3:PutObject",
+    "s3:DeleteObject",
+    "s3:List*",
+]
+
+
+def build_ecs_task_role_s3_statement(*, sid: str, bucket_name: str) -> Dict[str, Any]:
+    """Scoped S3 access for one bucket (identity policy on the ECS task role)."""
+    return {
+        "Sid": sid,
+        "Effect": "Allow",
+        "Action": list(ECS_TASK_ROLE_S3_ACTIONS),
+        "Resource": [
+            f"arn:aws:s3:::{bucket_name}",
+            f"arn:aws:s3:::{bucket_name}/*",
+        ],
+    }
+
+
+def build_ecs_task_role_inline_policy(
+    *,
+    output_bucket_name: str,
+    log_config_bucket_name: Optional[str] = None,
+    shared_kms_key_arn: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Task role inline policy: STS, scoped S3 buckets, optional shared CMK for S3."""
+    statements: List[Dict[str, Any]] = [
+        {
+            "Sid": "STSCallerIdentity",
+            "Effect": "Allow",
+            "Action": ["sts:GetCallerIdentity"],
+            "Resource": "*",
+        },
+        build_ecs_task_role_s3_statement(
+            sid="S3Output",
+            bucket_name=output_bucket_name,
+        ),
+    ]
+    if log_config_bucket_name:
+        statements.append(
+            build_ecs_task_role_s3_statement(
+                sid="S3LogConfig",
+                bucket_name=log_config_bucket_name,
+            )
+        )
+    if shared_kms_key_arn:
+        statements.append(
+            {
+                "Sid": "KMSS3Access",
+                "Effect": "Allow",
+                "Action": [
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
+                "Resource": shared_kms_key_arn,
+            }
+        )
+    return {"Version": "2012-10-17", "Statement": statements}
+
+
 def build_ecs_task_role_kms_policy(
     *,
     shared_kms_key_arn: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Task role: shared CMK for S3 bucket encryption (when USE_CUSTOM_KMS_KEY=1)."""
+    """Task role KMS-only policy (tests / legacy callers without S3 bucket names)."""
     statements: List[Dict[str, Any]] = [
         {
             "Sid": "STSCallerIdentity",
@@ -930,7 +999,12 @@ def build_ecs_task_role_kms_policy(
             {
                 "Sid": "KMSS3Access",
                 "Effect": "Allow",
-                "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
+                "Action": [
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
                 "Resource": shared_kms_key_arn,
             }
         )
@@ -3417,14 +3491,17 @@ def create_s3_batch_ecs_trigger_lambda(
             },
         )
     )
+    # Job .env uploads and inputs live on the output bucket (short retention).
     output_bucket.grant_read(lambda_role, f"{env_prefix}*")
-    if general_env_prefix:
-        output_bucket.grant_read(lambda_role, f"{general_env_prefix}*")
+    # Durable defaults (app_defaults.env) live on the log/config bucket.
     config_bucket.grant_read(lambda_role)
+    if general_env_prefix:
+        config_bucket.grant_read(lambda_role, f"{general_env_prefix}*")
     if default_params_key:
-        output_bucket.grant_read(lambda_role, default_params_key)
+        config_bucket.grant_read(lambda_role, default_params_key)
 
     bucket_name = output_bucket.bucket_name
+    log_bucket_name = config_bucket.bucket_name
     if not default_input_s3_uri:
         default_input_s3_uri = f"s3://{bucket_name}/{input_prefix.rstrip('/')}/dummy_consultation_response.xlsx"
 
@@ -3437,6 +3514,7 @@ def create_s3_batch_ecs_trigger_lambda(
         "memory_size": 256,
         "environment": {
             "BUCKET": bucket_name,
+            "LOG_BUCKET": log_bucket_name,
             "INPUT_PREFIX": input_prefix,
             "ENV_PREFIX": env_prefix,
             "GENERAL_ENV_PREFIX": general_env_prefix,
@@ -3464,6 +3542,99 @@ def create_s3_batch_ecs_trigger_lambda(
     )
 
     return batch_fn
+
+
+def create_dynamo_usage_log_export_lambda(
+    scope: Construct,
+    logical_id: str,
+    *,
+    function_name: Optional[str],
+    lambda_asset_path: str,
+    dynamodb_table: dynamodb.ITable,
+    output_bucket: s3.IBucket,
+    s3_output_key: str,
+    schedule_expression: str,
+    dynamodb_table_name: str,
+    date_attribute: str = "timestamp",
+    output_filename: str = "dynamodb_logs_export.csv",
+    shared_kms_key_arn: Optional[str] = None,
+) -> lambda_.Function:
+    """
+    Scheduled Lambda: scan usage-log DynamoDB table, export CSV, upload to S3.
+
+    Triggered by EventBridge on ``schedule_expression`` (cron or rate).
+    """
+    lambda_role = iam.Role(
+        scope,
+        f"{logical_id}Role",
+        assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+        managed_policies=[
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
+            )
+        ],
+    )
+    dynamodb_table.grant_read_data(lambda_role)
+    output_bucket.grant_put(lambda_role, s3_output_key)
+    if shared_kms_key_arn:
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey",
+                    "kms:DescribeKey",
+                ],
+                resources=[shared_kms_key_arn],
+            )
+        )
+
+    fn_kwargs: Dict[str, Any] = {
+        "runtime": lambda_.Runtime.PYTHON_3_12,
+        "handler": "lambda_function.lambda_handler",
+        "code": lambda_.Code.from_asset(lambda_asset_path),
+        "role": lambda_role,
+        "timeout": Duration.minutes(15),
+        "memory_size": 512,
+        "environment": {
+            "DYNAMODB_TABLE_NAME": dynamodb_table_name,
+            "USAGE_LOG_DYNAMODB_TABLE_NAME": dynamodb_table_name,
+            "OUTPUT_FOLDER": "/tmp",
+            "OUTPUT_FILENAME": output_filename,
+            "DATE_ATTRIBUTE": date_attribute,
+            "S3_OUTPUT_BUCKET": output_bucket.bucket_name,
+            "S3_OUTPUT_KEY": s3_output_key,
+        },
+    }
+    if function_name:
+        fn_kwargs["function_name"] = function_name
+
+    export_fn = lambda_.Function(scope, logical_id, **fn_kwargs)
+
+    events.Rule(
+        scope,
+        f"{logical_id}Schedule",
+        schedule=events.Schedule.expression(schedule_expression),
+        description=(
+            "Export DynamoDB usage logs to CSV in S3 " f"({schedule_expression})"
+        ),
+        targets=[targets.LambdaFunction(export_fn)],
+    )
+
+    CfnOutput(
+        scope,
+        f"{logical_id}LambdaArn",
+        value=export_fn.function_arn,
+        description="Lambda ARN for scheduled DynamoDB usage log export to S3",
+    )
+    CfnOutput(
+        scope,
+        f"{logical_id}S3Uri",
+        value=f"s3://{output_bucket.bucket_name}/{s3_output_key}",
+        description="S3 URI for the scheduled DynamoDB usage log CSV export",
+    )
+
+    return export_fn
 
 
 def sanitize_headless_metric_filter_id(raw: str) -> str:
@@ -3689,7 +3860,9 @@ def build_headless_app_defaults_env_content(
     Render general-config/app_defaults.env for headless batch jobs.
 
     Merges the static seed template with deployment-specific values (notably
-    ``S3_OUTPUTS_BUCKET`` from the stack output bucket).
+    ``S3_OUTPUTS_BUCKET`` from the stack output bucket). The rendered file is
+    uploaded to the log/config bucket so it is not deleted by the output
+    bucket object-expiration lifecycle rule.
     """
     template_path = os.path.join(
         seed_asset_directory, "general-config", "app_defaults.env"
@@ -3708,6 +3881,9 @@ def build_headless_app_defaults_env_content(
                     and "=" in stripped
                     and stripped.split("=", 1)[0].strip() == "S3_OUTPUTS_BUCKET"
                 ):
+                    # Keep a single S3_OUTPUTS_BUCKET entry (templates may list it twice).
+                    if wrote_outputs_bucket:
+                        continue
                     out_lines.append(f"S3_OUTPUTS_BUCKET={s3_outputs_bucket_name}")
                     wrote_outputs_bucket = True
                 else:
@@ -3725,11 +3901,19 @@ def create_headless_s3_batch_seed(
     scope: Construct,
     logical_id: str,
     *,
-    destination_bucket: s3.IBucket,
+    output_bucket: s3.IBucket,
+    log_bucket: s3.IBucket,
     seed_asset_directory: str,
     s3_outputs_bucket_name: str,
+    default_params_key: str = "general-config/app_defaults.env",
 ) -> None:
-    """Upload input/ and input/config/ markers plus example job .env to the output bucket."""
+    """
+    Seed headless batch S3 layout across two buckets:
+
+    - Output bucket: ``input/`` markers and example job ``.env`` (short retention OK).
+    - Log/config bucket: durable ``general-config/app_defaults.env`` (no object
+      expiration), so defaults survive the output bucket lifecycle rule.
+    """
     from aws_cdk import aws_s3_deployment as s3deploy
 
     app_defaults_content = build_headless_app_defaults_env_content(
@@ -3737,17 +3921,29 @@ def create_headless_s3_batch_seed(
         s3_outputs_bucket_name=s3_outputs_bucket_name,
     )
 
+    # Job inputs / example .env stay on the output bucket (triggered by Lambda).
     s3deploy.BucketDeployment(
         scope,
-        logical_id,
+        f"{logical_id}Output",
         sources=[
-            s3deploy.Source.asset(seed_asset_directory),
-            s3deploy.Source.data(
-                "general-config/app_defaults.env",
-                app_defaults_content,
+            s3deploy.Source.asset(
+                seed_asset_directory,
+                exclude=["general-config/**"],
             ),
         ],
-        destination_bucket=destination_bucket,
+        destination_bucket=output_bucket,
+        prune=False,
+    )
+
+    # Durable defaults on the log/config bucket (no object-expiration lifecycle).
+    defaults_key = (default_params_key or "general-config/app_defaults.env").lstrip("/")
+    s3deploy.BucketDeployment(
+        scope,
+        f"{logical_id}Defaults",
+        sources=[
+            s3deploy.Source.data(defaults_key, app_defaults_content),
+        ],
+        destination_bucket=log_bucket,
         prune=False,
     )
 
@@ -3790,6 +3986,298 @@ def build_pi_agent_container_environment(
 
 
 # Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/pi/start.sh.
+def _bedrock_source_arn(region: str, account: str) -> str:
+    return f"arn:aws:bedrock:{region}:{account}:*"
+
+
+def grant_bedrock_kms_generate_data_key(
+    key: kms.IKey,
+    *,
+    region: str,
+    account: str,
+) -> None:
+    """Allow Bedrock to encrypt invocation-log objects on an SSE-KMS bucket."""
+    key.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="BedrockModelInvocationLogsKms",
+            effect=iam.Effect.ALLOW,
+            principals=[iam.ServicePrincipal("bedrock.amazonaws.com")],
+            actions=["kms:GenerateDataKey*", "kms:DescribeKey"],
+            resources=["*"],
+            conditions={
+                "StringEquals": {"aws:SourceAccount": account},
+                "ArnLike": {"aws:SourceArn": _bedrock_source_arn(region, account)},
+            },
+        )
+    )
+
+
+def add_bedrock_model_invocation_s3_bucket_policy(
+    bucket: s3.IBucket,
+    *,
+    region: str,
+    account: str,
+    key_prefix: str = "bedrock-logs",
+) -> None:
+    """
+    Allow bedrock.amazonaws.com to PutObject invocation logs under the prefix.
+
+    Path shape matches AWS docs:
+    ``s3://{bucket}/{prefix}/AWSLogs/{account}/BedrockModelInvocationLogs/*``
+    Plus a slightly broader ``{prefix}/*`` grant so console validation and large
+    binary/data objects under the same prefix succeed.
+    """
+    prefix = (key_prefix or "bedrock-logs").strip().strip("/")
+    source_arn = _bedrock_source_arn(region, account)
+    common_conditions = {
+        "StringEquals": {"aws:SourceAccount": account},
+        "ArnLike": {"aws:SourceArn": source_arn},
+    }
+    # Exact AWS-documented path used by invocation logging delivery.
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="AmazonBedrockLogsWrite",
+            effect=iam.Effect.ALLOW,
+            principals=[iam.ServicePrincipal("bedrock.amazonaws.com")],
+            actions=["s3:PutObject"],
+            resources=[
+                f"{bucket.bucket_arn}/{prefix}/AWSLogs/{account}/BedrockModelInvocationLogs/*"
+            ],
+            conditions=common_conditions,
+        )
+    )
+    # Broader PutObject under the prefix (large payloads / console validation paths).
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="AmazonBedrockLogsWritePrefix",
+            effect=iam.Effect.ALLOW,
+            principals=[iam.ServicePrincipal("bedrock.amazonaws.com")],
+            actions=["s3:PutObject"],
+            resources=[f"{bucket.bucket_arn}/{prefix}/*"],
+            conditions=common_conditions,
+        )
+    )
+
+
+def create_bedrock_model_invocation_logging(
+    scope: Construct,
+    logical_id: str,
+    *,
+    log_bucket: s3.IBucket,
+    region: str,
+    account: str,
+    key_prefix: str = "bedrock-logs",
+    log_group_name: str,
+    log_retention_days: int = 90,
+    kms_key: Optional[kms.IKey] = None,
+    text_enabled: bool = True,
+    image_enabled: bool = True,
+    embedding_enabled: bool = True,
+    video_enabled: bool = True,
+) -> Dict[str, Any]:
+    """
+    Enable Bedrock account-level model invocation logging to S3 and CloudWatch.
+
+    There is no CloudFormation L1 for PutModelInvocationLoggingConfiguration, so
+    this uses AwsCustomResource. Requires bedrock.amazonaws.com PutObject on the
+    log bucket and, when the bucket uses SSE-KMS, kms:GenerateDataKey on the key.
+    """
+    prefix = (key_prefix or "bedrock-logs").strip().strip("/")
+    add_bedrock_model_invocation_s3_bucket_policy(
+        log_bucket,
+        region=region,
+        account=account,
+        key_prefix=prefix,
+    )
+    if kms_key is not None:
+        grant_bedrock_kms_generate_data_key(kms_key, region=region, account=account)
+
+    retention_by_days = {
+        1: logs.RetentionDays.ONE_DAY,
+        3: logs.RetentionDays.THREE_DAYS,
+        5: logs.RetentionDays.FIVE_DAYS,
+        7: logs.RetentionDays.ONE_WEEK,
+        14: logs.RetentionDays.TWO_WEEKS,
+        30: logs.RetentionDays.ONE_MONTH,
+        60: logs.RetentionDays.TWO_MONTHS,
+        90: logs.RetentionDays.THREE_MONTHS,
+        120: logs.RetentionDays.FOUR_MONTHS,
+        150: logs.RetentionDays.FIVE_MONTHS,
+        180: logs.RetentionDays.SIX_MONTHS,
+        365: logs.RetentionDays.ONE_YEAR,
+        400: logs.RetentionDays.THIRTEEN_MONTHS,
+        545: logs.RetentionDays.EIGHTEEN_MONTHS,
+        731: logs.RetentionDays.TWO_YEARS,
+        1096: logs.RetentionDays.THREE_YEARS,
+        1827: logs.RetentionDays.FIVE_YEARS,
+        2192: logs.RetentionDays.SIX_YEARS,
+        2557: logs.RetentionDays.SEVEN_YEARS,
+        2922: logs.RetentionDays.EIGHT_YEARS,
+        3288: logs.RetentionDays.NINE_YEARS,
+        3653: logs.RetentionDays.TEN_YEARS,
+    }
+    try:
+        retention = retention_by_days.get(
+            int(log_retention_days), logs.RetentionDays.THREE_MONTHS
+        )
+    except (TypeError, ValueError):
+        retention = logs.RetentionDays.THREE_MONTHS
+
+    log_group_kwargs: Dict[str, Any] = {
+        "log_group_name": log_group_name,
+        "retention": retention,
+        "removal_policy": RemovalPolicy.RETAIN,
+    }
+    if kms_key is not None:
+        log_group_kwargs["encryption_key"] = kms_key
+        # CloudWatch Logs needs decrypt/encrypt on the CMK for log-group encryption.
+        kms_key.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="CloudWatchLogsBedrockInvocationGroup",
+                effect=iam.Effect.ALLOW,
+                principals=[iam.ServicePrincipal(f"logs.{region}.amazonaws.com")],
+                actions=[
+                    "kms:Encrypt*",
+                    "kms:Decrypt*",
+                    "kms:ReEncrypt*",
+                    "kms:GenerateDataKey*",
+                    "kms:Describe*",
+                ],
+                resources=["*"],
+                conditions={
+                    "ArnLike": {
+                        "kms:EncryptionContext:aws:logs:arn": (
+                            f"arn:aws:logs:{region}:{account}:log-group:{log_group_name}"
+                        )
+                    }
+                },
+            )
+        )
+
+    log_group = logs.LogGroup(scope, f"{logical_id}LogGroup", **log_group_kwargs)
+
+    logging_role = iam.Role(
+        scope,
+        f"{logical_id}Role",
+        assumed_by=iam.PrincipalWithConditions(
+            iam.ServicePrincipal("bedrock.amazonaws.com"),
+            {
+                "StringEquals": {"aws:SourceAccount": account},
+                "ArnLike": {"aws:SourceArn": _bedrock_source_arn(region, account)},
+            },
+        ),
+        description="Bedrock model invocation logging to CloudWatch Logs",
+    )
+    stream_arn = (
+        f"arn:aws:logs:{region}:{account}:log-group:{log_group_name}"
+        f":log-stream:aws/bedrock/modelinvocations"
+    )
+    logging_role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["logs:CreateLogStream", "logs:PutLogEvents"],
+            resources=[stream_arn, f"{log_group.log_group_arn}:*"],
+        )
+    )
+    if kms_key is not None:
+        logging_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "kms:Encrypt",
+                    "kms:Decrypt",
+                    "kms:GenerateDataKey*",
+                    "kms:ReEncrypt*",
+                    "kms:DescribeKey",
+                ],
+                resources=[kms_key.key_arn],
+            )
+        )
+
+    logging_config: Dict[str, Any] = {
+        "cloudWatchConfig": {
+            "logGroupName": log_group.log_group_name,
+            "roleArn": logging_role.role_arn,
+            "largeDataDeliveryS3Config": {
+                "bucketName": log_bucket.bucket_name,
+                "keyPrefix": prefix,
+            },
+        },
+        "s3Config": {
+            "bucketName": log_bucket.bucket_name,
+            "keyPrefix": prefix,
+        },
+        "textDataDeliveryEnabled": bool(text_enabled),
+        "imageDataDeliveryEnabled": bool(image_enabled),
+        "embeddingDataDeliveryEnabled": bool(embedding_enabled),
+        "videoDataDeliveryEnabled": bool(video_enabled),
+    }
+
+    put_call = cr.AwsSdkCall(
+        service="Bedrock",
+        action="putModelInvocationLoggingConfiguration",
+        parameters={"loggingConfig": logging_config},
+        physical_resource_id=cr.PhysicalResourceId.of(
+            f"{logical_id}-ModelInvocationLogging"
+        ),
+    )
+    delete_call = cr.AwsSdkCall(
+        service="Bedrock",
+        action="deleteModelInvocationLoggingConfiguration",
+        parameters={},
+        physical_resource_id=cr.PhysicalResourceId.of(
+            f"{logical_id}-ModelInvocationLogging"
+        ),
+    )
+    custom = cr.AwsCustomResource(
+        scope,
+        f"{logical_id}Config",
+        on_create=put_call,
+        on_update=put_call,
+        on_delete=delete_call,
+        policy=cr.AwsCustomResourcePolicy.from_statements(
+            [
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=[
+                        "bedrock:PutModelInvocationLoggingConfiguration",
+                        "bedrock:DeleteModelInvocationLoggingConfiguration",
+                        "bedrock:GetModelInvocationLoggingConfiguration",
+                    ],
+                    resources=["*"],
+                ),
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=["iam:PassRole"],
+                    resources=[logging_role.role_arn],
+                ),
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=[
+                        "s3:GetBucketPolicy",
+                        "s3:PutBucketPolicy",
+                        "s3:GetBucketLocation",
+                        "s3:ListBucket",
+                    ],
+                    resources=[log_bucket.bucket_arn],
+                ),
+            ]
+        ),
+        timeout=Duration.minutes(2),
+        install_latest_aws_sdk=True,
+    )
+    custom.node.add_dependency(log_group)
+    custom.node.add_dependency(logging_role)
+    custom.node.add_dependency(log_bucket)
+
+    return {
+        "log_group": log_group,
+        "logging_role": logging_role,
+        "custom_resource": custom,
+        "s3_key_prefix": prefix,
+    }
+
+
 PI_ECS_APP_START_CMD = (
     "python3 agent-redact/pi/pi_agent_config.py && "
     "exec uvicorn gradio_app:app --app-dir agent-redact/pi "
@@ -3954,6 +4442,7 @@ def create_pi_agent_ecs_resources(
         service_connect_configuration=ecs.ServiceConnectProps(
             namespace=service_connect_namespace,
         ),
+        propagate_tags=ecs.PropagatedTagSource.SERVICE,
     )
 
     return pi_service, pi_security_group, pi_task_definition

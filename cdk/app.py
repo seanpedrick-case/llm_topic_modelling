@@ -1,9 +1,13 @@
 import os
 
 from aws_cdk import App, Environment
+from cdk_application_tags import apply_application_tags_to_app
 from cdk_appregistry import register_llm_topic_application
 from cdk_config import (
     ALB_NAME,
+    APPLICATION_NAME,
+    APPLICATION_REPOSITORY_URL,
+    APPLICATION_TAG_KEY,
     APPREGISTRY_APPLICATION_NAME,
     APPREGISTRY_ATTRIBUTE_GROUP_NAME,
     APPREGISTRY_DESCRIPTION,
@@ -29,6 +33,16 @@ from check_resources import CONTEXT_FILE, check_and_set_context
 
 # Initialize the CDK app
 app = App()
+
+# Shared application tags on every CDK-managed resource (regional + CloudFront).
+# Preferred over AppRegistry/myApplications for monitoring (AppRegistry new-customer
+# cut-off 30 Jul 2026). Imported resources are not retagged.
+apply_application_tags_to_app(
+    app,
+    tag_key=APPLICATION_TAG_KEY,
+    application_name=APPLICATION_NAME,
+    repository_url=APPLICATION_REPOSITORY_URL,
+)
 
 log_aws_credential_context(
     expected_account_id=AWS_ACCOUNT_ID,
@@ -80,6 +94,9 @@ regional_stack = CdkStack(
 regional_stack.termination_protection = _stack_delete_protection
 
 if ENABLE_APPREGISTRY == "True":
+    # Legacy Service Catalog AppRegistry / myApplications (opt-in).
+    # New AppRegistry customers cannot sign up after 30 Jul 2026; prefer
+    # APPLICATION_* tags + Resource Groups. Keep this path for existing users.
     # Use pre-check context only — not regional_stack.params (avoids AppRegistry
     # -> SummarisationStack dependency cycle during synth).
     _alb_dns_context = app.node.try_get_context(f"dns:{ALB_NAME}")

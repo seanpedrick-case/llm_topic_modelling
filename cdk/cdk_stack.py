@@ -23,6 +23,7 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_wafv2 as wafv2
+from cdk_application_tags import create_application_resource_group
 from cdk_cloudfront_headers import (
     create_secure_cloudfront_response_headers_policy,
     resolve_cloudfront_csp_urls,
@@ -35,9 +36,19 @@ from cdk_config import (
     ALB_TARGET_GROUP_NAME,
     APP_CONFIG_ENV_BASENAME,
     APP_CONFIG_ENV_FILE,
+    APPLICATION_NAME,
+    APPLICATION_RESOURCE_GROUP_NAME,
+    APPLICATION_TAG_KEY,
     AWS_ACCOUNT_ID,
     AWS_MANAGED_TASK_ROLES_LIST,
     AWS_REGION,
+    BEDROCK_MODEL_INVOCATION_EMBEDDING_ENABLED,
+    BEDROCK_MODEL_INVOCATION_IMAGE_ENABLED,
+    BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME,
+    BEDROCK_MODEL_INVOCATION_LOG_RETENTION_DAYS,
+    BEDROCK_MODEL_INVOCATION_S3_PREFIX,
+    BEDROCK_MODEL_INVOCATION_TEXT_ENABLED,
+    BEDROCK_MODEL_INVOCATION_VIDEO_ENABLED,
     CDK_FOLDER,
     CDK_PREFIX,
     CLOUDFRONT_DISTRIBUTION_NAME,
@@ -62,6 +73,11 @@ from cdk_config import (
     CUSTOM_HEADER_VALUE,
     CUSTOM_KMS_KEY_NAME,
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
+    DYNAMODB_USAGE_LOG_EXPORT_DATE_ATTRIBUTE,
+    DYNAMODB_USAGE_LOG_EXPORT_LAMBDA_NAME,
+    DYNAMODB_USAGE_LOG_EXPORT_OUTPUT_FILENAME,
+    DYNAMODB_USAGE_LOG_EXPORT_S3_KEY,
+    DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE,
     ECR_CDK_REPO_NAME,
     ECR_PI_REPO_NAME,
     ECS_AVAILABILITY_ZONE_REBALANCING,
@@ -97,6 +113,9 @@ from cdk_config import (
     ECS_TASK_MEMORY_SIZE,
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
+    ENABLE_APPLICATION_RESOURCE_GROUP,
+    ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING,
+    ENABLE_DYNAMODB_USAGE_LOG_EXPORT,
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
@@ -166,11 +185,13 @@ from cdk_functions import (  # Only keep CDK-native functions
     attach_managed_policy_arns,
     attach_pi_agent_to_shared_alb,
     build_ecs_execution_role_kms_policy,
-    build_ecs_task_role_kms_policy,
+    build_ecs_task_role_inline_policy,
     build_express_gateway_primary_container,
     build_express_pi_primary_container,
     build_pi_express_container_environment,
     configure_public_github_codebuild_source,
+    create_bedrock_model_invocation_logging,
+    create_dynamo_usage_log_export_lambda,
     create_ecs_express_infrastructure_role,
     create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
@@ -1009,8 +1030,12 @@ class CdkStack(Stack):
                 or default_secrets_manager_kms_key_arn(AWS_REGION, AWS_ACCOUNT_ID)
             )
 
-        task_role_kms_policy = json.dumps(
-            build_ecs_task_role_kms_policy(shared_kms_key_arn=shared_kms_key_arn),
+        task_role_inline_policy = json.dumps(
+            build_ecs_task_role_inline_policy(
+                output_bucket_name=S3_OUTPUT_BUCKET_NAME,
+                log_config_bucket_name=S3_LOG_CONFIG_BUCKET_NAME,
+                shared_kms_key_arn=shared_kms_key_arn,
+            ),
             indent=4,
         )
         if enable_headless:
@@ -1094,7 +1119,7 @@ class CdkStack(Stack):
                 policy_file_locations=resolve_policy_file_paths(
                     POLICY_FILE_LOCATIONS, cdk_folder=CDK_FOLDER
                 ),
-                custom_policy_text=task_role_kms_policy,
+                custom_policy_text=task_role_inline_policy,
             )
 
             execution_role_name = ECS_TASK_EXECUTION_ROLE_NAME
@@ -1253,6 +1278,61 @@ class CdkStack(Stack):
             add_s3_enforce_ssl_policy(bucket)
             add_s3_enforce_ssl_policy(output_bucket)
 
+            if ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING == "True":
+                try:
+                    bedrock_logging = create_bedrock_model_invocation_logging(
+                        self,
+                        "BedrockModelInvocationLogging",
+                        log_bucket=bucket,
+                        region=AWS_REGION,
+                        account=AWS_ACCOUNT_ID,
+                        key_prefix=BEDROCK_MODEL_INVOCATION_S3_PREFIX,
+                        log_group_name=BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME,
+                        log_retention_days=int(
+                            BEDROCK_MODEL_INVOCATION_LOG_RETENTION_DAYS or "90"
+                        ),
+                        kms_key=(
+                            kms_key
+                            if USE_CUSTOM_KMS_KEY == "1"
+                            and isinstance(kms_key, kms.Key)
+                            else None
+                        ),
+                        text_enabled=BEDROCK_MODEL_INVOCATION_TEXT_ENABLED == "True",
+                        image_enabled=BEDROCK_MODEL_INVOCATION_IMAGE_ENABLED == "True",
+                        embedding_enabled=(
+                            BEDROCK_MODEL_INVOCATION_EMBEDDING_ENABLED == "True"
+                        ),
+                        video_enabled=BEDROCK_MODEL_INVOCATION_VIDEO_ENABLED == "True",
+                    )
+                    CfnOutput(
+                        self,
+                        "BedrockInvocationLogGroupName",
+                        value=bedrock_logging["log_group"].log_group_name,
+                        description="CloudWatch log group for Bedrock model invocation logs",
+                    )
+                    CfnOutput(
+                        self,
+                        "BedrockInvocationS3Uri",
+                        value=(
+                            f"s3://{bucket.bucket_name}/"
+                            f"{bedrock_logging['s3_key_prefix']}/"
+                        ),
+                        description=(
+                            "S3 prefix for Bedrock model invocation logs "
+                            "(on the log/config bucket)"
+                        ),
+                    )
+                    print(
+                        "Bedrock model invocation logging enabled "
+                        f"(S3 prefix {bedrock_logging['s3_key_prefix']}/ + "
+                        f"CloudWatch {BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME})."
+                    )
+                except Exception as e:
+                    raise Exception(
+                        "Could not configure Bedrock model invocation logging due to:",
+                        e,
+                    )
+
             # Add policies to output bucket
             output_bucket.add_to_resource_policy(
                 iam.PolicyStatement(
@@ -1270,13 +1350,32 @@ class CdkStack(Stack):
                     resources=[output_bucket.bucket_arn],
                 )
             )
-            # Identity-based grants (Pi agent + main app share task_role; required when the
-            # output bucket is imported and bucket policies were not updated).
-            bucket.grant_read_write(task_role)
-            output_bucket.grant_read_write(task_role)
+            # Identity-based S3 access is scoped via build_ecs_task_role_inline_policy on
+            # task_role (output + log/config buckets). Bucket policies above remain for
+            # imported buckets and org policies that expect explicit bucket principals.
 
         except Exception as e:
             raise Exception("Could not handle S3 buckets due to:", e)
+
+        if ENABLE_APPLICATION_RESOURCE_GROUP == "True":
+            try:
+                create_application_resource_group(
+                    self,
+                    "ApplicationResourceGroup",
+                    group_name=APPLICATION_RESOURCE_GROUP_NAME
+                    or f"{APPLICATION_NAME}-resources",
+                    tag_key=APPLICATION_TAG_KEY,
+                    application_name=APPLICATION_NAME,
+                )
+                print(
+                    "Application Resource Group enabled "
+                    f"({APPLICATION_RESOURCE_GROUP_NAME or APPLICATION_NAME}-resources; "
+                    f"filter {APPLICATION_TAG_KEY}={APPLICATION_NAME})."
+                )
+            except Exception as e:
+                raise Exception(
+                    "Could not create application Resource Group due to:", e
+                )
 
         # --- Elastic Container Registry ---
         try:
@@ -1638,6 +1737,7 @@ class CdkStack(Stack):
                 ) from e
 
         # --- DynamoDB tables for logs (optional) ---
+        usage_log_table = None
 
         if SAVE_LOGS_TO_DYNAMODB == "True":
             try:
@@ -1667,7 +1767,7 @@ class CdkStack(Stack):
                     removal_policy=resource_removal_policy,
                 )
 
-                dynamodb.Table(
+                usage_log_table = dynamodb.Table(
                     self,
                     "SummarisationUsageDataTable",
                     table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
@@ -1681,6 +1781,39 @@ class CdkStack(Stack):
 
             except Exception as e:
                 raise Exception("Could not create DynamoDB tables due to:", e)
+
+        if ENABLE_DYNAMODB_USAGE_LOG_EXPORT == "True":
+            try:
+                if usage_log_table is None:
+                    raise ValueError(
+                        "ENABLE_DYNAMODB_USAGE_LOG_EXPORT=True requires "
+                        "SAVE_LOGS_TO_DYNAMODB=True and the usage log table."
+                    )
+                lambda_asset_dir = os.path.join(
+                    os.path.dirname(__file__), "lambda_dynamo_logs_export"
+                )
+                create_dynamo_usage_log_export_lambda(
+                    self,
+                    "DynamoUsageLogExport",
+                    function_name=DYNAMODB_USAGE_LOG_EXPORT_LAMBDA_NAME or None,
+                    lambda_asset_path=lambda_asset_dir,
+                    dynamodb_table=usage_log_table,
+                    output_bucket=output_bucket,
+                    s3_output_key=DYNAMODB_USAGE_LOG_EXPORT_S3_KEY,
+                    schedule_expression=DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE,
+                    dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+                    date_attribute=DYNAMODB_USAGE_LOG_EXPORT_DATE_ATTRIBUTE,
+                    output_filename=DYNAMODB_USAGE_LOG_EXPORT_OUTPUT_FILENAME,
+                    shared_kms_key_arn=shared_kms_key_arn,
+                )
+                print(
+                    "Scheduled DynamoDB usage log export Lambda defined "
+                    f"({DYNAMODB_USAGE_LOG_EXPORT_SCHEDULE})."
+                )
+            except Exception as e:
+                raise Exception(
+                    "Could not handle DynamoDB usage log export Lambda due to:", e
+                ) from e
 
         alb = None
         load_balancer_name = ALB_NAME
@@ -1933,7 +2066,7 @@ class CdkStack(Stack):
         try:
             # ECS environmentFiles (app_config.env) are fetched by the execution role at task start.
             bucket.grant_read(execution_role, APP_CONFIG_ENV_BASENAME)
-            # KMS: task role uses shared S3 CMK via build_ecs_task_role_kms_policy;
+            # KMS: task role uses shared S3 CMK via build_ecs_task_role_inline_policy;
             # execution role uses the secret's CMK via build_ecs_execution_role_kms_policy.
         except Exception as e:
             raise Exception("Could not grant bucket read to execution role due to:", e)
@@ -2510,6 +2643,7 @@ class CdkStack(Stack):
                                 ECS_AVAILABILITY_ZONE_REBALANCING
                             ),
                             service_connect_configuration=service_connect_configuration,
+                            propagate_tags=ecs.PropagatedTagSource.SERVICE,
                         )
                         print("Successfully created new ECS service")
 
@@ -2625,9 +2759,23 @@ class CdkStack(Stack):
                         create_headless_s3_batch_seed(
                             self,
                             "HeadlessBatchS3Seed",
-                            destination_bucket=output_bucket,
+                            output_bucket=output_bucket,
+                            log_bucket=bucket,
                             seed_asset_directory=seed_asset_dir,
                             s3_outputs_bucket_name=output_bucket.bucket_name,
+                            default_params_key=S3_BATCH_DEFAULT_PARAMS_KEY,
+                        )
+                        CfnOutput(
+                            self,
+                            "BatchDefaultsEnvUri",
+                            value=(
+                                f"s3://{bucket.bucket_name}/"
+                                f"{S3_BATCH_DEFAULT_PARAMS_KEY}"
+                            ),
+                            description=(
+                                "Durable app_defaults.env on the log/config bucket "
+                                "(not subject to output-bucket object expiration)"
+                            ),
                         )
                     if (
                         enable_headless

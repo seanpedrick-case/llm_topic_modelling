@@ -25,7 +25,7 @@ ENV INSTALL_TORCH=${INSTALL_TORCH}
 
 # Local torch install requires CUDA 12.6
 RUN if [ "$INSTALL_TORCH" = "True" ]; then \
-    pip install --no-cache-dir --target=/install torch==2.9.1 --extra-index-url https://download.pytorch.org/whl/cu126; \
+    pip install --no-cache-dir --target=/install torch==2.14.0 --extra-index-url https://download.pytorch.org/whl/cu126; \
     fi
 
 ARG INSTALL_LLAMA_CPP_PYTHON=False

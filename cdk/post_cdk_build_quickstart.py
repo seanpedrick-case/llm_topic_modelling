@@ -25,6 +25,7 @@ from cdk_config import (
     GITHUB_REPO_USERNAME,
     GRADIO_SERVER_PORT,
     PI_AGENT_ENV_S3_KEY,
+    S3_BATCH_DEFAULT_PARAMS_KEY,
     S3_BATCH_ENV_PREFIX,
     S3_BATCH_INPUT_PREFIX,
     S3_BATCH_LAMBDA_FUNCTION_NAME,
@@ -160,13 +161,18 @@ else:
         input_prefix=S3_BATCH_INPUT_PREFIX,
         env_prefix=S3_BATCH_ENV_PREFIX,
         example_env_local_path=os.path.join("config", "example_headless_env_file.env"),
+        log_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+        default_params_key=S3_BATCH_DEFAULT_PARAMS_KEY,
+        s3_outputs_bucket_name=S3_OUTPUT_BUCKET_NAME,
     )
     print_headless_deployment_next_steps(
         {
             "AWS_REGION": AWS_REGION,
             "S3_OUTPUT_BUCKET_NAME": S3_OUTPUT_BUCKET_NAME,
+            "S3_LOG_CONFIG_BUCKET_NAME": S3_LOG_CONFIG_BUCKET_NAME,
             "S3_BATCH_INPUT_PREFIX": S3_BATCH_INPUT_PREFIX,
             "S3_BATCH_ENV_PREFIX": S3_BATCH_ENV_PREFIX,
+            "S3_BATCH_DEFAULT_PARAMS_KEY": S3_BATCH_DEFAULT_PARAMS_KEY,
             "ECS_LOG_GROUP_NAME": ECS_LOG_GROUP_NAME,
             "S3_BATCH_LAMBDA_FUNCTION_NAME": S3_BATCH_LAMBDA_FUNCTION_NAME,
             "CDK_PREFIX": CDK_PREFIX,

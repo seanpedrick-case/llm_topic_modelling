@@ -11,6 +11,7 @@ CDK_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CDK_DIR))
 
 from cdk_config import (  # noqa: E402
+    AWS_MANAGED_TASK_ROLES_LIST,
     ECS_EXECUTION_ROLE_MANAGED_POLICIES,
     POLICY_FILE_LOCATIONS,
     parse_comma_separated_list,
@@ -33,6 +34,10 @@ def test_parse_comma_separated_list_json_and_plain():
 def test_policy_file_locations_default_is_empty_list():
     assert isinstance(POLICY_FILE_LOCATIONS, list)
     assert POLICY_FILE_LOCATIONS == []
+
+
+def test_task_role_managed_policies_exclude_s3_full_access():
+    assert "AmazonS3FullAccess" not in AWS_MANAGED_TASK_ROLES_LIST
 
 
 def test_execution_role_managed_policies_default_minimal():
