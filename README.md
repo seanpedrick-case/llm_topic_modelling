@@ -7,7 +7,7 @@ sdk: gradio
 sdk_version: 6.27.0
 app_file: app.py
 pinned: true
-license: agpl-3.0
+license: mit
 short_description: Extract topics from open text data with LLMs
 ---
 
