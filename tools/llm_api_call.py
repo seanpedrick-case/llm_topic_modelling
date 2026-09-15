@@ -2031,6 +2031,120 @@ def _four_column_table_has_sentiment(df: pd.DataFrame) -> bool:
     return col2.isin(sentiment_values).mean() >= 0.5
 
 
+TOPIC_TABLE_EXPECTED_COLS = [
+    "General topic",
+    "Subtopic",
+    "Sentiment",
+    "Response ID",
+    "Summary",
+]
+
+
+def _dedupe_dataframe_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Make column labels unique so later selection/concat cannot hit reindex errors."""
+    if df is None or df.empty:
+        return df
+    if not df.columns.duplicated().any():
+        return df
+
+    seen: dict[object, int] = {}
+    new_cols: list[str] = []
+    for col in df.columns.tolist():
+        count = seen.get(col, 0)
+        if count == 0:
+            new_cols.append(str(col))
+        else:
+            new_cols.append(f"{col}__dup{count}")
+        seen[col] = count + 1
+    out = df.copy()
+    out.columns = new_cols
+    return out
+
+
+def _column_as_string_series(values: Any, length: int) -> pd.Series:
+    """Coerce a column (Series or one-col DataFrame) to a clean string Series."""
+    if isinstance(values, pd.DataFrame):
+        values = values.iloc[:, 0]
+    if not isinstance(values, pd.Series):
+        values = pd.Series(values)
+    series = (
+        values.astype(str)
+        .replace({"nan": "", "None": "", "<NA>": "", "NaT": ""})
+        .fillna("")
+        .astype(str)
+        .reset_index(drop=True)
+    )
+    if len(series) < length:
+        series = pd.concat(
+            [series, pd.Series([""] * (length - len(series)), dtype=str)],
+            ignore_index=True,
+        )
+    elif len(series) > length:
+        series = series.iloc[:length].reset_index(drop=True)
+    return series
+
+
+def _ensure_standard_topic_table_columns(
+    df: pd.DataFrame, batch_size_number: int
+) -> pd.DataFrame:
+    """
+    Force a topic-analysis table into exactly the five expected columns.
+
+    Avoids duplicate column names (which break pd.concat with
+    'Reindexing only valid with uniquely valued Index objects') and ensures
+    topic/sentiment fields are strings before .str processing.
+    """
+    expected = TOPIC_TABLE_EXPECTED_COLS
+    if df is None or df.empty:
+        return pd.DataFrame(columns=expected)
+
+    working = _dedupe_dataframe_column_names(df.copy()).reset_index(drop=True)
+    n_rows = len(working)
+    mapped: dict[str, pd.Series] = {}
+    used_cols: set[str] = set()
+
+    def _is_blank_series(series: pd.Series) -> bool:
+        return bool((series.astype(str).str.strip() == "").all())
+
+    for standard_name in expected:
+        found = _find_parsed_table_column(working, standard_name)
+        if found is None or found in used_cols:
+            continue
+        candidate = _column_as_string_series(working[found], n_rows)
+        # Ignore empty header matches so positional columns with real values
+        # can fill the standard field instead (common with malformed tables).
+        if _is_blank_series(candidate):
+            continue
+        mapped[standard_name] = candidate
+        used_cols.add(found)
+
+    unused_cols = [c for c in working.columns if c not in used_cols]
+    for standard_name in expected:
+        if standard_name in mapped:
+            continue
+        if not unused_cols:
+            break
+        col = unused_cols.pop(0)
+        mapped[standard_name] = _column_as_string_series(working[col], n_rows)
+        used_cols.add(col)
+
+    default_response_id = "1" if int(batch_size_number) == 1 else ""
+    defaults = {
+        "General topic": "",
+        "Subtopic": "",
+        "Sentiment": "Not assessed",
+        "Response ID": default_response_id,
+        "Summary": "",
+    }
+    for standard_name in expected:
+        if standard_name not in mapped:
+            mapped[standard_name] = pd.Series(
+                [defaults[standard_name]] * n_rows, dtype=str
+            )
+
+    return pd.DataFrame({name: mapped[name] for name in expected})
+
+
 def convert_response_text_to_dataframe(
     response_text: str, table_type: str = "Main table"
 ):
@@ -2329,12 +2443,15 @@ def write_llm_output_and_logs(
             False,  # has_incomplete_output
         )
 
-    # Check if the parsed dataframe has less than 3 columns (incomplete output)
-    # This will be used to trigger a retry
+    # Check if the parsed dataframe has an unexpected shape (incomplete / malformed)
+    # This will be used to trigger a retry of the LLM call
     has_incomplete_output = False
+    parsed_column_count = (
+        topic_with_response_df.shape[1] if not topic_with_response_df.empty else 0
+    )
     if not is_error and not topic_with_response_df.empty:
-        # Check if dataframe has less than 3 columns (incomplete output format)
-        if topic_with_response_df.shape[1] < 3:
+        # Valid topic tables are 4 or 5 columns; anything else should be retried
+        if parsed_column_count < 3 or parsed_column_count not in (4, 5):
             has_incomplete_output = True
 
     # If the table has 5 columns, rename them
@@ -2391,85 +2508,21 @@ def write_llm_output_and_logs(
             topic_with_response_df["Sentiment"] = pd.Series(
                 ["Not assessed"] * len(topic_with_response_df), dtype=str
             )
-        topic_with_response_df = topic_with_response_df[
-            ["General topic", "Subtopic", "Sentiment", "Response ID", "Summary"]
-        ]
     else:
-        # Something went wrong with the table output, so add empty columns
-        print("Table output has wrong number of columns, adding with blank values")
+        # Something went wrong with the table output; repair best-effort for
+        # exhausted-retry fallback, and flag incomplete so the caller can retry.
+        print(
+            "Table output has wrong number of columns "
+            f"({parsed_column_count}), repairing to standard schema"
+        )
 
-        # Check for and handle duplicate column names which can cause DataFrame access issues
-        if topic_with_response_df.columns.duplicated().any():
-            # Remove duplicate column names by adding suffix
-            topic_with_response_df.columns = [
-                (
-                    f"{col}_{i}"
-                    if topic_with_response_df.columns.tolist().count(col) > 1
-                    and topic_with_response_df.columns.tolist()[: i + 1].count(col) > 1
-                    else col
-                )
-                for i, col in enumerate(topic_with_response_df.columns)
-            ]
-
-        # First, rename first two columns that should always exist.
-        if len(topic_with_response_df.columns) >= 2:
-            new_column_names = {
-                topic_with_response_df.columns[0]: "General topic",
-                topic_with_response_df.columns[1]: "Subtopic",
-            }
-            topic_with_response_df.rename(columns=new_column_names, inplace=True)
-        else:
-            # If we don't have enough columns, create a minimal valid structure
-            topic_with_response_df = pd.DataFrame(
-                columns=[
-                    "General topic",
-                    "Subtopic",
-                    "Sentiment",
-                    "Response ID",
-                    "Summary",
-                ]
-            )
-
-        # Add empty columns if they are not present
-        # Ensure we're assigning to a Series, not accidentally creating a DataFrame
-        if "Sentiment" not in topic_with_response_df.columns:
-            topic_with_response_df["Sentiment"] = pd.Series(
-                ["Not assessed"] * len(topic_with_response_df), dtype=str
-            )
-        if "Response ID" not in topic_with_response_df.columns:
-            if batch_size_number == 1:
-                topic_with_response_df["Response ID"] = pd.Series(
-                    ["1"] * len(topic_with_response_df), dtype=str
-                )
-            else:
-                topic_with_response_df["Response ID"] = pd.Series(
-                    [""] * len(topic_with_response_df), dtype=str
-                )
-        if "Summary" not in topic_with_response_df.columns:
-            topic_with_response_df["Summary"] = pd.Series(
-                [""] * len(topic_with_response_df), dtype=str
-            )
-
-        # Ensure we only have the expected columns and they're all Series
-        expected_cols = [
-            "General topic",
-            "Subtopic",
-            "Sentiment",
-            "Response ID",
-            "Summary",
-        ]
-        topic_with_response_df = topic_with_response_df[expected_cols].copy()
-
-        # Verify all columns are Series (not DataFrames)
-        for col in expected_cols:
-            if col in topic_with_response_df.columns:
-                if not isinstance(topic_with_response_df[col], pd.Series):
-                    # If somehow it's a DataFrame, take the first column
-                    topic_with_response_df[col] = (
-                        topic_with_response_df[col].iloc[:, 0]
-                        if hasattr(topic_with_response_df[col], "iloc")
-                        else topic_with_response_df[col]
-                    )
+    # Always normalise to the five expected unique string columns. This prevents
+    # duplicate-name collisions from positional renames (e.g. renaming col0 to
+    # "General topic" when another column is already named that), which previously
+    # caused: Reindexing only valid with uniquely valued Index objects.
+    topic_with_response_df = _ensure_standard_topic_table_columns(
+        topic_with_response_df, batch_size_number
+    )
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
@@ -2477,15 +2530,7 @@ def write_llm_output_and_logs(
     # Ensure we have a valid DataFrame with the expected columns before processing
     if topic_with_response_df.empty:
         # If DataFrame is empty, create a minimal valid structure
-        topic_with_response_df = pd.DataFrame(
-            columns=[
-                "General topic",
-                "Subtopic",
-                "Sentiment",
-                "Response ID",
-                "Summary",
-            ]
-        )
+        topic_with_response_df = pd.DataFrame(columns=TOPIC_TABLE_EXPECTED_COLS)
 
     # For instances where you end up with float values in Response ID
     # Ensure we're working with a Series by using iloc if needed
@@ -2499,15 +2544,17 @@ def write_llm_output_and_logs(
             # If it's a DataFrame (due to duplicate columns), take first column
             if isinstance(response_ref_series, pd.DataFrame):
                 response_ref_series = response_ref_series.iloc[:, 0]
-            topic_with_response_df["Response ID"] = response_ref_series.astype(
-                str
-            ).str.replace(".0", "", regex=False)
+            topic_with_response_df["Response ID"] = (
+                response_ref_series.astype(str)
+                .str.replace(".0", "", regex=False)
+                .replace({"nan": "", "None": "", "<NA>": ""})
+            )
         except Exception as e:
             print(f"Warning: Error processing Response ID column: {e}")
             # Fallback: create a simple Series
-            topic_with_response_df["Response ID"] = topic_with_response_df[
-                "Response ID"
-            ].astype(str)
+            topic_with_response_df["Response ID"] = _column_as_string_series(
+                topic_with_response_df["Response ID"], len(topic_with_response_df)
+            )
 
     # Strip and lower case topic names to remove issues where model is randomly capitalising topics/sentiment
     # Also remove markdown emphasis characters
@@ -2518,14 +2565,13 @@ def write_llm_output_and_logs(
             and not topic_with_response_df.empty
         ):
             try:
-                col_series = topic_with_response_df[col_name]
-                # If it's a DataFrame (due to duplicate columns), take first column
-                if isinstance(col_series, pd.DataFrame):
-                    col_series = col_series.iloc[:, 0]
+                col_series = _column_as_string_series(
+                    topic_with_response_df[col_name], len(topic_with_response_df)
+                )
                 # Remove markdown emphasis, then strip, lower, and capitalize
                 topic_with_response_df[col_name] = (
-                    col_series.astype(str)
-                    .apply(remove_markdown_emphasis)
+                    col_series.apply(remove_markdown_emphasis)
+                    .astype(str)
                     .str.strip()
                     .str.lower()
                     .str.capitalize()
@@ -2533,11 +2579,15 @@ def write_llm_output_and_logs(
             except Exception as e:
                 print(f"Warning: Error processing {col_name} column: {e}")
                 # Fallback: just convert to string and remove markdown emphasis
-                topic_with_response_df[col_name] = (
-                    topic_with_response_df[col_name]
-                    .astype(str)
-                    .apply(remove_markdown_emphasis)
-                )
+                try:
+                    col_series = _column_as_string_series(
+                        topic_with_response_df[col_name], len(topic_with_response_df)
+                    )
+                    topic_with_response_df[col_name] = col_series.apply(
+                        remove_markdown_emphasis
+                    ).astype(str)
+                except Exception as e2:
+                    print(f"Warning: Fallback also failed for {col_name} column: {e2}")
 
     topic_table_out_path = (
         output_folder
@@ -2806,9 +2856,13 @@ def write_llm_output_and_logs(
     )
 
     # Table of all unique topics with descriptions
-    new_topic_summary_df = topic_with_response_df[
-        ["General topic", "Subtopic", "Sentiment"]
-    ]
+    new_topic_summary_df = topic_with_response_df.loc[
+        :, ["General topic", "Subtopic", "Sentiment"]
+    ].copy()
+    # Guard against any residual duplicate labels before concat
+    new_topic_summary_df = new_topic_summary_df.loc[
+        :, ~new_topic_summary_df.columns.duplicated()
+    ].reset_index(drop=True)
 
     # new_topic_summary_df = new_topic_summary_df.rename(
     #     columns={
@@ -2820,20 +2874,23 @@ def write_llm_output_and_logs(
 
     # Join existing and new unique topics
     # Reset index to avoid reindexing errors with duplicate indices
-    new_topic_summary_df = new_topic_summary_df.reset_index(drop=True)
     if not existing_topics_df.empty:
-        existing_topics_df = existing_topics_df.reset_index(drop=True)
+        existing_topics_df = _dedupe_dataframe_column_names(
+            existing_topics_df
+        ).reset_index(drop=True)
     out_topic_summary_df = pd.concat(
         [new_topic_summary_df, existing_topics_df], ignore_index=True
     ).dropna(how="all")
 
-    out_topic_summary_df = out_topic_summary_df.rename(
-        columns={
-            out_topic_summary_df.columns[0]: "General topic",
-            out_topic_summary_df.columns[1]: "Subtopic",
-            out_topic_summary_df.columns[2]: "Sentiment",
-        }
-    )
+    if out_topic_summary_df.shape[1] >= 3:
+        out_topic_summary_df = out_topic_summary_df.rename(
+            columns={
+                out_topic_summary_df.columns[0]: "General topic",
+                out_topic_summary_df.columns[1]: "Subtopic",
+                out_topic_summary_df.columns[2]: "Sentiment",
+            }
+        )
+    out_topic_summary_df = _dedupe_dataframe_column_names(out_topic_summary_df)
 
     # print("out_topic_summary_df:", out_topic_summary_df)
 
@@ -3214,14 +3271,14 @@ def process_batch_with_llm(
             output_folder=output_folder,
         )
 
-        # Check if output has less than 3 columns (incomplete output format)
+        # Check if output has unexpected column count (incomplete / malformed format)
         # This indicates the LLM didn't follow the format properly
         if has_incomplete_output:
             retry_count += 1
             if retry_count < max_retries:
                 next_temperature = original_temperature + (retry_count * 0.1)
                 print(
-                    f"LLM output table has less than 3 columns (incomplete format). "
+                    f"LLM output table has unexpected column count (incomplete/malformed format). "
                     f"Retrying LLM call with increased temperature {next_temperature:.1f} "
                     f"(attempt {retry_count + 1}/{max_retries})..."
                 )
@@ -3229,7 +3286,7 @@ def process_batch_with_llm(
                 continue
             else:
                 print(
-                    f"LLM output still incomplete after {max_retries} attempts. Proceeding with incomplete data."
+                    f"LLM output still incomplete after {max_retries} attempts. Proceeding with repaired data."
                 )
                 retry_needed = False
         else:
@@ -6296,7 +6353,6 @@ def all_in_one_pipeline(
         )
 
     # 2) Deduplication
-    print("Deduplicating topic names with fuzzy matching")
     (
         ref_df_loaded,
         unique_df_loaded,
@@ -6306,6 +6362,31 @@ def all_in_one_pipeline(
         unique_topics_table_file_name_textbox,
     ) = load_in_previous_data_files(out_file_paths_1)
 
+    reference_df_for_dedup = (
+        ref_df_loaded if not ref_df_loaded.empty else out_reference_df
+    )
+    topic_summary_for_dedup = (
+        unique_df_loaded if not unique_df_loaded.empty else out_topic_summary_df
+    )
+
+    if (
+        reference_df_for_dedup is None
+        or reference_df_for_dedup.empty
+        or "Response ID" not in reference_df_for_dedup.columns
+    ):
+        available_cols = (
+            list(reference_df_for_dedup.columns)
+            if reference_df_for_dedup is not None
+            else []
+        )
+        raise ValueError(
+            "Topic extraction produced no usable reference table "
+            f"(missing 'Response ID'; available columns: {available_cols}). "
+            "Check earlier logs for markdown table parsing or segment processing "
+            "errors. Cannot continue to deduplication."
+        )
+
+    print("Deduplicating topic names with fuzzy matching")
     (
         ref_df_after_dedup,
         unique_df_after_dedup,
@@ -6313,10 +6394,8 @@ def all_in_one_pipeline(
         log_files_output_dedup,
         summarised_output_markdown,
     ) = deduplicate_topics(
-        reference_df=ref_df_loaded if not ref_df_loaded.empty else out_reference_df,
-        topic_summary_df=(
-            unique_df_loaded if not unique_df_loaded.empty else out_topic_summary_df
-        ),
+        reference_df=reference_df_for_dedup,
+        topic_summary_df=topic_summary_for_dedup,
         reference_table_file_name=working_data_file_name_textbox,
         unique_topics_table_file_name=unique_topics_table_file_name_textbox,
         in_excel_sheets=in_excel_sheets,

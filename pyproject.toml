@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.14.0"
+version = "0.15.0"
 description = "Generate thematic summaries from open text in tabular data files with a large language model."
 requires-python = ">=3.10"
 readme = "README.md"
@@ -36,7 +36,7 @@ keywords = [
     "text-mining"
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Information Technology",
@@ -52,7 +52,7 @@ classifiers = [
 ]
 
 dependencies = [    
-    "gradio<=6.26.0",
+    "gradio<=6.27.0",
     "transformers<=5.16.1",
     "spaces",
     "boto3<=1.43.90",
