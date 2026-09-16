@@ -60,7 +60,7 @@ def create_application_resource_group(
         description=description
         or (
             f"Tag-based group for {name} "
-            f"(filter: {key}={name}). Prefer over AppRegistry after Jul 2026."
+            f"filter {key} {name}. Prefer over AppRegistry after Jul 2026."
         ),
         resource_query=resourcegroups.CfnGroup.ResourceQueryProperty(
             type="TAG_FILTERS_1_0",

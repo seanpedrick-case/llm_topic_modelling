@@ -131,7 +131,7 @@ APPLICATION_NAME = get_or_create_env_var(
 )
 APPLICATION_REPOSITORY_URL = get_or_create_env_var(
     "APPLICATION_REPOSITORY_URL",
-    "https://github.com/seanpedrick-case/llm_topic_modeller.git",
+    "https://github.com/seanpedrick-case/llm_topic_modelling.git",
 )
 ENABLE_APPLICATION_RESOURCE_GROUP = get_or_create_env_var(
     "ENABLE_APPLICATION_RESOURCE_GROUP", "True"

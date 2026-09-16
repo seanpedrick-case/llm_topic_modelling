@@ -4,18 +4,16 @@ emoji: 📚
 colorFrom: purple
 colorTo: yellow
 sdk: gradio
-sdk_version: 6.26.0
+sdk_version: 6.27.0
 app_file: app.py
 pinned: true
-license: agpl-3.0
+license: mit
 short_description: Extract topics from open text data with LLMs
 ---
 
 # Large language model topic modelling
 
-Version: 0.13.0
-
-Extract topics and summarise outputs using Large Language Models (LLMs), either local, Gemini, Azure, or AWS Bedrock models (e.g. Claude, Nova models). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets on the main app page, which will show you example outputs from a local model run. API keys for AWS, Azure, and Gemini services can be entered on the settings page (note that Gemini has a free public API).
+Extract topics and summarise outputs using Large Language Models (LLMs), either local or cloud based (AWS, Azure, Gemini). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets on the main app page, which will show you example outputs from a local model run. API keys for cloud services can be entered on the settings page.
 
 NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.
 
