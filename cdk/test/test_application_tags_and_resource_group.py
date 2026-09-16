@@ -65,6 +65,9 @@ def test_create_application_resource_group_synth():
     assert len(groups) == 1
     props = groups[0]["Properties"]
     assert props["Name"] == "demo-llm-topic-modeller-resources"
+    assert all(
+        character.isalnum() or character in " _.-" for character in props["Description"]
+    )
     assert props["ResourceQuery"]["Type"] == "TAG_FILTERS_1_0"
     tag_filters = props["ResourceQuery"]["Query"]["TagFilters"]
     assert any(

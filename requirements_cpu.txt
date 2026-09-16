@@ -1,4 +1,4 @@
-gradio<=6.26.0
+gradio<=6.27.0
 transformers<=5.16.1
 spaces
 pandas<=3.0.5

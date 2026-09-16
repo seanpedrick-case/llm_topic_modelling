@@ -38,6 +38,7 @@ workspace/*
 user_guide/*
 _extensions/*
 cdk/config/*
+cdk/node_modules/*
 !cdk/config/app_config.env.example
 !cdk/config/lambda/
 cdk/config/lambda/*
@@ -57,3 +58,5 @@ cdk/archive/*
 cdk/cdk.json
 cdk/cdk.context.json
 cdk/precheck.context.json
+cdk/package.json
+cdk/package-lock.json

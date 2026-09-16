@@ -290,7 +290,7 @@ class CdkStack(Stack):
         resource_delete_protection = resource_deletion_protection_flag()
         s3_auto_delete_objects = s3_auto_delete_objects_on_stack_destroy()
 
-        self.template_options.description = "Deployment of the llm_topic_modeller Gradio app for LLM-based topic modelling. Git repo: https://github.com/seanpedrick-case/llm_topic_modeller."
+        self.template_options.description = "Deployment of the llm_topic_modeller Gradio app for LLM-based topic modelling. Git repo: https://github.com/seanpedrick-case/llm_topic_modelling."
 
         use_express_ingress = (
             not ACM_SSL_CERTIFICATE_ARN and USE_ECS_EXPRESS_MODE == "True"
