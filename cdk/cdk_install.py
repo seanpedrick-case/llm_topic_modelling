@@ -277,7 +277,7 @@ def _python_has_aws_cdk(python_exe: Path) -> Tuple[bool, str]:
     cmd = [
         str(python_exe),
         "-c",
-        "import aws_cdk; print(getattr(aws_cdk, '__version__', 'unknown'))",
+        "from importlib.metadata import version; print(version('aws-cdk-lib'))"
     ]
     try:
         result = subprocess.run(
@@ -3796,7 +3796,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                     break
                 print(email_error)
             default_iam_user = (
-                getattr(args, "headless_output_iam_user", "").strip()
+                (getattr(args, "headless_output_iam_user", "") or "").strip()
                 or f"{answers.cdk_prefix}s3-output-reader"
             )
             iam_user = ask(
@@ -3811,7 +3811,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 getattr(args, "headless_notify_email", "") or ""
             ).strip()
             answers.headless_output_iam_user_name = (
-                getattr(args, "headless_output_iam_user", "").strip()
+                (getattr(args, "headless_output_iam_user", "") or "").strip()
                 or f"{answers.cdk_prefix}s3-output-reader"
             )
             email_error = validate_notify_email(answers.headless_output_notify_email)
