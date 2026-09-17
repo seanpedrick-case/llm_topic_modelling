@@ -2,7 +2,7 @@ import codecs
 import math
 import os
 import re
-from typing import List
+from typing import Any, List
 
 import boto3
 import gradio as gr
@@ -1290,6 +1290,40 @@ def move_overall_summary_output_files_to_front_page(
     overall_summary_output_files_xlsx: List[str],
 ):
     return overall_summary_output_files_xlsx
+
+
+def has_submitted_candidate_topics(candidate_topics: Any) -> bool:
+    """Return True if the user submitted an initial candidate topics file or list."""
+    if candidate_topics is None:
+        return False
+    if isinstance(candidate_topics, (list, tuple)):
+        return any(has_submitted_candidate_topics(item) for item in candidate_topics)
+    if isinstance(candidate_topics, str):
+        return bool(candidate_topics.strip())
+    name = getattr(candidate_topics, "name", None)
+    if isinstance(name, str):
+        return bool(name.strip())
+    return bool(candidate_topics)
+
+
+def effective_force_zero_shot_radio(
+    force_zero_shot_radio: str,
+    candidate_topics: Any,
+) -> str:
+    """
+    Force-zero-shot only applies when an initial candidate topics list was submitted.
+
+    Without a submitted file/list, later-batch topic lists must not be treated as
+    a forced taxonomy.
+    """
+    if force_zero_shot_radio != "Yes":
+        return "No"
+    if has_submitted_candidate_topics(candidate_topics):
+        return "Yes"
+    print(
+        "Ignoring force zero-shot: no initial candidate topics file/list was submitted."
+    )
+    return "No"
 
 
 def generate_zero_shot_topics_df(

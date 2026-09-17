@@ -961,7 +961,7 @@ with app:
 
             with gr.Row(equal_height=True):
                 force_zero_shot_radio = gr.Radio(
-                    label="Force responses into suggested topics",
+                    label="Force responses into suggested topics (only applies if a topics file is provided)",
                     value="No",
                     choices=["Yes", "No"],
                 )
@@ -1817,6 +1817,7 @@ with app:
             aws_region_textbox,
             api_url_textbox,
             max_topics_number,
+            candidate_topics,
         ],
         outputs=[
             display_topic_table_markdown,

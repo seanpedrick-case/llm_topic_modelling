@@ -52,9 +52,11 @@ from tools.helper_functions import (
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
+    effective_force_zero_shot_radio,
     ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
+    has_submitted_candidate_topics,
     load_in_data_file,
     load_in_previous_data_files,
     normalize_topic_name_for_llm,
@@ -393,6 +395,7 @@ def validate_topics(
     aws_region_textbox: str = "",
     api_url: str = None,
     max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
+    candidate_topics: gr.FileData = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -415,7 +418,7 @@ def validate_topics(
     - reasoning_suffix (str): Suffix for reasoning
     - group_name (str): Name of the group
     - produce_structured_summary_radio (str): Whether to produce structured summaries
-    - force_zero_shot_radio (str): Whether to force zero-shot
+    - force_zero_shot_radio (str): Whether to force assignment into submitted candidate topics. Only has an effect when an initial candidate topics file/list is provided.
     - force_single_topic_radio (str): Whether to force single topic
     - context_textbox (str): Context for the validation
     - additional_instructions_summary_format (str): Additional instructions
@@ -434,6 +437,10 @@ def validate_topics(
     - Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]: Updated reference_df, topic_summary_df, logged_content, conversation_metadata_str, total_input_tokens, total_output_tokens, total_llm_calls
     """
     print("Starting validation process...")
+
+    force_zero_shot_radio = effective_force_zero_shot_radio(
+        force_zero_shot_radio, candidate_topics
+    )
 
     # Ensure custom model_choice is registered in model_name_map
     ensure_model_in_map(model_choice)
@@ -1255,6 +1262,7 @@ def validate_topics_wrapper(
     aws_region_textbox: str = "",
     api_url: str = None,
     max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
+    candidate_topics: gr.FileData = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -1277,7 +1285,7 @@ def validate_topics_wrapper(
         reasoning_suffix (str): Suffix for reasoning.
         group_name (str): Name of the group.
         produce_structured_summary_radio (str): Whether to produce structured summaries ("Yes" or "No").
-        force_zero_shot_radio (str): Whether to force zero-shot ("Yes" or "No").
+        force_zero_shot_radio (str): Whether to force assignment into submitted candidate topics ("Yes" or "No"). Only has an effect when an initial candidate topics file/list is provided.
         force_single_topic_radio (str): Whether to force single topic ("Yes" or "No").
         context_textbox (str): Context for the validation.
         additional_instructions_summary_format (str): Additional instructions for summary format.
@@ -1456,6 +1464,7 @@ def validate_topics_wrapper(
                 aws_region_textbox=aws_region_textbox,
                 api_url=api_url,
                 max_topics_number=max_topics_number,
+                candidate_topics=candidate_topics,
             )
 
             # Accumulate results
@@ -3565,7 +3574,7 @@ def extract_topics(
     - context_textbox (str, optional): A string giving some context to the consultation/task.
     - time_taken (float, optional): The amount of time taken to process the responses up until this point.
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
-    - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
+    - force_zero_shot_radio (str, optional): Should responses be forced into submitted candidate topics. Only has an effect when an initial candidate topics file/list is submitted.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - force_single_topic_radio (str, optional): Should the model be forced to assign only one single topic to each response (effectively a classifier).
     - produce_structured_summary_radio (str, optional): Should the model create a structured summary instead of extracting topics.
@@ -3594,6 +3603,10 @@ def extract_topics(
 
     # Ensure custom model_choice is registered in model_name_map
     ensure_model_in_map(model_choice, model_name_map)
+
+    force_zero_shot_radio = effective_force_zero_shot_radio(
+        force_zero_shot_radio, candidate_topics
+    )
 
     tic = time.perf_counter()
 
@@ -3894,14 +3907,19 @@ def extract_topics(
             if not batch_basic_response_df.empty:
 
                 # If this is the second batch, the master table will refer back to the current master table when assigning topics to the new table. Also runs if there is an existing list of topics supplied by the user
-                if latest_batch_completed >= 1 or candidate_topics is not None:
+                if latest_batch_completed >= 1 or has_submitted_candidate_topics(
+                    candidate_topics
+                ):
 
                     formatted_system_prompt = add_existing_topics_system_prompt.format(
                         consultation_context=context_textbox, column_name=chosen_cols
                     )
 
                     # Preparing candidate topics if no topics currently exist
-                    if candidate_topics and existing_topic_summary_df.empty:
+                    if (
+                        has_submitted_candidate_topics(candidate_topics)
+                        and existing_topic_summary_df.empty
+                    ):
 
                         # 'Zero shot topics' are those supplied by the user
                         # Handle both string paths (CLI) and gr.FileData objects (Gradio)
@@ -3950,7 +3968,10 @@ def extract_topics(
                         else:
                             existing_topic_summary_df = zero_shot_topics_df
 
-                    if candidate_topics and not zero_shot_topics_df.empty:
+                    if (
+                        has_submitted_candidate_topics(candidate_topics)
+                        and not zero_shot_topics_df.empty
+                    ):
                         # If you have already created revised zero shot topics, concat to the current
                         existing_topic_summary_df = pd.concat(
                             [existing_topic_summary_df, zero_shot_topics_df]
@@ -4717,6 +4738,7 @@ def extract_topics(
                 logged_content=group_combined_logged_content,
                 api_url=api_url,
                 max_topics_number=max_topics_number,
+                candidate_topics=candidate_topics,
             )
 
             # Add validation conversation metadata to the main conversation metadata
@@ -5025,7 +5047,7 @@ def wrapper_extract_topics_per_column_value(
     :param batch_size: Number of rows to process in each batch for the LLM.
     :param context_textbox: Additional context provided by the user.
     :param sentiment_checkbox: Choice for sentiment assessment (e.g., "Negative, Neutral, or Positive").
-    :param force_zero_shot_radio: Option to force responses into zero-shot topics.
+    :param force_zero_shot_radio: Option to force responses into submitted candidate topics. Only has an effect when candidate_topics is provided.
     :param in_excel_sheets: List of Excel sheet names if applicable.
     :param force_single_topic_radio: Option to force a single topic per response.
     :param produce_structured_summary_radio: Option to produce a structured summary.
@@ -5686,18 +5708,10 @@ def discover_topics_from_sample(
             "Set 'Ask the model to produce structured summaries' to No."
         )
 
-    if candidate_topics is not None:
-        has_candidate = False
-        if isinstance(candidate_topics, list):
-            has_candidate = bool(candidate_topics)
-        elif isinstance(candidate_topics, str):
-            has_candidate = bool(candidate_topics.strip())
-        elif getattr(candidate_topics, "name", None):
-            has_candidate = True
-        if has_candidate:
-            warnings.append(
-                "Uploaded candidate topics were ignored for this discovery run."
-            )
+    if has_submitted_candidate_topics(candidate_topics):
+        warnings.append(
+            "Uploaded candidate topics were ignored for this discovery run."
+        )
 
     try:
         sample_fraction_percent = float(sample_fraction_percent)
@@ -6265,7 +6279,7 @@ def all_in_one_pipeline(
         batch_size (int): Size of each processing batch.
         context_text (str): Additional context for the LLM.
         sentiment_choice (str): Choice for sentiment analysis (e.g., "Yes", "No").
-        force_zero_shot_choice (str): Choice to force zero-shot prompting.
+        force_zero_shot_choice (str): Choice to force assignment into submitted candidate topics. Only has an effect when an initial candidate topics file/list is provided.
         in_excel_sheets (List[str]): List of sheet names in the input Excel file.
         force_single_topic_choice (str): Choice to force single topic extraction.
         produce_structures_summary_choice (str): Choice to produce structured summaries.
@@ -6301,6 +6315,10 @@ def all_in_one_pipeline(
 
     # Ensure custom model_choice is registered in model_name_map_state
     ensure_model_in_map(model_choice, model_name_map_state)
+
+    force_zero_shot_choice = effective_force_zero_shot_radio(
+        force_zero_shot_choice, candidate_topics
+    )
 
     # Load local model if it's not already loaded
     if (
@@ -6516,7 +6534,14 @@ def all_in_one_pipeline(
             "errors. Cannot continue to deduplication."
         )
 
-    print("Deduplicating topic names with fuzzy matching")
+    skip_forced_taxonomy_dedup = force_zero_shot_choice == "Yes"
+    if skip_forced_taxonomy_dedup:
+        print(
+            "Skipping fuzzy topic merge because force zero-shot is enabled "
+            "with a submitted candidate topics list."
+        )
+    else:
+        print("Deduplicating topic names with fuzzy matching")
     (
         ref_df_after_dedup,
         unique_df_after_dedup,
@@ -6536,10 +6561,16 @@ def all_in_one_pipeline(
         chosen_cols=chosen_cols,
         output_folder=output_folder,
         sentiment_checkbox=sentiment_choice,
+        deduplicate_topics="No" if skip_forced_taxonomy_dedup else "Yes",
     )
 
     # LLM-based deduplication if enabled
-    if force_zero_shot_choice == "No" and ALL_IN_ONE_USE_LLM_DEDUP:
+    if skip_forced_taxonomy_dedup:
+        print(
+            "Skipping LLM topic merge because force zero-shot is enabled "
+            "with a submitted candidate topics list."
+        )
+    elif ALL_IN_ONE_USE_LLM_DEDUP:
         # Set up model source and bedrock runtime if needed
 
         print("Deduplicating topic names with LLM")
