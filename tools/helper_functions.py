@@ -540,6 +540,8 @@ def convert_reference_table_to_pivot_table(
     df: pd.DataFrame, basic_response_data: pd.DataFrame = pd.DataFrame()
 ):
     df = df.copy()
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()].copy()
     if "Sentiment" not in df.columns:
         df["Sentiment"] = "Not assessed"
 
@@ -577,6 +579,17 @@ def convert_reference_table_to_pivot_table(
     pivot_table.columns = pivot_table.columns.str.replace(
         "Not assessed - ", ""
     ).str.replace("- Not assessed", "")
+
+    # Stripping "Not assessed" can make distinct topic/sentiment combos collide.
+    # Duplicate labels then break later assignment such as pivot_df["Group"] = ...
+    if pivot_table.columns.duplicated().any():
+        seen: dict[str, int] = {}
+        unique_cols: list[str] = []
+        for col in pivot_table.columns.tolist():
+            count = seen.get(col, 0)
+            unique_cols.append(col if count == 0 else f"{col} ({count + 1})")
+            seen[col] = count + 1
+        pivot_table.columns = unique_cols
 
     leading_cols = [
         col
@@ -628,6 +641,12 @@ def create_topic_summary_df_from_reference_table(
     reference_df: pd.DataFrame,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ):
+
+    if reference_df is not None and not reference_df.empty:
+        if reference_df.columns.duplicated().any():
+            reference_df = reference_df.loc[
+                :, ~reference_df.columns.duplicated()
+            ].copy()
 
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"

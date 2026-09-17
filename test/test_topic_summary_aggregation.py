@@ -5,7 +5,10 @@ import unittest
 
 import pandas as pd
 
-from tools.helper_functions import create_topic_summary_df_from_reference_table
+from tools.helper_functions import (
+    convert_reference_table_to_pivot_table,
+    create_topic_summary_df_from_reference_table,
+)
 
 
 class TestCreateTopicSummaryDfFromReferenceTable(unittest.TestCase):
@@ -92,6 +95,24 @@ class TestCreateTopicSummaryDfFromReferenceTable(unittest.TestCase):
 
         self.assertEqual(len(out), n_topics)
         self.assertLess(elapsed, 2.0)
+
+
+class TestConvertReferenceTableToPivotTable(unittest.TestCase):
+    def test_not_assessed_strip_does_not_create_duplicate_columns(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 2],
+                "General topic": ["Not assessed", "Housing"],
+                "Subtopic": ["Housing - Repairs", "Repairs"],
+                "Sentiment": ["Not assessed", "Not assessed"],
+            }
+        )
+
+        pivot = convert_reference_table_to_pivot_table(reference_df)
+
+        self.assertFalse(pivot.columns.duplicated().any())
+        pivot["Group"] = "All"
+        self.assertEqual(pivot.loc[0, "Group"], "All")
 
 
 if __name__ == "__main__":

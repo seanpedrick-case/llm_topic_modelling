@@ -3,6 +3,7 @@ import os
 import re
 import string
 import time
+import traceback
 from io import StringIO
 from typing import Any, List, Tuple
 
@@ -896,7 +897,15 @@ def validate_topics(
 
                     # Concatenate the new results
                     validation_reference_df = pd.concat(
-                        [validation_reference_df, validation_new_reference_df]
+                        [
+                            _dedupe_dataframe_column_names(
+                                validation_reference_df
+                            ).reset_index(drop=True),
+                            _dedupe_dataframe_column_names(
+                                validation_new_reference_df
+                            ).reset_index(drop=True),
+                        ],
+                        ignore_index=True,
                     ).dropna(how="all")
 
             # Rebuild topic_summary_df from accumulated reference_df to ensure consistency
@@ -2096,7 +2105,7 @@ TOPIC_TABLE_EXPECTED_COLS = [
 
 def _dedupe_dataframe_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """Make column labels unique so later selection/concat cannot hit reindex errors."""
-    if df is None or df.empty:
+    if df is None:
         return df
     if not df.columns.duplicated().any():
         return df
@@ -2200,6 +2209,20 @@ def _ensure_standard_topic_table_columns(
         # rather than consuming Response ID or Summary values.
         if not assess_sentiment and standard_name == "Sentiment":
             continue
+        # Short/malformed tables (e.g. force-zero-shot Placeholder + Subtopic +
+        # IDs) should not treat numeric response IDs as Sentiment.
+        if standard_name == "Sentiment":
+            candidate_vals = _column_as_string_series(working[unused_cols[0]], n_rows)
+            looks_like_ids = (
+                candidate_vals.str.contains(r"\d", regex=True, na=False).mean() >= 0.5
+            )
+            sentiment_values = {"negative", "neutral", "positive", "not assessed"}
+            looks_like_sentiment = (
+                candidate_vals.str.strip().str.lower().isin(sentiment_values).mean()
+                >= 0.5
+            )
+            if looks_like_ids and not looks_like_sentiment:
+                continue
         col = unused_cols.pop(0)
         mapped[standard_name] = _column_as_string_series(working[col], n_rows)
         used_cols.add(col)
@@ -4811,10 +4834,8 @@ def extract_topics(
 
         ## Response ID table mapping response numbers to topics
         # Ensure Group is present for grouped pipelines and downstream concatenation
-        if "Group" not in existing_reference_df.columns:
-            existing_reference_df["Group"] = group_name
-        else:
-            existing_reference_df["Group"] = group_name
+        existing_reference_df = _dedupe_dataframe_column_names(existing_reference_df)
+        existing_reference_df["Group"] = group_name
 
         existing_reference_df.to_csv(
             reference_table_out_path, index=None, encoding="utf-8-sig"
@@ -4870,6 +4891,9 @@ def extract_topics(
         out_file_paths = [x for x in out_file_paths if "_final_" in x]
 
         ## Response ID table mapping response numbers to topics
+        existing_reference_df_pivot = _dedupe_dataframe_column_names(
+            existing_reference_df_pivot
+        )
         existing_reference_df_pivot["Group"] = group_name
         existing_reference_df_pivot.drop(
             ["1", "2", "3"], axis=1, errors="ignore"
@@ -5156,6 +5180,7 @@ def wrapper_extract_topics_per_column_value(
     acc_logged_content = list()
 
     wrapper_first_loop = initial_first_loop_state
+    last_segment_error = None
 
     if len(unique_values) == 1:
         # If only one unique value, no need for progress bar, iterate directly
@@ -5286,27 +5311,39 @@ def wrapper_extract_topics_per_column_value(
             # Aggregate results
             # The DFs returned by extract_topics are already cumulative for *its own run*.
             # We now make them cumulative for the *wrapper's run*.
-            # Reset indices before concatenation to avoid reindexing errors
+            # Reset indices and drop duplicate column labels before concatenation
             if not acc_reference_df.empty:
-                acc_reference_df = acc_reference_df.reset_index(drop=True)
+                acc_reference_df = _dedupe_dataframe_column_names(
+                    acc_reference_df
+                ).reset_index(drop=True)
             if not seg_reference_df.empty:
-                seg_reference_df = seg_reference_df.reset_index(drop=True)
+                seg_reference_df = _dedupe_dataframe_column_names(
+                    seg_reference_df
+                ).reset_index(drop=True)
             acc_reference_df = pd.concat(
                 [acc_reference_df, seg_reference_df], ignore_index=True
             )
 
             if not acc_topic_summary_df.empty:
-                acc_topic_summary_df = acc_topic_summary_df.reset_index(drop=True)
+                acc_topic_summary_df = _dedupe_dataframe_column_names(
+                    acc_topic_summary_df
+                ).reset_index(drop=True)
             if not seg_topic_summary_df.empty:
-                seg_topic_summary_df = seg_topic_summary_df.reset_index(drop=True)
+                seg_topic_summary_df = _dedupe_dataframe_column_names(
+                    seg_topic_summary_df
+                ).reset_index(drop=True)
             acc_topic_summary_df = pd.concat(
                 [acc_topic_summary_df, seg_topic_summary_df], ignore_index=True
             )
 
             if not acc_reference_df_pivot.empty:
-                acc_reference_df_pivot = acc_reference_df_pivot.reset_index(drop=True)
+                acc_reference_df_pivot = _dedupe_dataframe_column_names(
+                    acc_reference_df_pivot
+                ).reset_index(drop=True)
             if not seg_reference_df_pivot.empty:
-                seg_reference_df_pivot = seg_reference_df_pivot.reset_index(drop=True)
+                seg_reference_df_pivot = _dedupe_dataframe_column_names(
+                    seg_reference_df_pivot
+                ).reset_index(drop=True)
             acc_reference_df_pivot = pd.concat(
                 [acc_reference_df_pivot, seg_reference_df_pivot], ignore_index=True
             )
@@ -5347,9 +5384,14 @@ def wrapper_extract_topics_per_column_value(
 
         except Exception as e:
             print(f"Error processing segment {grouping_col} = {group_value}: {e}")
+            traceback.print_exc()
+            last_segment_error = e
             # Optionally, decide if you want to continue with other segments or stop
             # For now, it will continue
             continue
+
+    if acc_reference_df.empty and last_segment_error is not None:
+        raise last_segment_error
 
     overall_file_name = clean_column_name(original_file_name, max_length=20)
     model_choice_clean = model_name_map[model_choice]["short_name"]

@@ -214,6 +214,25 @@ class TestNoSentimentTableLayouts(unittest.TestCase):
         self.assertEqual(out.loc[0, "Response ID"], "3")
         self.assertEqual(out.loc[0, "Summary"], "summary")
 
+    def test_three_column_placeholder_table_maps_ids_not_sentiment(self):
+        """Force-zero-shot tables often have Placeholder, Subtopic, Response ID."""
+        df = pd.DataFrame(
+            {
+                "Placeholder": ["Not assessed", "Not assessed"],
+                "Subtopics": ["Housing repairs", "Buses"],
+                "Response refs": ["1, 2", "3"],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df, batch_size_number=5, assess_sentiment=True
+        )
+
+        self.assertEqual(out.loc[0, "Response ID"], "1, 2")
+        self.assertEqual(out.loc[1, "Response ID"], "3")
+        self.assertEqual(out.loc[0, "Subtopic"], "Housing repairs")
+        self.assertEqual(out.loc[0, "Sentiment"], "Not assessed")
+
     def test_four_column_with_response_id_header_is_not_sentiment(self):
         df = pd.DataFrame(
             {
