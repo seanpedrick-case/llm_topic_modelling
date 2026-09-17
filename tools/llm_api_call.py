@@ -942,15 +942,8 @@ def validate_topics(
             reference_table_file_name = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_reference"
             unique_topics_table_file_name = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_unique_topics"
 
-            # Prepare file_data for deduplication if available
-            in_data_files_for_dedup = None
             validation_num_batches = None
-            validation_data_file_names_textbox = None
-            if not file_data.empty and chosen_cols:
-                # Pass file_data as DataFrame and calculate num_batches
-                in_data_files_for_dedup = file_data
-                validation_num_batches = (len(file_data) + batch_size - 1) // batch_size
-                validation_data_file_names_textbox = file_name
+            validation_data_file_names_textbox = file_name if file_name else None
 
             # Clean General topic and Subtopic columns using the same process as zero-shot topics
             for col_name in ["General topic", "Subtopic"]:
@@ -989,7 +982,7 @@ def validate_topics(
                     merge_sentiment="No",
                     merge_general_topics="No",
                     score_threshold=95,
-                    in_data_files=in_data_files_for_dedup,
+                    in_data_files=None,
                     chosen_cols=(
                         chosen_cols
                         if isinstance(chosen_cols, list)
@@ -4441,15 +4434,8 @@ def extract_topics(
                     f"{file_name_clean}_batch_{latest_batch_completed}_unique_topics"
                 )
 
-                # Prepare file_data for deduplication if available
-                in_data_files_for_dedup = in_data_file
-                extract_num_batches = None
-                extract_data_file_names_textbox = None
-                if not file_data.empty and chosen_cols:
-                    # Pass file_data as DataFrame and use available num_batches and file_name
-                    in_data_files_for_dedup = file_data
-                    extract_num_batches = num_batches
-                    extract_data_file_names_textbox = file_name
+                extract_num_batches = num_batches
+                extract_data_file_names_textbox = file_name
 
                 try:
                     original_topic_summary_df = existing_topic_summary_df.copy()
@@ -4487,7 +4473,7 @@ def extract_topics(
                         merge_sentiment="No",
                         merge_general_topics="No",
                         score_threshold=95,
-                        in_data_files=in_data_files_for_dedup,
+                        in_data_files=None,
                         chosen_cols=(
                             chosen_cols
                             if isinstance(chosen_cols, list)

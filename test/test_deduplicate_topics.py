@@ -1,0 +1,104 @@
+"""Tests for memory-conscious fuzzy topic deduplication."""
+
+import unittest
+
+import pandas as pd
+
+from tools.dedup_summaries import deduplicate_topics
+
+
+class TestDeduplicateTopicsMemory(unittest.TestCase):
+    def _reference_df(self):
+        return pd.DataFrame(
+            {
+                "Response ID": [1, 2, 3, 4],
+                "General topic": ["Transport"] * 4,
+                "Subtopic": [
+                    "Parking availability",
+                    "Parking availablity",
+                    "Bus frequency",
+                    "Parking availability",
+                ],
+                "Sentiment": ["Negative"] * 4,
+                "Summary": [
+                    "Hard to park",
+                    "No spaces",
+                    "Buses are rare",
+                    "More spaces needed",
+                ],
+                "Start row of group": [1, 1, 1, 6],
+                "Group": ["All"] * 4,
+            }
+        )
+
+    def test_batch_dedup_without_source_file_merges_typos(self):
+        reference_df = self._reference_df()
+        topic_summary_df = pd.DataFrame(
+            {
+                "General topic": ["Transport", "Transport"],
+                "Subtopic": ["Parking availability", "Bus frequency"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Topic number": [1, 2],
+            }
+        )
+
+        out_ref, out_topics, output_files, log_files, markdown = deduplicate_topics(
+            reference_df=reference_df,
+            topic_summary_df=topic_summary_df,
+            reference_table_file_name="test_ref",
+            unique_topics_table_file_name="test_topics",
+            score_threshold=90,
+            output_files="False",
+            in_data_files=None,
+        )
+
+        self.assertEqual(output_files, [])
+        self.assertEqual(markdown, "")
+        parking_rows = out_ref[out_ref["Subtopic"].str.contains("Parking", case=False)]
+        self.assertGreaterEqual(parking_rows["Subtopic"].nunique(), 1)
+        self.assertEqual(parking_rows["Subtopic"].nunique(), 1)
+        self.assertEqual(out_ref["Response ID"].nunique(), 4)
+
+    def test_duplicate_topic_response_rows_collapse_summaries(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 1, 2],
+                "General topic": ["Housing", "Housing", "Transport"],
+                "Subtopic": ["Repairs", "Repairs", "Buses"],
+                "Sentiment": ["Negative", "Negative", "Negative"],
+                "Summary": ["Damp in kitchen", "Broken boiler", "Need more buses"],
+                "Start row of group": [1, 1, 6],
+                "Group": ["All", "All", "All"],
+            }
+        )
+        topic_summary_df = pd.DataFrame(
+            {
+                "General topic": ["Housing", "Transport"],
+                "Subtopic": ["Repairs", "Buses"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Topic number": [1, 2],
+            }
+        )
+
+        out_ref, _, _, _, _ = deduplicate_topics(
+            reference_df=reference_df,
+            topic_summary_df=topic_summary_df,
+            reference_table_file_name="test_ref",
+            unique_topics_table_file_name="test_topics",
+            output_files="False",
+            in_data_files=None,
+        )
+
+        repair_rows = out_ref[
+            (out_ref["Response ID"] == 1) & (out_ref["Subtopic"] == "Repairs")
+        ]
+        self.assertEqual(len(repair_rows), 1)
+        summary = repair_rows.iloc[0]["Summary"]
+        self.assertIn("Damp in kitchen", summary)
+        self.assertIn("Broken boiler", summary)
+
+
+if __name__ == "__main__":
+    unittest.main()

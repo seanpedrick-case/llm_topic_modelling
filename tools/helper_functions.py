@@ -590,6 +590,40 @@ def convert_reference_table_to_pivot_table(
     return pivot_table
 
 
+def _split_summary_segments(summary) -> list:
+    """Split a summary cell into unique-ready snippets, including pre-joined <br> text."""
+    if summary is None or (not isinstance(summary, str) and pd.isna(summary)):
+        return []
+    summary_str = str(summary).strip()
+    if not summary_str:
+        return []
+    if "<br>" in summary_str:
+        return [
+            seg.strip() for seg in re.split(r"<br>| <br> ", summary_str) if seg.strip()
+        ]
+    return [summary_str]
+
+
+def _summary_segment_start_rows(frame: pd.DataFrame) -> dict:
+    """Map each summary snippet to the earliest Start row of group it came from.
+
+    Built in a single pass over the reference table so summary aggregation does
+    not scan the full frame for every snippet.
+    """
+    if frame is None or frame.empty or "Start row of group" not in frame.columns:
+        return {}
+    mapping = {}
+    summaries = frame["Summary"].to_numpy() if "Summary" in frame.columns else []
+    start_rows = frame["Start row of group"].to_numpy()
+    for summary, start_row in zip(summaries, start_rows):
+        start_val = float("inf") if pd.isna(start_row) else start_row
+        for segment in _split_summary_segments(summary):
+            prev = mapping.get(segment)
+            if prev is None or start_val < prev:
+                mapping[segment] = start_val
+    return mapping
+
+
 def create_topic_summary_df_from_reference_table(
     reference_df: pd.DataFrame,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
@@ -636,6 +670,11 @@ def create_topic_summary_df_from_reference_table(
         sorted_refs = sorted(refs)
         return ", ".join(map(str, sorted_refs)) if sorted_refs else ""
 
+    # Map each summary snippet to its earliest batch start row in one pass.
+    # The previous per-snippet full-table str.contains scan was O(topics ×
+    # snippets × rows) and dominated validation time on large reference tables.
+    segment_to_start_row = _summary_segment_start_rows(reference_df)
+
     # Helper function to concatenate summaries
     # This aggregates all unique summaries from rows with the same topic combination
     def aggregate_summaries(x):
@@ -643,17 +682,7 @@ def create_topic_summary_df_from_reference_table(
         all_segments = []
 
         for summary in x:
-            if pd.notna(summary):
-                summary_str = str(summary).strip()
-                if summary_str:
-                    # If summary already contains <br> separators, split it into segments
-                    if "<br>" in summary_str or " <br> " in summary_str:
-                        segments = re.split(r"<br>| <br> ", summary_str)
-                        segments = [seg.strip() for seg in segments if seg.strip()]
-                        all_segments.extend(segments)
-                    else:
-                        # Single summary
-                        all_segments.append(summary_str)
+            all_segments.extend(_split_summary_segments(summary))
 
         # Remove duplicate segments while preserving order
         unique_segments = []
@@ -663,35 +692,11 @@ def create_topic_summary_df_from_reference_table(
                 seen_segments.add(segment)
                 unique_segments.append(segment)
 
-        # Sort by minimum Start row of group if available (try to match segments to original summaries)
-        if "Start row of group" in reference_df.columns and unique_segments:
-            try:
-                # Create a mapping of segments to their minimum start row
-                segment_to_start_row = {}
-                for segment in unique_segments:
-                    # Find rows where Summary contains this segment
-                    matching_rows = reference_df[
-                        reference_df["Summary"].str.contains(
-                            segment, na=False, regex=False
-                        )
-                    ]
-                    if (
-                        not matching_rows.empty
-                        and "Start row of group" in matching_rows.columns
-                    ):
-                        min_start_row = matching_rows["Start row of group"].min()
-                        segment_to_start_row[segment] = min_start_row
-                    else:
-                        segment_to_start_row[segment] = float("inf")
-
-                # Sort by minimum start row
-                unique_segments = sorted(
-                    unique_segments,
-                    key=lambda seg: segment_to_start_row.get(seg, float("inf")),
-                )
-            except Exception:
-                # If sorting fails, just use the order we have
-                pass
+        # Sort by earliest Start row of group when that mapping is available
+        if segment_to_start_row and unique_segments:
+            unique_segments.sort(
+                key=lambda seg: segment_to_start_row.get(seg, float("inf"))
+            )
 
         return "<br>".join(unique_segments) if unique_segments else ""
 

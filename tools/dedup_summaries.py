@@ -105,11 +105,12 @@ max_number_of_topics = MAXIMUM_ALLOWED_TOPICS
 def deduplicate_categories(
     category_series: pd.Series,
     join_series: pd.Series,
-    reference_df: pd.DataFrame,
+    reference_df: pd.DataFrame = None,
     general_topic_series: pd.Series = None,
     merge_general_topics="No",
     merge_sentiment: str = "No",
     threshold: float = 90,
+    category_counts: dict = None,
 ) -> pd.DataFrame:
     """
     Deduplicates similar category names in a pandas Series based on a fuzzy matching threshold,
@@ -120,12 +121,15 @@ def deduplicate_categories(
         join_series (pd.Series): Additional series used for joining back to original results.
         reference_df (pd.DataFrame): DataFrame containing the reference data to count occurrences.
         threshold (float): Similarity threshold for considering two strings as duplicates.
-
-    Returns:
-        pd.DataFrame: DataFrame with columns ['old_category', 'deduplicated_category'].
+        category_counts (dict, optional): Precomputed Subtopic value counts. If omitted,
+            counts are taken from reference_df.
     """
     # Count occurrences of each category in the reference_df
-    category_counts = reference_df["Subtopic"].value_counts().to_dict()
+    if category_counts is None:
+        if reference_df is None or "Subtopic" not in reference_df.columns:
+            category_counts = {}
+        else:
+            category_counts = reference_df["Subtopic"].value_counts().to_dict()
 
     # Initialize dictionaries for both category mapping and scores
     deduplication_map = {}
@@ -181,12 +185,15 @@ def deduplicate_categories(
             ].tolist()
 
         matches = process.extract(
-            category, potential_matches, scorer=fuzz.WRatio, score_cutoff=threshold
+            category,
+            potential_matches,
+            scorer=fuzz.WRatio,
+            score_cutoff=threshold,
+            limit=1,
         )
 
         if matches:
-            best_match = max(matches, key=lambda x: x[1])
-            match, score, _ = best_match
+            match, score, _ = matches[0]
 
             if category_counts.get(category, 0) < category_counts.get(match, 0):
                 deduplication_map[category] = match
@@ -214,6 +221,34 @@ def deduplicate_categories(
     # print(result_df)
 
     return result_df
+
+
+def _topic_map_has_changes(map_df: pd.DataFrame) -> bool:
+    """True if any old subtopic is mapped to a different name."""
+    if map_df is None or map_df.empty:
+        return False
+    if "deduplicated_category" not in map_df.columns:
+        return False
+    if map_df["deduplicated_category"].isnull().all():
+        return False
+    original = (
+        map_df["old_category"].astype(str).str.replace(r" \| .*$", "", regex=True)
+    )
+    mapped = map_df["deduplicated_category"].astype(str)
+    return bool((original.str.strip() != mapped.str.strip()).any())
+
+
+def _join_unique_summaries(series: pd.Series) -> str:
+    seen = []
+    seen_set = set()
+    for val in series:
+        if pd.isna(val):
+            continue
+        text = str(val).strip()
+        if text and text not in seen_set:
+            seen_set.add(text)
+            seen.append(text)
+    return " <br> ".join(seen)
 
 
 def deduplicate_topics(
@@ -368,12 +403,13 @@ def deduplicate_topics(
         )
 
     # Check if in_data_files is not empty (handles both DataFrame and list)
+    # Skip loading/copying source data unless we will write pivot outputs.
     has_data_files = (
         (isinstance(in_data_files, pd.DataFrame) and not in_data_files.empty)
         or (isinstance(in_data_files, list) and len(in_data_files) > 0)
         or (not isinstance(in_data_files, (pd.DataFrame, list)) and in_data_files)
     )
-    if has_data_files and chosen_cols:
+    if should_output_files == "True" and has_data_files and chosen_cols:
         # Check if in_data_files is already a DataFrame
         if isinstance(in_data_files, pd.DataFrame):
             # Use the DataFrame directly
@@ -399,9 +435,8 @@ def deduplicate_topics(
                 )
             )
     else:
-        out_message = "No file data found, pivot table output will not be created."
-        print(out_message)
-        # raise Exception(out_message)
+        if should_output_files == "True":
+            print("No file data found, pivot table output will not be created.")
 
     # Run through this x times to try to get all duplicate topics
     if deduplicate_topics == "Yes":
@@ -414,6 +449,7 @@ def deduplicate_topics(
                         reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     )
                     reference_df_unique = reference_df.drop_duplicates("old_category")
+                    category_counts = reference_df["Subtopic"].value_counts().to_dict()
 
                     # Create an empty list to store results from each group
                     results = list()
@@ -425,7 +461,7 @@ def deduplicate_topics(
                         result = deduplicate_categories(
                             group["Subtopic"],
                             group["Sentiment"],
-                            reference_df,
+                            category_counts=category_counts,
                             general_topic_series=group["General topic"],
                             merge_general_topics="No",
                             threshold=score_threshold,
@@ -443,13 +479,14 @@ def deduplicate_topics(
                         reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     )
                     reference_df_unique = reference_df.drop_duplicates("old_category")
+                    category_counts = reference_df["Subtopic"].value_counts().to_dict()
 
                     results = list()
                     for name, group in reference_df_unique.groupby("Sentiment"):
                         result = deduplicate_categories(
                             group["Subtopic"],
                             group["Sentiment"],
-                            reference_df,
+                            category_counts=category_counts,
                             general_topic_series=None,
                             merge_general_topics="Yes",
                             threshold=score_threshold,
@@ -465,13 +502,14 @@ def deduplicate_topics(
                         reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     )
                     reference_df_unique = reference_df.drop_duplicates("old_category")
+                    category_counts = reference_df["Subtopic"].value_counts().to_dict()
 
                     results = list()
                     for name, group in reference_df_unique.groupby("General topic"):
                         result = deduplicate_categories(
                             group["Subtopic"],
                             group["Sentiment"],
-                            reference_df,
+                            category_counts=category_counts,
                             general_topic_series=group["General topic"],
                             merge_general_topics="No",
                             merge_sentiment=merge_sentiment,
@@ -487,18 +525,20 @@ def deduplicate_topics(
                         reference_df["Subtopic"] + " | " + reference_df["Sentiment"]
                     )
                     reference_df_unique = reference_df.drop_duplicates("old_category")
+                    category_counts = reference_df["Subtopic"].value_counts().to_dict()
 
                     deduplicated_topic_map_df = deduplicate_categories(
                         reference_df_unique["Subtopic"],
                         reference_df_unique["Sentiment"],
-                        reference_df,
+                        category_counts=category_counts,
                         general_topic_series=None,
                         merge_general_topics="Yes",
                         merge_sentiment=merge_sentiment,
                         threshold=score_threshold,
                     ).reset_index(drop=True)
 
-            if deduplicated_topic_map_df["deduplicated_category"].isnull().all():
+            has_remaps = _topic_map_has_changes(deduplicated_topic_map_df)
+            if not has_remaps:
                 print("No deduplicated categories found, skipping the following code.")
 
             else:
@@ -620,11 +660,21 @@ def deduplicate_topics(
                     "Group",
                 ]
             ]
+            if not has_remaps:
+                break
 
-        # Update reference summary column with all summaries
-        reference_df["Summary"] = reference_df.groupby(
-            ["Response ID", "General topic", "Subtopic", "Sentiment"]
-        )["Summary"].transform(" <br> ".join)
+        # Collapse duplicate topic-response rows without broadcasting joined
+        # summaries onto every original row (the previous transform join used
+        # O(n²) string memory on large groups).
+        group_cols = ["Response ID", "General topic", "Subtopic", "Sentiment"]
+        agg_dict = {"Summary": _join_unique_summaries}
+        if "Start row of group" in reference_df.columns:
+            agg_dict["Start row of group"] = "min"
+        if "Group" in reference_df.columns:
+            agg_dict["Group"] = "first"
+        reference_df = reference_df.groupby(group_cols, as_index=False, sort=False).agg(
+            agg_dict
+        )
 
         # Check that we have not inadvertantly removed some data during the above process
         end_unique_references = len(reference_df["Response ID"].unique())
@@ -751,7 +801,7 @@ def deduplicate_topics(
         unique_topics_table_file_name
     )
 
-    if not file_data.empty:
+    if should_output_files == "True" and not file_data.empty:
         basic_response_data = get_basic_response_data(file_data, chosen_cols)
         reference_df_pivot = convert_reference_table_to_pivot_table(
             reference_df, basic_response_data
@@ -760,11 +810,10 @@ def deduplicate_topics(
         reference_pivot_file_path = (
             output_folder + reference_table_file_name_no_ext + "_pivot_dedup.csv"
         )
-        if should_output_files == "True":
-            reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
-                reference_pivot_file_path, index=None, encoding="utf-8-sig"
-            )
-            log_output_files.append(reference_pivot_file_path)
+        reference_df_pivot.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            reference_pivot_file_path, index=None, encoding="utf-8-sig"
+        )
+        log_output_files.append(reference_pivot_file_path)
 
     reference_file_out_path = (
         output_folder + reference_table_file_name_no_ext + "_dedup.csv"
@@ -784,13 +833,14 @@ def deduplicate_topics(
         output_files.append(reference_file_out_path)
         output_files.append(unique_topics_file_out_path)
 
-    # Outputs for markdown table output
-    topic_summary_df_revised_display = topic_summary_df.apply(
-        lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
-    )
-    deduplicated_unique_table_markdown = topic_summary_df_revised_display.to_markdown(
-        index=False
-    )
+        topic_summary_df_revised_display = topic_summary_df.apply(
+            lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
+        )
+        deduplicated_unique_table_markdown = (
+            topic_summary_df_revised_display.to_markdown(index=False)
+        )
+    else:
+        deduplicated_unique_table_markdown = ""
 
     print("Deduplication task successfully completed")
 
