@@ -1909,6 +1909,19 @@ def process_requests(
     )
 
 
+def adjust_retry_temperature(original_temperature: float, retry_step: int) -> float:
+    """Shift temperature for a retry, staying within Bedrock's 0.1–1.0 range.
+
+    If the original temperature is already at 1.0, decrease instead of increase.
+    """
+    step = 0.1 * retry_step
+    if original_temperature >= 1.0:
+        adjusted = original_temperature - step
+    else:
+        adjusted = original_temperature + step
+    return min(1.0, max(0.1, round(adjusted, 1)))
+
+
 def call_llm_with_markdown_table_checks(
     batch_prompts: List[str],
     system_prompt: str,
@@ -2009,12 +2022,7 @@ def call_llm_with_markdown_table_checks(
             break  # Success - exit loop
 
         # Adjust temperature for next attempt. Bedrock rejects values above 1.0.
-        step = 0.1 * (attempt + 1)
-        if temperature >= 1.0:
-            call_temperature = temperature - step
-        else:
-            call_temperature = temperature + step
-        call_temperature = min(1.0, max(0.1, round(call_temperature, 1)))
+        call_temperature = adjust_retry_temperature(temperature, attempt + 1)
         print(
             f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
             f"Trying again with temperature: {call_temperature}"

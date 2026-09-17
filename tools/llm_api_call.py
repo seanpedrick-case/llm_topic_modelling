@@ -66,6 +66,7 @@ from tools.helper_functions import (
     write_topic_discovery_manifest_csv,
 )
 from tools.llm_funcs import (
+    adjust_retry_temperature,
     calculate_tokens_from_metadata,
     call_llm_with_markdown_table_checks,
     construct_azure_client,
@@ -176,7 +177,10 @@ def normalise_string(text: str):
 
 
 def reconstruct_markdown_table_from_reference_df(
-    reference_df: pd.DataFrame, start_row: int = None, end_row: int = None
+    reference_df: pd.DataFrame,
+    start_row: int = None,
+    end_row: int = None,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ) -> tuple[str, pd.DataFrame]:
     """
     Reconstructs a markdown table from reference_df data when all_responses_content is missing.
@@ -186,6 +190,8 @@ def reconstruct_markdown_table_from_reference_df(
     - reference_df (pd.DataFrame): The reference dataframe containing topic analysis data
     - start_row (int, optional): The starting row number for the current batch
     - end_row (int, optional): The ending row number for the current batch
+    - sentiment_checkbox (str, optional): Sentiment analysis option. When
+      "Do not assess sentiment", the reconstructed table omits the Sentiment column.
 
     Returns:
     - tuple[str, pd.DataFrame]: A tuple containing:
@@ -217,9 +223,16 @@ def reconstruct_markdown_table_from_reference_df(
     ):
         filtered_df = filtered_df.rename(columns={"Revised summary": "Summary"})
 
-    # Group by General topic, Subtopic, and Sentiment to aggregate response references
+    include_sentiment = _assess_sentiment(sentiment_checkbox)
+    if include_sentiment:
+        if "Sentiment" not in filtered_df.columns:
+            filtered_df["Sentiment"] = "Not assessed"
+        group_cols = ["General topic", "Subtopic", "Sentiment"]
+    else:
+        group_cols = ["General topic", "Subtopic"]
+
     grouped_df = (
-        filtered_df.groupby(["General topic", "Subtopic", "Sentiment"])
+        filtered_df.groupby(group_cols)
         .agg(
             {
                 "Response ID": lambda x: ", ".join(map(str, sorted(x.unique()))),
@@ -250,14 +263,16 @@ def reconstruct_markdown_table_from_reference_df(
 
     # Clean up the data to handle any NaN values and remove "Rows x to y: " prefix from summary
     cleaned_df = grouped_df.copy()
-    for col in [
-        "General topic",
-        "Subtopic",
-        "Sentiment",
-        "Response ID",
-        "Summary",
-    ]:
-        cleaned_df[col] = cleaned_df[col].fillna("").astype(str)
+    markdown_cols = ["General topic", "Subtopic"]
+    if include_sentiment:
+        markdown_cols.append("Sentiment")
+    markdown_cols.extend(["Response ID", "Summary"])
+    for col in markdown_cols:
+        if col in cleaned_df.columns:
+            cleaned_df[col] = cleaned_df[col].fillna("").astype(str)
+
+    if not include_sentiment:
+        cleaned_df["Sentiment"] = "Not assessed"
 
     # Remove "Rows x to y: " prefix from summary if present
     cleaned_df["Summary"] = cleaned_df["Summary"].apply(
@@ -266,25 +281,36 @@ def reconstruct_markdown_table_from_reference_df(
         )
     )
 
-    cleaned_df.drop_duplicates(
-        ["General topic", "Subtopic", "Sentiment", "Response ID"], inplace=True
-    )
+    dedupe_cols = ["General topic", "Subtopic", "Response ID"]
+    if include_sentiment:
+        dedupe_cols.insert(2, "Sentiment")
+    cleaned_df.drop_duplicates(dedupe_cols, inplace=True)
 
-    # Create the markdown table
-    markdown_table = (
-        "| General topic | Subtopic | Sentiment | Response ID | Summary |\n"
-    )
-    markdown_table += "|---|---|---|---|---|\n"
+    if include_sentiment:
+        markdown_table = (
+            "| General topic | Subtopic | Sentiment | Response ID | Summary |\n"
+        )
+        markdown_table += "|---|---|---|---|---|\n"
+    else:
+        markdown_table = "| General topic | Subtopic | Response ID | Summary |\n"
+        markdown_table += "|---|---|---|---|\n"
 
     for _, row in cleaned_df.iterrows():
         general_topic = row["General topic"]
         subtopic = row["Subtopic"]
-        sentiment = row["Sentiment"]
         response_refs = row["Response ID"]
         summary = row["Summary"]
 
-        # Add row to markdown table
-        markdown_table += f"| {general_topic} | {subtopic} | {sentiment} | {response_refs} | {summary} |\n"
+        if include_sentiment:
+            sentiment = row["Sentiment"]
+            markdown_table += (
+                f"| {general_topic} | {subtopic} | {sentiment} | "
+                f"{response_refs} | {summary} |\n"
+            )
+        else:
+            markdown_table += (
+                f"| {general_topic} | {subtopic} | {response_refs} | {summary} |\n"
+            )
 
     return markdown_table, cleaned_df
 
@@ -566,13 +592,19 @@ def validate_topics(
                     validation_latest_batch_completed
                 ]
                 _, previous_topic_df = reconstruct_markdown_table_from_reference_df(
-                    reference_df, validation_start_row, validation_end_row
+                    reference_df,
+                    validation_start_row,
+                    validation_end_row,
+                    sentiment_checkbox=sentiment_checkbox,
                 )
             else:
                 # Try to reconstruct markdown table from reference_df data
                 previous_table_content, previous_topic_df = (
                     reconstruct_markdown_table_from_reference_df(
-                        reference_df, validation_start_row, validation_end_row
+                        reference_df,
+                        validation_start_row,
+                        validation_end_row,
+                        sentiment_checkbox=sentiment_checkbox,
                     )
                 )
 
@@ -784,6 +816,7 @@ def validate_topics(
                 task_type="Validation",
                 assistant_prefill=add_existing_topics_assistant_prefill,
                 api_url=api_url,
+                sentiment_checkbox=sentiment_checkbox,
             )
 
             if validation_new_topic_df.empty:
@@ -2016,19 +2049,38 @@ def _find_parsed_table_column(df: pd.DataFrame, standard_name: str) -> str | Non
     return None
 
 
-def _four_column_table_has_sentiment(df: pd.DataFrame) -> bool:
+def _four_column_table_has_sentiment(
+    df: pd.DataFrame, assess_sentiment: bool = True
+) -> bool:
     """Distinguish 4-column tables with Sentiment (batch_size==1) from those without."""
-    if _find_parsed_table_column(df, "Sentiment") is not None:
-        return True
-    if _find_parsed_table_column(df, "Response ID") is not None:
-        return False
+    has_sentiment_header = _find_parsed_table_column(df, "Sentiment") is not None
+    has_response_id_header = _find_parsed_table_column(df, "Response ID") is not None
+
+    if not assess_sentiment:
+        # Prompt asked for Response ID, not Sentiment. Keep ID columns even if
+        # a Sentiment header is also present.
+        if has_response_id_header:
+            return False
+        if has_sentiment_header:
+            return True
+    else:
+        if has_sentiment_header:
+            return True
+        if has_response_id_header:
+            return False
+
     if df.shape[1] < 3:
         return False
     col2 = df.iloc[:, 2].astype(str).str.strip().str.lower()
     sentiment_values = {"negative", "neutral", "positive", "not assessed"}
     if col2.empty:
         return False
-    return col2.isin(sentiment_values).mean() >= 0.5
+    looks_like_sentiment = col2.isin(sentiment_values).mean() >= 0.5
+    if not assess_sentiment and looks_like_sentiment:
+        # Do not treat numeric ID cells as sentiment.
+        looks_like_ids = col2.str.contains(r"\d", regex=True, na=False).mean() >= 0.5
+        return not looks_like_ids
+    return looks_like_sentiment
 
 
 TOPIC_TABLE_EXPECTED_COLS = [
@@ -2084,8 +2136,26 @@ def _column_as_string_series(values: Any, length: int) -> pd.Series:
     return series
 
 
+def _column_fill_order(assess_sentiment: bool) -> List[str]:
+    """Order unused parsed columns should fill standard fields.
+
+    When sentiment is not requested, Response ID and Summary must be filled
+    before Sentiment so topic/summary text is not consumed as a missing
+    Sentiment column.
+    """
+    if assess_sentiment:
+        return list(TOPIC_TABLE_EXPECTED_COLS)
+    return [
+        "General topic",
+        "Subtopic",
+        "Response ID",
+        "Summary",
+        "Sentiment",
+    ]
+
+
 def _ensure_standard_topic_table_columns(
-    df: pd.DataFrame, batch_size_number: int
+    df: pd.DataFrame, batch_size_number: int, assess_sentiment: bool = True
 ) -> pd.DataFrame:
     """
     Force a topic-analysis table into exactly the five expected columns.
@@ -2119,11 +2189,15 @@ def _ensure_standard_topic_table_columns(
         used_cols.add(found)
 
     unused_cols = [c for c in working.columns if c not in used_cols]
-    for standard_name in expected:
+    for standard_name in _column_fill_order(assess_sentiment):
         if standard_name in mapped:
             continue
         if not unused_cols:
             break
+        # When sentiment was not requested, leave Sentiment for the default
+        # rather than consuming Response ID or Summary values.
+        if not assess_sentiment and standard_name == "Sentiment":
+            continue
         col = unused_cols.pop(0)
         mapped[standard_name] = _column_as_string_series(working[col], n_rows)
         used_cols.add(col)
@@ -2237,6 +2311,7 @@ def write_llm_output_and_logs(
     produce_structured_summary_radio: str = "No",
     return_logs: bool = False,
     output_folder: str = OUTPUT_FOLDER,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ) -> Tuple:
     """
     Writes the output of the large language model requests and logs to files.
@@ -2258,6 +2333,9 @@ def write_llm_output_and_logs(
     - produce_structured_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
     - return_logs (bool): A boolean indicating if logs should be returned. Defaults to False.
     - output_folder (str): The name of the folder where output files are saved.
+    - sentiment_checkbox (str, optional): Sentiment analysis option. When
+      "Do not assess sentiment", 4-column tables are treated as having
+      Response ID rather than Sentiment.
     """
     topic_summary_df_out_path = list()
     topic_table_out_path = "topic_table_error.csv"
@@ -2454,20 +2532,48 @@ def write_llm_output_and_logs(
         if parsed_column_count < 3 or parsed_column_count not in (4, 5):
             has_incomplete_output = True
 
+    assess_sentiment = _assess_sentiment(sentiment_checkbox)
+    has_sentiment_header = (
+        _find_parsed_table_column(topic_with_response_df, "Sentiment") is not None
+    )
+    has_response_id_header = (
+        _find_parsed_table_column(topic_with_response_df, "Response ID") is not None
+    )
+
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
     if topic_with_response_df.shape[1] == 5:
-        new_column_names = {
-            topic_with_response_df.columns[0]: "General topic",
-            topic_with_response_df.columns[1]: "Subtopic",
-            topic_with_response_df.columns[2]: "Sentiment",
-            topic_with_response_df.columns[3]: "Response ID",
-            topic_with_response_df.columns[4]: "Summary",
-        }
-
-        topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
+        if not assess_sentiment and not has_sentiment_header:
+            # Prompt asked for 4 columns; a 5th is usually a trailing empty cell.
+            # Do not treat column 3 as Sentiment or Response ID values are lost.
+            if not has_response_id_header:
+                new_column_names = {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Response ID",
+                    topic_with_response_df.columns[3]: "Summary",
+                }
+                topic_with_response_df = topic_with_response_df.rename(
+                    columns=new_column_names
+                )
+            topic_with_response_df["Sentiment"] = pd.Series(
+                ["Not assessed"] * len(topic_with_response_df), dtype=str
+            )
+        else:
+            new_column_names = {
+                topic_with_response_df.columns[0]: "General topic",
+                topic_with_response_df.columns[1]: "Subtopic",
+                topic_with_response_df.columns[2]: "Sentiment",
+                topic_with_response_df.columns[3]: "Response ID",
+                topic_with_response_df.columns[4]: "Summary",
+            }
+            topic_with_response_df = topic_with_response_df.rename(
+                columns=new_column_names
+            )
     elif topic_with_response_df.shape[1] == 4:
-        if _four_column_table_has_sentiment(topic_with_response_df):
+        if _four_column_table_has_sentiment(
+            topic_with_response_df, assess_sentiment=assess_sentiment
+        ):
             # batch_size==1: General topic, Subtopic, Sentiment, Summary (no Response ID)
             rename_map = {}
             for standard_name in [
@@ -2496,15 +2602,43 @@ def write_llm_output_and_logs(
             )
         else:
             # 4-column case without Sentiment (Response ID present instead)
-            new_column_names = {
-                topic_with_response_df.columns[0]: "General topic",
-                topic_with_response_df.columns[1]: "Subtopic",
-                topic_with_response_df.columns[2]: "Response ID",
-                topic_with_response_df.columns[3]: "Summary",
-            }
-            topic_with_response_df = topic_with_response_df.rename(
-                columns=new_column_names
-            )
+            if has_response_id_header:
+                rename_map = {}
+                for standard_name in [
+                    "General topic",
+                    "Subtopic",
+                    "Response ID",
+                    "Summary",
+                ]:
+                    found_col = _find_parsed_table_column(
+                        topic_with_response_df, standard_name
+                    )
+                    if found_col is not None:
+                        rename_map[found_col] = standard_name
+                if len(rename_map) == 4:
+                    topic_with_response_df = topic_with_response_df.rename(
+                        columns=rename_map
+                    )
+                else:
+                    new_column_names = {
+                        topic_with_response_df.columns[0]: "General topic",
+                        topic_with_response_df.columns[1]: "Subtopic",
+                        topic_with_response_df.columns[2]: "Response ID",
+                        topic_with_response_df.columns[3]: "Summary",
+                    }
+                    topic_with_response_df = topic_with_response_df.rename(
+                        columns=new_column_names
+                    )
+            else:
+                new_column_names = {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Response ID",
+                    topic_with_response_df.columns[3]: "Summary",
+                }
+                topic_with_response_df = topic_with_response_df.rename(
+                    columns=new_column_names
+                )
             topic_with_response_df["Sentiment"] = pd.Series(
                 ["Not assessed"] * len(topic_with_response_df), dtype=str
             )
@@ -2521,7 +2655,9 @@ def write_llm_output_and_logs(
     # "General topic" when another column is already named that), which previously
     # caused: Reindexing only valid with uniquely valued Index objects.
     topic_with_response_df = _ensure_standard_topic_table_columns(
-        topic_with_response_df, batch_size_number
+        topic_with_response_df,
+        batch_size_number,
+        assess_sentiment=assess_sentiment,
     )
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
@@ -3031,6 +3167,7 @@ def process_batch_with_llm(
     task_type: str,
     assistant_prefill: str = "",
     api_url: str = None,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ):
     """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
 
@@ -3196,11 +3333,13 @@ def process_batch_with_llm(
     current_temperature = temperature
 
     while retry_needed and retry_count < max_retries:
-        # Increase temperature by 0.1 on each retry (not on first attempt)
+        # Adjust temperature on each retry (not on first attempt). Bedrock rejects values above 1.0.
         if retry_count > 0:
-            current_temperature = original_temperature + (retry_count * 0.1)
+            current_temperature = adjust_retry_temperature(
+                original_temperature, retry_count
+            )
             print(
-                f"Increasing temperature to {current_temperature:.1f} for retry attempt {retry_count + 1}"
+                f"Adjusting temperature to {current_temperature:.1f} for retry attempt {retry_count + 1}"
             )
 
             # Recreate client with updated temperature if using Gemini
@@ -3269,6 +3408,7 @@ def process_batch_with_llm(
             group_name,
             produce_structured_summary_radio,
             output_folder=output_folder,
+            sentiment_checkbox=sentiment_checkbox,
         )
 
         # Check if output has unexpected column count (incomplete / malformed format)
@@ -3276,10 +3416,12 @@ def process_batch_with_llm(
         if has_incomplete_output:
             retry_count += 1
             if retry_count < max_retries:
-                next_temperature = original_temperature + (retry_count * 0.1)
+                next_temperature = adjust_retry_temperature(
+                    original_temperature, retry_count
+                )
                 print(
                     f"LLM output table has unexpected column count (incomplete/malformed format). "
-                    f"Retrying LLM call with increased temperature {next_temperature:.1f} "
+                    f"Retrying LLM call with temperature {next_temperature:.1f} "
                     f"(attempt {retry_count + 1}/{max_retries})..."
                 )
                 retry_needed = True
@@ -3916,7 +4058,7 @@ def extract_topics(
                             ["Main heading", "Subheading"], ascending=[True, True]
                         )
 
-                    print("Number of topics:", topics_df_for_markdown.shape[0])
+                    # print("Number of topics:", topics_df_for_markdown.shape[0])
 
                     # Clean topic names before converting to markdown to ensure consistent formatting
                     if "General topic" in topics_df_for_markdown.columns:
@@ -4034,9 +4176,10 @@ def extract_topics(
                         task_type=task_type,
                         assistant_prefill=add_existing_topics_assistant_prefill,
                         api_url=api_url,
+                        sentiment_checkbox=sentiment_checkbox,
                     )
 
-                    print("Completed batch processing")
+                    # print("Completed batch processing")
 
                     all_prompts_content.append(current_prompt_content_logged)
                     all_responses_content.append(current_summary_content_logged)
@@ -4193,6 +4336,7 @@ def extract_topics(
                         task_type=task_type,
                         assistant_prefill=initial_table_assistant_prefill,
                         api_url=api_url,
+                        sentiment_checkbox=sentiment_checkbox,
                     )
 
                     all_prompts_content.append(current_prompt_content_logged)

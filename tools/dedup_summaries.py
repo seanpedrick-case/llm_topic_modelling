@@ -1145,7 +1145,7 @@ def deduplicate_topics_llm(
 
     # Set up model clients based on model source
     if "Gemini" in model_source:
-        print("Using Gemini model:", model_choice)
+        # print("Using Gemini model:", model_choice)
         client, config = construct_gemini_generative_model(
             in_api_key,
             temperature,
@@ -1156,7 +1156,7 @@ def deduplicate_topics_llm(
         )
         bedrock_runtime = None
     elif "Azure/OpenAI" in model_source:
-        print("Using Azure/OpenAI AI Inference model:", model_choice)
+        # print("Using Azure/OpenAI AI Inference model:", model_choice)
         if azure_api_key_textbox:
             os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
         client, config = construct_azure_client(
@@ -1164,7 +1164,7 @@ def deduplicate_topics_llm(
         )
         bedrock_runtime = None
     elif "AWS" in model_source:
-        print("Using AWS Bedrock model:", model_choice)
+        # print("Using AWS Bedrock model:", model_choice)
         bedrock_runtime = connect_to_bedrock_runtime(
             model_name_map,
             model_choice,
@@ -1175,12 +1175,12 @@ def deduplicate_topics_llm(
         client = None
         config = None
     elif "Local" in model_source:
-        print("Using local model:", model_choice)
+        # print("Using local model:", model_choice)
         client = None
         config = None
         bedrock_runtime = None
     elif "inference-server" in model_source:
-        print("Using inference-server model:", model_choice)
+        # print("Using inference-server model:", model_choice)
         client = None
         config = None
         bedrock_runtime = None
