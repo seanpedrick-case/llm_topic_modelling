@@ -100,5 +100,54 @@ class TestDeduplicateTopicsMemory(unittest.TestCase):
         self.assertIn("Broken boiler", summary)
 
 
+class TestLightNearDuplicateTopicMerge(unittest.TestCase):
+    def _run(self, subtopics, threshold=92):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": list(range(1, len(subtopics) + 1)),
+                "General topic": ["Housing"] * len(subtopics),
+                "Subtopic": subtopics,
+                "Sentiment": ["Negative"] * len(subtopics),
+                "Summary": [f"Summary {i}" for i in range(len(subtopics))],
+                "Start row of group": [1] * len(subtopics),
+                "Group": ["All"] * len(subtopics),
+            }
+        )
+        topic_summary_df = pd.DataFrame(
+            {
+                "General topic": ["Housing"] * len(set(subtopics)),
+                "Subtopic": list(dict.fromkeys(subtopics)),
+                "Sentiment": ["Negative"] * len(set(subtopics)),
+                "Group": ["All"] * len(set(subtopics)),
+                "Topic number": list(range(1, len(set(subtopics)) + 1)),
+            }
+        )
+        out_ref, _, _, _, _ = deduplicate_topics(
+            reference_df=reference_df,
+            topic_summary_df=topic_summary_df,
+            reference_table_file_name="test_ref",
+            unique_topics_table_file_name="test_topics",
+            score_threshold=threshold,
+            merge_general_topics="No",
+            output_files="False",
+            in_data_files=None,
+        )
+        return out_ref
+
+    def test_case_and_apostrophe_variants_merge(self):
+        out_ref = self._run(
+            ["Councils housing", "Council's Housing", "COUNCIL'S housing"]
+        )
+        self.assertEqual(out_ref["Subtopic"].nunique(), 1)
+
+    def test_light_plural_variants_merge(self):
+        out_ref = self._run(["Repair", "Repairs"])
+        self.assertEqual(out_ref["Subtopic"].nunique(), 1)
+
+    def test_distinct_topics_are_not_merged(self):
+        out_ref = self._run(["Housing repairs", "Housing wait times"])
+        self.assertEqual(out_ref["Subtopic"].nunique(), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

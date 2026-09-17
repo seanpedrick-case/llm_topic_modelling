@@ -101,6 +101,21 @@ max_text_length = 500
 max_number_of_topics = MAXIMUM_ALLOWED_TOPICS
 
 
+def _topic_name_near_duplicate_key(name: object) -> str:
+    """Normalise a topic label for light near-duplicate matching.
+
+    Collapses case and apostrophes so "Council's housing" and "Councils Housing"
+    share a key. Remaining light plurals are handled by fuzzy matching.
+    """
+    if name is None or (isinstance(name, float) and pd.isna(name)):
+        return ""
+    text = str(name).lower().strip()
+    for mark in ("'", "\u2019", "\u2018", "`", "\u00b4", "\u02bc"):
+        text = text.replace(mark, "")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(
     category_series: pd.Series,
@@ -135,30 +150,23 @@ def deduplicate_categories(
     deduplication_map = {}
     match_scores = {}  # New dictionary to store match scores
 
-    # First pass: Handle exact matches
-    for category in category_series.unique():
-        if category in deduplication_map:
+    # First pass: Handle exact / near-exact matches (case and apostrophes)
+    category_keys = category_series.map(_topic_name_near_duplicate_key)
+    for key, group_indices in category_keys.groupby(category_keys).groups.items():
+        if not key:
+            continue
+        variants = category_series.loc[group_indices]
+        unique_variants = [v for v in variants.unique() if pd.notna(v)]
+        if len(unique_variants) <= 1:
             continue
 
-        # Find all exact matches
-        exact_matches = category_series[
-            category_series.str.lower() == category.lower()
-        ].index.tolist()
-        if len(exact_matches) > 1:
-            # Find the variant with the highest count
-            match_counts = {
-                match: category_counts.get(category_series[match], 0)
-                for match in exact_matches
-            }
-            most_common = max(match_counts.items(), key=lambda x: x[1])[0]
-            most_common_category = category_series[most_common]
-
-            # Map all exact matches to the most common variant and store score
-            for match in exact_matches:
-                deduplication_map[category_series[match]] = most_common_category
-                match_scores[category_series[match]] = (
-                    100  # Exact matches get score of 100
-                )
+        most_common_category = max(
+            unique_variants,
+            key=lambda variant: (category_counts.get(variant, 0), str(variant)),
+        )
+        for variant in unique_variants:
+            deduplication_map[variant] = most_common_category
+            match_scores[variant] = 100
 
     # Second pass: Handle fuzzy matches for remaining categories
     # Create a DataFrame to maintain the relationship between categories and general topics

@@ -114,6 +114,23 @@ class TestConvertReferenceTableToPivotTable(unittest.TestCase):
         pivot["Group"] = "All"
         self.assertEqual(pivot.loc[0, "Group"], "All")
 
+    def test_unassessed_general_topic_is_omitted_from_headers(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 2],
+                "General topic": ["Not Assessed", "Not assessed"],
+                "Subtopic": ["Parking", "Buses"],
+                "Sentiment": ["Negative", "Not assessed"],
+            }
+        )
+
+        pivot = convert_reference_table_to_pivot_table(reference_df)
+        headers = [str(col) for col in pivot.columns if col != "Response ID"]
+
+        self.assertIn("Parking - Negative", headers)
+        self.assertIn("Buses", headers)
+        self.assertFalse(any("not assessed" in col.casefold() for col in headers))
+
 
 if __name__ == "__main__":
     unittest.main()

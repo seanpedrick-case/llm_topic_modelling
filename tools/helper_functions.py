@@ -536,6 +536,26 @@ def get_basic_response_data(
     return basic_response_data
 
 
+def _is_unassessed_topic_label(value: object) -> bool:
+    """True for empty or 'Not assessed' placeholder topic/sentiment labels."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    return text.casefold() == "not assessed"
+
+
+def _flatten_pivot_column_label(col) -> str:
+    """Join MultiIndex pivot parts, omitting 'Not assessed' general topics/sentiment."""
+    if isinstance(col, str):
+        parts = [col]
+    else:
+        parts = list(col)
+    kept = [str(part).strip() for part in parts if not _is_unassessed_topic_label(part)]
+    return " - ".join(kept) if kept else "All"
+
+
 def convert_reference_table_to_pivot_table(
     df: pd.DataFrame, basic_response_data: pd.DataFrame = pd.DataFrame()
 ):
@@ -564,8 +584,11 @@ def convert_reference_table_to_pivot_table(
         margins=True,
     )
 
-    # Flatten column names to make them more readable
-    pivot_table.columns = [" - ".join(col) for col in pivot_table.columns]
+    # Flatten column names, dropping placeholder 'Not assessed' general topics
+    # (and sentiment) so subtopic-only zero-shot headers are not all prefixed.
+    pivot_table.columns = [
+        _flatten_pivot_column_label(col) for col in pivot_table.columns
+    ]
 
     pivot_table.reset_index(inplace=True)
 
@@ -576,11 +599,7 @@ def convert_reference_table_to_pivot_table(
 
         pivot_table.drop("Response ID", axis=1, inplace=True)
 
-    pivot_table.columns = pivot_table.columns.str.replace(
-        "Not assessed - ", ""
-    ).str.replace("- Not assessed", "")
-
-    # Stripping "Not assessed" can make distinct topic/sentiment combos collide.
+    # Flattening can make distinct topic/sentiment combos collide.
     # Duplicate labels then break later assignment such as pivot_df["Group"] = ...
     if pivot_table.columns.duplicated().any():
         seen: dict[str, int] = {}

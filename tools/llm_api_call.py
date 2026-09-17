@@ -107,6 +107,8 @@ number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
+# Light string merge for forced taxonomies: case, apostrophes, near-identical plurals.
+FORCE_ZERO_SHOT_FUZZY_THRESHOLD = 92
 max_comment_character_length = MAX_COMMENT_CHARS
 random_seed = LLM_SEED
 reasoning_suffix = REASONING_SUFFIX
@@ -944,7 +946,6 @@ def validate_topics(
         # Deduplicate topics after each batch if enabled and conditions are met
         if (
             ENABLE_BATCH_DEDUPLICATION
-            and force_zero_shot_radio == "No"
             and produce_structured_summary_radio == "No"
             and not validation_reference_df.empty
             and not validation_topic_summary_df.empty
@@ -997,7 +998,11 @@ def validate_topics(
                     in_excel_sheets="",  # in_excel_sheets not available in validate_topics
                     merge_sentiment="No",
                     merge_general_topics="No",
-                    score_threshold=95,
+                    score_threshold=(
+                        FORCE_ZERO_SHOT_FUZZY_THRESHOLD
+                        if force_zero_shot_radio == "Yes"
+                        else 95
+                    ),
                     in_data_files=None,
                     chosen_cols=(
                         chosen_cols
@@ -4463,7 +4468,6 @@ def extract_topics(
             # Deduplicate topics after each batch if enabled and conditions are met
             if (
                 ENABLE_BATCH_DEDUPLICATION
-                and force_zero_shot_radio == "No"
                 and produce_structured_summary_radio == "No"
                 and not existing_reference_df.empty
                 and not existing_topic_summary_df.empty
@@ -4516,7 +4520,11 @@ def extract_topics(
                         ),
                         merge_sentiment="No",
                         merge_general_topics="No",
-                        score_threshold=95,
+                        score_threshold=(
+                            FORCE_ZERO_SHOT_FUZZY_THRESHOLD
+                            if force_zero_shot_radio == "Yes"
+                            else 95
+                        ),
                         in_data_files=None,
                         chosen_cols=(
                             chosen_cols
@@ -6576,14 +6584,19 @@ def all_in_one_pipeline(
             "errors. Cannot continue to deduplication."
         )
 
-    skip_forced_taxonomy_dedup = force_zero_shot_choice == "Yes"
-    if skip_forced_taxonomy_dedup:
+    skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
+    if skip_llm_taxonomy_dedup:
+        light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
         print(
-            "Skipping fuzzy topic merge because force zero-shot is enabled "
-            "with a submitted candidate topics list."
+            "Running light fuzzy topic merge for forced zero-shot taxonomy "
+            f"(threshold={light_threshold}; case, apostrophes, near-identical names)."
         )
+        fuzzy_threshold = light_threshold
+        fuzzy_merge_general_topics = "No"
     else:
         print("Deduplicating topic names with fuzzy matching")
+        fuzzy_threshold = score_threshold
+        fuzzy_merge_general_topics = merge_general_topics
     (
         ref_df_after_dedup,
         unique_df_after_dedup,
@@ -6597,17 +6610,17 @@ def all_in_one_pipeline(
         unique_topics_table_file_name=unique_topics_table_file_name_textbox,
         in_excel_sheets=in_excel_sheets,
         merge_sentiment=merge_sentiment,
-        merge_general_topics=merge_general_topics,
-        score_threshold=score_threshold,
+        merge_general_topics=fuzzy_merge_general_topics,
+        score_threshold=fuzzy_threshold,
         in_data_files=in_data_files,
         chosen_cols=chosen_cols,
         output_folder=output_folder,
         sentiment_checkbox=sentiment_choice,
-        deduplicate_topics="No" if skip_forced_taxonomy_dedup else "Yes",
+        deduplicate_topics="Yes",
     )
 
     # LLM-based deduplication if enabled
-    if skip_forced_taxonomy_dedup:
+    if skip_llm_taxonomy_dedup:
         print(
             "Skipping LLM topic merge because force zero-shot is enabled "
             "with a submitted candidate topics list."
