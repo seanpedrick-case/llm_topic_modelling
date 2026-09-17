@@ -1779,31 +1779,39 @@ def data_file_to_markdown_table(
         file_data, chosen_cols, verify_titles=verify_titles
     )
 
-    file_len = int(len(basic_response_data["Response ID"]))
+    file_len = int(len(basic_response_data))
     batch_size = int(batch_size)
     batch_number = int(batch_number)
 
-    # Subset the data for the current batch
+    # Subset the data for the current batch with positional slicing so the
+    # final remainder batch (e.g. 41 rows, batch size 10 → 1 row) is included.
     start_row = int(batch_number * batch_size)
+    empty_batch = basic_response_data.iloc[0:0][
+        ["Response ID", "Response", "Original Response ID"]
+    ].copy()
 
-    if start_row > file_len + 1:
+    if start_row >= file_len:
         print("Start row greater than file row length")
-        return simplified_csv_table_path, normalised_simple_markdown_table, file_name
+        return (
+            simplified_csv_table_path,
+            normalised_simple_markdown_table,
+            start_row,
+            start_row,
+            empty_batch,
+        )
     if start_row < 0:
         raise Exception("Start row is below 0")
 
-    if ((start_row + batch_size) - 1) <= file_len + 1:
-        end_row = int((start_row + batch_size) - 1)
-    else:
-        end_row = file_len + 1
+    end_exclusive = min(start_row + batch_size, file_len)
+    end_row = end_exclusive - 1
 
-    batch_basic_response_data = basic_response_data.loc[
-        start_row:end_row, ["Response ID", "Response", "Original Response ID"]
-    ]  # Select the current batch
+    batch_basic_response_data = basic_response_data.iloc[start_row:end_exclusive][
+        ["Response ID", "Response", "Original Response ID"]
+    ].copy()
 
     # Now replace the reference numbers with numbers starting from 1
-    batch_basic_response_data.loc[:, "Response ID"] = (
-        batch_basic_response_data["Response ID"] - start_row
+    batch_basic_response_data["Response ID"] = (
+        batch_basic_response_data["Response ID"].astype(int) - start_row
     )
 
     # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
@@ -2324,6 +2332,24 @@ def convert_response_text_to_dataframe(
     return out_df, is_error
 
 
+def _effective_parse_batch_size(
+    batch_basic_response_df: pd.DataFrame, configured_batch_size: int
+) -> int:
+    """Use the actual number of responses in this batch when parsing LLM tables.
+
+    Remainder batches (e.g. 41 rows with batch size 10 → last batch of 1) must
+    not inherit the configured batch size. Otherwise blank Response IDs are
+    dropped and references are not forced to the single row, so that last
+    response never appears in the outputs.
+    """
+    if (
+        isinstance(batch_basic_response_df, pd.DataFrame)
+        and not batch_basic_response_df.empty
+    ):
+        return int(len(batch_basic_response_df))
+    return int(configured_batch_size)
+
+
 def write_llm_output_and_logs(
     response_text: str,
     whole_conversation: List[str],
@@ -2394,6 +2420,9 @@ def write_llm_output_and_logs(
         columns=["General topic", "Subtopic", "Sentiment"]
     )
     is_error = False  # If there was an error in parsing, return boolean saying error
+    batch_size_number = _effective_parse_batch_size(
+        batch_basic_response_df, batch_size_number
+    )
 
     if produce_structured_summary_radio == "Yes":
         existing_topics_df.rename(
