@@ -3090,7 +3090,7 @@ def process_batch_with_llm(
 
     # Prepare clients before query
     if "Gemini" in model_source:
-        print("Using Gemini model:", model_choice)
+        # print("Using Gemini model:", model_choice)
         client, client_config = construct_gemini_generative_model(
             in_api_key=in_api_key,
             temperature=temperature,
@@ -3099,20 +3099,20 @@ def process_batch_with_llm(
             max_tokens=max_tokens,
         )
     elif "Azure/OpenAI" in model_source:
-        print("Using Azure/OpenAI AI Inference model:", model_choice)
+        # print("Using Azure/OpenAI AI Inference model:", model_choice)
         if azure_api_key_textbox:
             os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
         client, client_config = construct_azure_client(
             in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox
         )
     elif "AWS" in model_source:
-        print("Using AWS Bedrock model:", model_choice)
+        # print("Using AWS Bedrock model:", model_choice)
         pass
     elif "Local" in model_source:
-        print("Using local model:", model_choice)
+        # print("Using local model:", model_choice)
         pass
     elif "inference-server" in model_source:
-        print("Using inference-server model:", model_choice)
+        # print("Using inference-server model:", model_choice)
         pass
     else:
         raise ValueError(f"Unsupported model source: {model_source}")

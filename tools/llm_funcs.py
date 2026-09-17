@@ -1516,7 +1516,7 @@ def send_request(
     elif "AWS" in model_source:
         for i in progress_bar:
             try:
-                print("Calling AWS Bedrock model, attempt", i + 1)
+                # print("Calling AWS Bedrock model, attempt", i + 1)
                 response = call_aws_bedrock(
                     prompt,
                     system_prompt,
@@ -2004,11 +2004,17 @@ def call_llm_with_markdown_table_checks(
             if stripped_response.lower().startswith("no change"):
                 print(f"Attempt {attempt + 1} produced 'No change' response.")
             else:
-                print(f"Attempt {attempt + 1} produced response with markdown table.")
+                # print(f"Attempt {attempt + 1} produced response with markdown table.")
+                pass
             break  # Success - exit loop
 
-        # Increase temperature for next attempt
-        call_temperature = max(1.0, temperature + (0.1 * (attempt + 1)))
+        # Adjust temperature for next attempt. Bedrock rejects values above 1.0.
+        step = 0.1 * (attempt + 1)
+        if temperature >= 1.0:
+            call_temperature = temperature - step
+        else:
+            call_temperature = temperature + step
+        call_temperature = min(1.0, max(0.1, round(call_temperature, 1)))
         print(
             f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
             f"Trying again with temperature: {call_temperature}"
