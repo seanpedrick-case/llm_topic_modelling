@@ -152,5 +152,96 @@ class TestRemainderBatchOutputMapping(unittest.TestCase):
         self.assertIn("Parking charges", markdown)
 
 
+class TestResponseIdZeroNotEmitted(unittest.TestCase):
+    def _batch_df(self, original_ids: list[int]) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "Response ID": [str(i) for i in range(1, len(original_ids) + 1)],
+                "Response": [f"Response {oid}" for oid in original_ids],
+                "Original Response ID": original_ids,
+            }
+        )
+
+    def _parse(
+        self,
+        response_text: str,
+        batch_df: pd.DataFrame,
+        start_row: int,
+        batch_size_number: int,
+    ) -> pd.DataFrame:
+        with tempfile.TemporaryDirectory() as tmp:
+            (
+                _topic_path,
+                _ref_path,
+                _summary_path,
+                _topic_df,
+                reference_df,
+                _summary_df,
+                _details,
+                is_error,
+                _incomplete,
+            ) = write_llm_output_and_logs(
+                response_text=response_text,
+                whole_conversation=[],
+                all_metadata_content=[],
+                batch_file_path_details="zero_id_batch",
+                start_row=start_row,
+                end_row=start_row + len(batch_df) - 1,
+                model_choice_clean="test-model",
+                log_files_output_paths=[],
+                existing_reference_df=pd.DataFrame(),
+                existing_topics_df=pd.DataFrame(),
+                batch_size_number=batch_size_number,
+                batch_basic_response_df=batch_df,
+                group_name="All",
+                produce_structured_summary_radio="No",
+                output_folder=tmp + os.sep,
+            )
+        self.assertFalse(is_error)
+        return reference_df
+
+    def test_out_of_range_response_id_is_not_written_as_zero(self):
+        reference_df = self._parse(
+            """| General topic | Subtopic | Sentiment | Response ID | Summary |
+|---|---|---|---|---|
+| Transport | Parking charges | Negative | 99 | Fees are too high. |
+""",
+            self._batch_df([11, 12, 13]),
+            start_row=10,
+            batch_size_number=10,
+        )
+        if not reference_df.empty:
+            ids = pd.to_numeric(reference_df["Response ID"], errors="coerce")
+            self.assertFalse((ids.fillna(0) == 0).any())
+            self.assertFalse((ids == 99).any())
+
+    def test_global_original_id_in_later_batch_is_mapped(self):
+        reference_df = self._parse(
+            """| General topic | Subtopic | Sentiment | Response ID | Summary |
+|---|---|---|---|---|
+| Transport | Parking charges | Negative | 12 | Fees are too high. |
+""",
+            self._batch_df([11, 12, 13]),
+            start_row=10,
+            batch_size_number=10,
+        )
+        self.assertFalse(reference_df.empty)
+        self.assertEqual(int(reference_df.iloc[0]["Response ID"]), 12)
+
+    def test_blank_response_id_in_multi_row_batch_is_not_zero(self):
+        reference_df = self._parse(
+            """| General topic | Subtopic | Sentiment | Response ID | Summary |
+|---|---|---|---|---|
+| Transport | Parking charges | Negative |  | Fees are too high. |
+""",
+            self._batch_df([11, 12, 13]),
+            start_row=10,
+            batch_size_number=10,
+        )
+        if not reference_df.empty:
+            ids = pd.to_numeric(reference_df["Response ID"], errors="coerce")
+            self.assertFalse((ids.fillna(0) == 0).any())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2350,6 +2350,73 @@ def _effective_parse_batch_size(
     return int(configured_batch_size)
 
 
+def _is_positive_response_id(value: object) -> bool:
+    try:
+        return int(float(value)) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _series_id_as_int_string(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+
+
+def _lookup_original_response_id(
+    ref: object,
+    batch_basic_response_df: pd.DataFrame,
+    start_row: int,
+    batch_size_number: int,
+) -> object | None:
+    """Map an LLM Response ID to Original Response ID. Never returns 0."""
+    try:
+        ref_int = int(float(str(ref).strip()))
+    except (TypeError, ValueError):
+        return None
+    if ref_int <= 0:
+        return None
+
+    if (
+        isinstance(batch_basic_response_df, pd.DataFrame)
+        and not batch_basic_response_df.empty
+    ):
+        ref_str = str(ref_int)
+        if "Response ID" in batch_basic_response_df.columns:
+            matches = batch_basic_response_df.loc[
+                _series_id_as_int_string(batch_basic_response_df["Response ID"])
+                == ref_str,
+                "Original Response ID",
+            ]
+            if not matches.empty and _is_positive_response_id(matches.iloc[0]):
+                return matches.iloc[0]
+
+        if "Original Response ID" in batch_basic_response_df.columns:
+            matches = batch_basic_response_df.loc[
+                _series_id_as_int_string(
+                    batch_basic_response_df["Original Response ID"]
+                )
+                == ref_str,
+                "Original Response ID",
+            ]
+            if not matches.empty and _is_positive_response_id(matches.iloc[0]):
+                return matches.iloc[0]
+
+        # Batch-relative ID that did not match due to dtype quirks
+        if 1 <= ref_int <= int(batch_size_number) and ref_int <= len(
+            batch_basic_response_df
+        ):
+            original_id = batch_basic_response_df.iloc[ref_int - 1][
+                "Original Response ID"
+            ]
+            if _is_positive_response_id(original_id):
+                return original_id
+        return None
+
+    computed = ref_int + int(start_row)
+    if computed > 0:
+        return computed
+    return None
+
+
 def write_llm_output_and_logs(
     response_text: str,
     whole_conversation: List[str],
@@ -2856,23 +2923,6 @@ def write_llm_output_and_logs(
         if batch_size_number == 1:
             references = ["1"]
 
-        # Filter out references that are outside the valid range
-        if references:
-            try:
-                # Convert all references to integers and keep only those within valid range
-                ref_numbers = [int(ref) for ref in references]
-                references = [
-                    ref
-                    for ref in ref_numbers
-                    if 1 <= int(ref) <= int(batch_size_number)
-                ]
-            except ValueError:
-                # If any reference can't be converted to int, skip this row
-                print("Response value could not be converted to number:", references)
-                continue
-        else:
-            references = []
-
         topic = row.iloc[0] if pd.notna(row.iloc[0]) else ""
         subtopic = row.iloc[1] if pd.notna(row.iloc[1]) else ""
         sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
@@ -2885,59 +2935,40 @@ def write_llm_output_and_logs(
         if produce_structured_summary_radio != "Yes":
             summary = row_number_string_start + summary
 
-        # Check if the 'references' list exists and is not empty
+        resolved_ids = []
+        seen_ids = set()
+        for ref in references:
+            response_ref_no = _lookup_original_response_id(
+                ref,
+                batch_basic_response_df,
+                start_row,
+                batch_size_number,
+            )
+            if response_ref_no is None:
+                print(f"Response ID '{ref}' not found in the DataFrame.")
+                continue
+            id_key = str(int(float(response_ref_no)))
+            if id_key in seen_ids:
+                continue
+            seen_ids.add(id_key)
+            resolved_ids.append(response_ref_no)
 
-        if references:
-            existing_reference_numbers = True
+        if (
+            not resolved_ids
+            and batch_size_number == 1
+            and isinstance(batch_basic_response_df, pd.DataFrame)
+            and not batch_basic_response_df.empty
+        ):
+            fallback_id = batch_basic_response_df["Original Response ID"].iloc[0]
+            if _is_positive_response_id(fallback_id):
+                resolved_ids = [fallback_id]
 
-            # We process one reference at a time to create one dictionary entry per reference.
-            for ref in references:
-                # This variable will hold the final reference number for the current 'ref'
-                response_ref_no = None
+        if not resolved_ids:
+            print("Skipping topic row with no valid Response ID")
+            continue
 
-                # Now, we decide how to calculate 'response_ref_no' for the current 'ref'
-                if batch_basic_response_df.empty:
-                    # --- Scenario 1: The DataFrame is empty, so we calculate the reference ---
-                    try:
-                        response_ref_no = int(ref) + int(start_row)
-                    except ValueError:
-                        print(f"Response ID '{ref}' is not a number and was skipped.")
-                        continue  # Skip to the next 'ref' in the loop
-
-                else:
-                    # --- Scenario 2: The DataFrame is NOT empty, so we look up the reference ---
-                    matching_series = batch_basic_response_df.loc[
-                        batch_basic_response_df["Response ID"] == str(ref),
-                        "Original Response ID",
-                    ]
-
-                    if not matching_series.empty:
-                        # If found, get the first match
-                        response_ref_no = matching_series.iloc[0]
-                    else:
-                        # If not found, report it and skip this reference
-                        print(f"Response ID '{ref}' not found in the DataFrame.")
-                        continue  # Skip to the next 'ref' in the loop
-
-                # This code runs for every *valid* reference that wasn't skipped by 'continue'.
-                # It uses the 'response_ref_no' calculated in the if/else block above.
-                reference_data.append(
-                    {
-                        "Response ID": str(response_ref_no),
-                        "General topic": topic,
-                        "Subtopic": subtopic,
-                        "Sentiment": sentiment,
-                        "Summary": summary,
-                        "Start row of group": start_row_reported,
-                    }
-                )
-
-        # This 'else' corresponds to the 'if references:' at the top
-        else:
-            # This block runs only if the 'references' list was empty or None to begin with
-            existing_reference_numbers = False
-            response_ref_no = 0  # Default value when no references are provided
-
+        existing_reference_numbers = True
+        for response_ref_no in resolved_ids:
             reference_data.append(
                 {
                     "Response ID": str(response_ref_no),
@@ -3000,6 +3031,11 @@ def write_llm_output_and_logs(
         for col in required_cols:
             if col not in out_reference_df.columns:
                 out_reference_df[col] = ""
+
+    # Response ID 0 is a placeholder and does not exist in source data
+    if not out_reference_df.empty and "Response ID" in out_reference_df.columns:
+        numeric_ids = pd.to_numeric(out_reference_df["Response ID"], errors="coerce")
+        out_reference_df = out_reference_df.loc[numeric_ids.fillna(0) > 0].copy()
 
     # Remove duplicate Response ID for the same topic
     # Only if out_reference_df is not empty and has the required columns
