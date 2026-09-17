@@ -140,6 +140,70 @@ class TestLightNearDuplicateTopicMerge(unittest.TestCase):
         )
         self.assertEqual(out_ref["Subtopic"].nunique(), 1)
 
+    def test_title_case_and_sentence_case_variants_merge(self):
+        out_ref = self._run(
+            [
+                "General Disagree",
+                "General disagree",
+                "Impact On Businesses",
+                "Impact on businesses",
+                "Unaware Of Business Or Carer Or Health Permits",
+                "Unaware of business or carer or health permits",
+            ]
+        )
+        names = sorted(out_ref["Subtopic"].str.lower().unique())
+        self.assertEqual(len(names), 3)
+        self.assertEqual(
+            names,
+            [
+                "general disagree",
+                "impact on businesses",
+                "unaware of business or carer or health permits",
+            ],
+        )
+
+    def test_need_vs_needing_near_duplicate_merges(self):
+        out_ref = self._run(
+            ["Penalty For Need A Car", "Penalty for needing a car"],
+            threshold=92,
+        )
+        self.assertEqual(out_ref["Subtopic"].nunique(), 1)
+
+    def test_case_variants_merge_across_general_topic_casing(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 2],
+                "General topic": ["Not Assessed", "Not assessed"],
+                "Subtopic": ["Impact On Businesses", "Impact on businesses"],
+                "Sentiment": ["Negative", "Negative"],
+                "Summary": ["s1", "s2"],
+                "Start row of group": [1, 1],
+                "Group": ["All", "All"],
+            }
+        )
+        topic_summary_df = pd.DataFrame(
+            {
+                "General topic": ["Not Assessed", "Not assessed"],
+                "Subtopic": ["Impact On Businesses", "Impact on businesses"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Topic number": [1, 2],
+            }
+        )
+        out_ref, out_topics, _, _, _ = deduplicate_topics(
+            reference_df=reference_df,
+            topic_summary_df=topic_summary_df,
+            reference_table_file_name="test_ref",
+            unique_topics_table_file_name="test_topics",
+            score_threshold=92,
+            merge_general_topics="No",
+            output_files="False",
+            in_data_files=None,
+        )
+        self.assertEqual(out_ref["Subtopic"].nunique(), 1)
+        self.assertEqual(out_ref["General topic"].nunique(), 1)
+        self.assertEqual(out_topics["Subtopic"].nunique(), 1)
+
     def test_light_plural_variants_merge(self):
         out_ref = self._run(["Repair", "Repairs"])
         self.assertEqual(out_ref["Subtopic"].nunique(), 1)

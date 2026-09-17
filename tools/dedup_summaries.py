@@ -116,6 +116,35 @@ def _topic_name_near_duplicate_key(name: object) -> str:
     return text
 
 
+def _canonicalise_near_duplicate_labels(series: pd.Series) -> pd.Series:
+    """Map case/apostrophe variants of the same label to the most common spelling."""
+    if series is None or series.empty:
+        return series
+
+    working = series.copy()
+    counts = working.value_counts(dropna=True).to_dict()
+    keys = working.map(_topic_name_near_duplicate_key)
+    canonical_by_key: dict[str, object] = {}
+    for key, group_indices in keys.groupby(keys).groups.items():
+        if not key:
+            continue
+        variants = [
+            variant
+            for variant in working.loc[group_indices].unique()
+            if pd.notna(variant) and str(variant).strip()
+        ]
+        if not variants:
+            continue
+        canonical_by_key[key] = max(
+            variants,
+            key=lambda variant: (counts.get(variant, 0), str(variant)),
+        )
+
+    return working.map(
+        lambda value: canonical_by_key.get(_topic_name_near_duplicate_key(value), value)
+    )
+
+
 # DEDUPLICATION/SUMMARISATION FUNCTIONS
 def deduplicate_categories(
     category_series: pd.Series,
@@ -196,6 +225,7 @@ def deduplicate_categories(
             category,
             potential_matches,
             scorer=fuzz.WRatio,
+            processor=_topic_name_near_duplicate_key,
             score_cutoff=threshold,
             limit=1,
         )
@@ -450,6 +480,13 @@ def deduplicate_topics(
     if deduplicate_topics == "Yes":
         if "Group" not in reference_df.columns:
             reference_df["Group"] = "All"
+        # Unify Title Case vs sentence case (and apostrophes) before grouping so
+        # "Impact On Businesses" / "Impact on businesses" are compared together.
+        for col_name in ["General topic", "Subtopic", "Sentiment"]:
+            if col_name in reference_df.columns:
+                reference_df[col_name] = _canonicalise_near_duplicate_labels(
+                    reference_df[col_name]
+                )
         for i in range(0, 8):
             if merge_sentiment == "No":
                 if merge_general_topics == "No":
