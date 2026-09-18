@@ -2,7 +2,7 @@ import codecs
 import math
 import os
 import re
-from typing import List
+from typing import Any, List
 
 import boto3
 import gradio as gr
@@ -536,10 +536,54 @@ def get_basic_response_data(
     return basic_response_data
 
 
+def _is_unassessed_topic_label(value: object) -> bool:
+    """True for empty or 'Not assessed' placeholder topic/sentiment labels."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    return text.casefold() == "not assessed"
+
+
+UNASSESSED_GENERAL_TOPIC_LABEL = "Not assessed"
+
+
+def apply_forced_unassessed_general_topics(
+    df: pd.DataFrame, force_zero_shot_radio: str = "No"
+) -> pd.DataFrame:
+    """Overwrite General topic when force-zero-shot asked for 'Not assessed'.
+
+    The prompt tells the model to put 'Not assessed' in the Placeholder /
+    General topic column. If it invents names instead, replace them afterwards.
+    """
+    if force_zero_shot_radio != "Yes":
+        return df
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return df
+    if "General topic" not in df.columns:
+        return df
+    out = df.copy()
+    out["General topic"] = UNASSESSED_GENERAL_TOPIC_LABEL
+    return out
+
+
+def _flatten_pivot_column_label(col) -> str:
+    """Join MultiIndex pivot parts, omitting 'Not assessed' general topics/sentiment."""
+    if isinstance(col, str):
+        parts = [col]
+    else:
+        parts = list(col)
+    kept = [str(part).strip() for part in parts if not _is_unassessed_topic_label(part)]
+    return " - ".join(kept) if kept else "All"
+
+
 def convert_reference_table_to_pivot_table(
     df: pd.DataFrame, basic_response_data: pd.DataFrame = pd.DataFrame()
 ):
     df = df.copy()
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()].copy()
     if "Sentiment" not in df.columns:
         df["Sentiment"] = "Not assessed"
 
@@ -562,8 +606,11 @@ def convert_reference_table_to_pivot_table(
         margins=True,
     )
 
-    # Flatten column names to make them more readable
-    pivot_table.columns = [" - ".join(col) for col in pivot_table.columns]
+    # Flatten column names, dropping placeholder 'Not assessed' general topics
+    # (and sentiment) so subtopic-only zero-shot headers are not all prefixed.
+    pivot_table.columns = [
+        _flatten_pivot_column_label(col) for col in pivot_table.columns
+    ]
 
     pivot_table.reset_index(inplace=True)
 
@@ -574,9 +621,16 @@ def convert_reference_table_to_pivot_table(
 
         pivot_table.drop("Response ID", axis=1, inplace=True)
 
-    pivot_table.columns = pivot_table.columns.str.replace(
-        "Not assessed - ", ""
-    ).str.replace("- Not assessed", "")
+    # Flattening can make distinct topic/sentiment combos collide.
+    # Duplicate labels then break later assignment such as pivot_df["Group"] = ...
+    if pivot_table.columns.duplicated().any():
+        seen: dict[str, int] = {}
+        unique_cols: list[str] = []
+        for col in pivot_table.columns.tolist():
+            count = seen.get(col, 0)
+            unique_cols.append(col if count == 0 else f"{col} ({count + 1})")
+            seen[col] = count + 1
+        pivot_table.columns = unique_cols
 
     leading_cols = [
         col
@@ -590,10 +644,50 @@ def convert_reference_table_to_pivot_table(
     return pivot_table
 
 
+def _split_summary_segments(summary) -> list:
+    """Split a summary cell into unique-ready snippets, including pre-joined <br> text."""
+    if summary is None or (not isinstance(summary, str) and pd.isna(summary)):
+        return []
+    summary_str = str(summary).strip()
+    if not summary_str:
+        return []
+    if "<br>" in summary_str:
+        return [
+            seg.strip() for seg in re.split(r"<br>| <br> ", summary_str) if seg.strip()
+        ]
+    return [summary_str]
+
+
+def _summary_segment_start_rows(frame: pd.DataFrame) -> dict:
+    """Map each summary snippet to the earliest Start row of group it came from.
+
+    Built in a single pass over the reference table so summary aggregation does
+    not scan the full frame for every snippet.
+    """
+    if frame is None or frame.empty or "Start row of group" not in frame.columns:
+        return {}
+    mapping = {}
+    summaries = frame["Summary"].to_numpy() if "Summary" in frame.columns else []
+    start_rows = frame["Start row of group"].to_numpy()
+    for summary, start_row in zip(summaries, start_rows):
+        start_val = float("inf") if pd.isna(start_row) else start_row
+        for segment in _split_summary_segments(summary):
+            prev = mapping.get(segment)
+            if prev is None or start_val < prev:
+                mapping[segment] = start_val
+    return mapping
+
+
 def create_topic_summary_df_from_reference_table(
     reference_df: pd.DataFrame,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ):
+
+    if reference_df is not None and not reference_df.empty:
+        if reference_df.columns.duplicated().any():
+            reference_df = reference_df.loc[
+                :, ~reference_df.columns.duplicated()
+            ].copy()
 
     if "Group" not in reference_df.columns:
         reference_df["Group"] = "All"
@@ -636,6 +730,11 @@ def create_topic_summary_df_from_reference_table(
         sorted_refs = sorted(refs)
         return ", ".join(map(str, sorted_refs)) if sorted_refs else ""
 
+    # Map each summary snippet to its earliest batch start row in one pass.
+    # The previous per-snippet full-table str.contains scan was O(topics ×
+    # snippets × rows) and dominated validation time on large reference tables.
+    segment_to_start_row = _summary_segment_start_rows(reference_df)
+
     # Helper function to concatenate summaries
     # This aggregates all unique summaries from rows with the same topic combination
     def aggregate_summaries(x):
@@ -643,17 +742,7 @@ def create_topic_summary_df_from_reference_table(
         all_segments = []
 
         for summary in x:
-            if pd.notna(summary):
-                summary_str = str(summary).strip()
-                if summary_str:
-                    # If summary already contains <br> separators, split it into segments
-                    if "<br>" in summary_str or " <br> " in summary_str:
-                        segments = re.split(r"<br>| <br> ", summary_str)
-                        segments = [seg.strip() for seg in segments if seg.strip()]
-                        all_segments.extend(segments)
-                    else:
-                        # Single summary
-                        all_segments.append(summary_str)
+            all_segments.extend(_split_summary_segments(summary))
 
         # Remove duplicate segments while preserving order
         unique_segments = []
@@ -663,35 +752,11 @@ def create_topic_summary_df_from_reference_table(
                 seen_segments.add(segment)
                 unique_segments.append(segment)
 
-        # Sort by minimum Start row of group if available (try to match segments to original summaries)
-        if "Start row of group" in reference_df.columns and unique_segments:
-            try:
-                # Create a mapping of segments to their minimum start row
-                segment_to_start_row = {}
-                for segment in unique_segments:
-                    # Find rows where Summary contains this segment
-                    matching_rows = reference_df[
-                        reference_df["Summary"].str.contains(
-                            segment, na=False, regex=False
-                        )
-                    ]
-                    if (
-                        not matching_rows.empty
-                        and "Start row of group" in matching_rows.columns
-                    ):
-                        min_start_row = matching_rows["Start row of group"].min()
-                        segment_to_start_row[segment] = min_start_row
-                    else:
-                        segment_to_start_row[segment] = float("inf")
-
-                # Sort by minimum start row
-                unique_segments = sorted(
-                    unique_segments,
-                    key=lambda seg: segment_to_start_row.get(seg, float("inf")),
-                )
-            except Exception:
-                # If sorting fails, just use the order we have
-                pass
+        # Sort by earliest Start row of group when that mapping is available
+        if segment_to_start_row and unique_segments:
+            unique_segments.sort(
+                key=lambda seg: segment_to_start_row.get(seg, float("inf"))
+            )
 
         return "<br>".join(unique_segments) if unique_segments else ""
 
@@ -1285,6 +1350,40 @@ def move_overall_summary_output_files_to_front_page(
     overall_summary_output_files_xlsx: List[str],
 ):
     return overall_summary_output_files_xlsx
+
+
+def has_submitted_candidate_topics(candidate_topics: Any) -> bool:
+    """Return True if the user submitted an initial candidate topics file or list."""
+    if candidate_topics is None:
+        return False
+    if isinstance(candidate_topics, (list, tuple)):
+        return any(has_submitted_candidate_topics(item) for item in candidate_topics)
+    if isinstance(candidate_topics, str):
+        return bool(candidate_topics.strip())
+    name = getattr(candidate_topics, "name", None)
+    if isinstance(name, str):
+        return bool(name.strip())
+    return bool(candidate_topics)
+
+
+def effective_force_zero_shot_radio(
+    force_zero_shot_radio: str,
+    candidate_topics: Any,
+) -> str:
+    """
+    Force-zero-shot only applies when an initial candidate topics list was submitted.
+
+    Without a submitted file/list, later-batch topic lists must not be treated as
+    a forced taxonomy.
+    """
+    if force_zero_shot_radio != "Yes":
+        return "No"
+    if has_submitted_candidate_topics(candidate_topics):
+        return "Yes"
+    print(
+        "Ignoring force zero-shot: no initial candidate topics file/list was submitted."
+    )
+    return "No"
 
 
 def generate_zero_shot_topics_df(
