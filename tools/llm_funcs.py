@@ -1127,12 +1127,22 @@ def call_aws_bedrock(
 
     inference_config = {
         "maxTokens": max_tokens,
-        "topP": 0.999,
         "temperature": temperature,
     }
 
-    # Using an assistant prefill only works for Anthropic models.
-    if assistant_prefill and "anthropic" in model_choice:
+    # Anthropic Bedrock models reject temperature together with top_p/top_k.
+    # Prefer temperature when set; keep topP for other Bedrock model families.
+    model_choice_lower = model_choice.lower()
+    is_anthropic = "anthropic" in model_choice_lower
+    if not is_anthropic:
+        inference_config["topP"] = 0.999
+
+    # Assistant prefill is only supported on older Anthropic Claude 3.x models.
+    # Claude 4+ on Bedrock rejects ending the conversation with an assistant turn.
+    supports_prefill = is_anthropic and not re.search(
+        r"claude-(?:sonnet-|opus-|haiku-)?4", model_choice_lower
+    )
+    if assistant_prefill and supports_prefill:
         assistant_prefill_added = True
         messages = [
             {
@@ -1516,7 +1526,7 @@ def send_request(
     elif "AWS" in model_source:
         for i in progress_bar:
             try:
-                print("Calling AWS Bedrock model, attempt", i + 1)
+                # print("Calling AWS Bedrock model, attempt", i + 1)
                 response = call_aws_bedrock(
                     prompt,
                     system_prompt,
@@ -1540,7 +1550,7 @@ def send_request(
                 )
                 time.sleep(timeout_wait)
 
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,
@@ -1909,6 +1919,19 @@ def process_requests(
     )
 
 
+def adjust_retry_temperature(original_temperature: float, retry_step: int) -> float:
+    """Shift temperature for a retry, staying within Bedrock's 0.1–1.0 range.
+
+    If the original temperature is already at 1.0, decrease instead of increase.
+    """
+    step = 0.1 * retry_step
+    if original_temperature >= 1.0:
+        adjusted = original_temperature - step
+    else:
+        adjusted = original_temperature + step
+    return min(1.0, max(0.1, round(adjusted, 1)))
+
+
 def call_llm_with_markdown_table_checks(
     batch_prompts: List[str],
     system_prompt: str,
@@ -2004,11 +2027,12 @@ def call_llm_with_markdown_table_checks(
             if stripped_response.lower().startswith("no change"):
                 print(f"Attempt {attempt + 1} produced 'No change' response.")
             else:
-                print(f"Attempt {attempt + 1} produced response with markdown table.")
+                # print(f"Attempt {attempt + 1} produced response with markdown table.")
+                pass
             break  # Success - exit loop
 
-        # Increase temperature for next attempt
-        call_temperature = max(1.0, temperature + (0.1 * (attempt + 1)))
+        # Adjust temperature for next attempt. Bedrock rejects values above 1.0.
+        call_temperature = adjust_retry_temperature(temperature, attempt + 1)
         print(
             f"Attempt {attempt + 1} resulted in invalid table: {stripped_response}. "
             f"Trying again with temperature: {call_temperature}"

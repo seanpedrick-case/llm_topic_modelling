@@ -12,6 +12,7 @@ output/*
 tools/__pycache__/*
 build/*
 dist/*
+evals/*
 logs/*
 usage/*
 docs/*

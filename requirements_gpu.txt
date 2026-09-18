@@ -1,7 +1,7 @@
 gradio<=6.27.0
-transformers<=5.16.1
+transformers<=5.17.0
 spaces
-pandas<=3.0.5
+pandas<=3.0.6
 boto3<=1.43.90
 pyarrow<=25.0.1
 openpyxl<=3.1.5

@@ -818,7 +818,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         "--force_zero_shot",
         choices=["Yes", "No"],
         default="No",
-        help="Force responses into suggested topics. Default: No",
+        help="Force responses into suggested topics. Only has an effect when --candidate_topics is provided. Default: No",
     )
     extract_group.add_argument(
         "--force_single_topic",
@@ -1529,6 +1529,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 aws_secret_key_textbox=args.aws_secret_key,
                 aws_region_textbox=args.aws_region,
                 api_url=args.api_url if args.api_url else API_URL,
+                candidate_topics=args.candidate_topics,
             )
 
             end_time = time.time()

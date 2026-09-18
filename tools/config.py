@@ -965,7 +965,9 @@ DIRECT_MODE_MAX_TOKENS = get_or_create_env_var(
 )
 DIRECT_MODE_CONTEXT = get_or_create_env_var("DIRECT_MODE_CONTEXT", "")
 DIRECT_MODE_CANDIDATE_TOPICS = get_or_create_env_var("DIRECT_MODE_CANDIDATE_TOPICS", "")
-DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var("DIRECT_MODE_FORCE_ZERO_SHOT", "No")
+DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var(
+    "DIRECT_MODE_FORCE_ZERO_SHOT", "No"
+)  # Only has an effect when DIRECT_MODE_CANDIDATE_TOPICS is set
 DIRECT_MODE_FORCE_SINGLE_TOPIC = get_or_create_env_var(
     "DIRECT_MODE_FORCE_SINGLE_TOPIC", "No"
 )

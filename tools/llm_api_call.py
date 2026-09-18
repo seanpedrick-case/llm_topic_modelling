@@ -3,6 +3,7 @@ import os
 import re
 import string
 import time
+import traceback
 from io import StringIO
 from typing import Any, List, Tuple
 
@@ -49,12 +50,15 @@ from tools.dedup_summaries import (
     wrapper_summarise_output_topics_per_group,
 )
 from tools.helper_functions import (
+    apply_forced_unassessed_general_topics,
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
+    effective_force_zero_shot_radio,
     ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
+    has_submitted_candidate_topics,
     load_in_data_file,
     load_in_previous_data_files,
     normalize_topic_name_for_llm,
@@ -66,6 +70,7 @@ from tools.helper_functions import (
     write_topic_discovery_manifest_csv,
 )
 from tools.llm_funcs import (
+    adjust_retry_temperature,
     calculate_tokens_from_metadata,
     call_llm_with_markdown_table_checks,
     construct_azure_client,
@@ -103,6 +108,8 @@ number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
 batch_size_default = BATCH_SIZE_DEFAULT
 deduplication_threshold = DEDUPLICATION_THRESHOLD
+# Light string merge for forced taxonomies: case, apostrophes, near-identical plurals.
+FORCE_ZERO_SHOT_FUZZY_THRESHOLD = 92
 max_comment_character_length = MAX_COMMENT_CHARS
 random_seed = LLM_SEED
 reasoning_suffix = REASONING_SUFFIX
@@ -176,7 +183,10 @@ def normalise_string(text: str):
 
 
 def reconstruct_markdown_table_from_reference_df(
-    reference_df: pd.DataFrame, start_row: int = None, end_row: int = None
+    reference_df: pd.DataFrame,
+    start_row: int = None,
+    end_row: int = None,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
 ) -> tuple[str, pd.DataFrame]:
     """
     Reconstructs a markdown table from reference_df data when all_responses_content is missing.
@@ -186,6 +196,8 @@ def reconstruct_markdown_table_from_reference_df(
     - reference_df (pd.DataFrame): The reference dataframe containing topic analysis data
     - start_row (int, optional): The starting row number for the current batch
     - end_row (int, optional): The ending row number for the current batch
+    - sentiment_checkbox (str, optional): Sentiment analysis option. When
+      "Do not assess sentiment", the reconstructed table omits the Sentiment column.
 
     Returns:
     - tuple[str, pd.DataFrame]: A tuple containing:
@@ -217,9 +229,16 @@ def reconstruct_markdown_table_from_reference_df(
     ):
         filtered_df = filtered_df.rename(columns={"Revised summary": "Summary"})
 
-    # Group by General topic, Subtopic, and Sentiment to aggregate response references
+    include_sentiment = _assess_sentiment(sentiment_checkbox)
+    if include_sentiment:
+        if "Sentiment" not in filtered_df.columns:
+            filtered_df["Sentiment"] = "Not assessed"
+        group_cols = ["General topic", "Subtopic", "Sentiment"]
+    else:
+        group_cols = ["General topic", "Subtopic"]
+
     grouped_df = (
-        filtered_df.groupby(["General topic", "Subtopic", "Sentiment"])
+        filtered_df.groupby(group_cols)
         .agg(
             {
                 "Response ID": lambda x: ", ".join(map(str, sorted(x.unique()))),
@@ -250,14 +269,16 @@ def reconstruct_markdown_table_from_reference_df(
 
     # Clean up the data to handle any NaN values and remove "Rows x to y: " prefix from summary
     cleaned_df = grouped_df.copy()
-    for col in [
-        "General topic",
-        "Subtopic",
-        "Sentiment",
-        "Response ID",
-        "Summary",
-    ]:
-        cleaned_df[col] = cleaned_df[col].fillna("").astype(str)
+    markdown_cols = ["General topic", "Subtopic"]
+    if include_sentiment:
+        markdown_cols.append("Sentiment")
+    markdown_cols.extend(["Response ID", "Summary"])
+    for col in markdown_cols:
+        if col in cleaned_df.columns:
+            cleaned_df[col] = cleaned_df[col].fillna("").astype(str)
+
+    if not include_sentiment:
+        cleaned_df["Sentiment"] = "Not assessed"
 
     # Remove "Rows x to y: " prefix from summary if present
     cleaned_df["Summary"] = cleaned_df["Summary"].apply(
@@ -266,25 +287,36 @@ def reconstruct_markdown_table_from_reference_df(
         )
     )
 
-    cleaned_df.drop_duplicates(
-        ["General topic", "Subtopic", "Sentiment", "Response ID"], inplace=True
-    )
+    dedupe_cols = ["General topic", "Subtopic", "Response ID"]
+    if include_sentiment:
+        dedupe_cols.insert(2, "Sentiment")
+    cleaned_df.drop_duplicates(dedupe_cols, inplace=True)
 
-    # Create the markdown table
-    markdown_table = (
-        "| General topic | Subtopic | Sentiment | Response ID | Summary |\n"
-    )
-    markdown_table += "|---|---|---|---|---|\n"
+    if include_sentiment:
+        markdown_table = (
+            "| General topic | Subtopic | Sentiment | Response ID | Summary |\n"
+        )
+        markdown_table += "|---|---|---|---|---|\n"
+    else:
+        markdown_table = "| General topic | Subtopic | Response ID | Summary |\n"
+        markdown_table += "|---|---|---|---|\n"
 
     for _, row in cleaned_df.iterrows():
         general_topic = row["General topic"]
         subtopic = row["Subtopic"]
-        sentiment = row["Sentiment"]
         response_refs = row["Response ID"]
         summary = row["Summary"]
 
-        # Add row to markdown table
-        markdown_table += f"| {general_topic} | {subtopic} | {sentiment} | {response_refs} | {summary} |\n"
+        if include_sentiment:
+            sentiment = row["Sentiment"]
+            markdown_table += (
+                f"| {general_topic} | {subtopic} | {sentiment} | "
+                f"{response_refs} | {summary} |\n"
+            )
+        else:
+            markdown_table += (
+                f"| {general_topic} | {subtopic} | {response_refs} | {summary} |\n"
+            )
 
     return markdown_table, cleaned_df
 
@@ -367,6 +399,7 @@ def validate_topics(
     aws_region_textbox: str = "",
     api_url: str = None,
     max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
+    candidate_topics: gr.FileData = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]:
     """
@@ -389,7 +422,7 @@ def validate_topics(
     - reasoning_suffix (str): Suffix for reasoning
     - group_name (str): Name of the group
     - produce_structured_summary_radio (str): Whether to produce structured summaries
-    - force_zero_shot_radio (str): Whether to force zero-shot
+    - force_zero_shot_radio (str): Whether to force assignment into submitted candidate topics. Only has an effect when an initial candidate topics file/list is provided.
     - force_single_topic_radio (str): Whether to force single topic
     - context_textbox (str): Context for the validation
     - additional_instructions_summary_format (str): Additional instructions
@@ -408,6 +441,10 @@ def validate_topics(
     - Tuple[pd.DataFrame, pd.DataFrame, list, str, int, int, int]: Updated reference_df, topic_summary_df, logged_content, conversation_metadata_str, total_input_tokens, total_output_tokens, total_llm_calls
     """
     print("Starting validation process...")
+
+    force_zero_shot_radio = effective_force_zero_shot_radio(
+        force_zero_shot_radio, candidate_topics
+    )
 
     # Ensure custom model_choice is registered in model_name_map
     ensure_model_in_map(model_choice)
@@ -566,13 +603,19 @@ def validate_topics(
                     validation_latest_batch_completed
                 ]
                 _, previous_topic_df = reconstruct_markdown_table_from_reference_df(
-                    reference_df, validation_start_row, validation_end_row
+                    reference_df,
+                    validation_start_row,
+                    validation_end_row,
+                    sentiment_checkbox=sentiment_checkbox,
                 )
             else:
                 # Try to reconstruct markdown table from reference_df data
                 previous_table_content, previous_topic_df = (
                     reconstruct_markdown_table_from_reference_df(
-                        reference_df, validation_start_row, validation_end_row
+                        reference_df,
+                        validation_start_row,
+                        validation_end_row,
+                        sentiment_checkbox=sentiment_checkbox,
                     )
                 )
 
@@ -784,6 +827,8 @@ def validate_topics(
                 task_type="Validation",
                 assistant_prefill=add_existing_topics_assistant_prefill,
                 api_url=api_url,
+                sentiment_checkbox=sentiment_checkbox,
+                force_zero_shot_radio=force_zero_shot_radio,
             )
 
             if validation_new_topic_df.empty:
@@ -856,7 +901,15 @@ def validate_topics(
 
                     # Concatenate the new results
                     validation_reference_df = pd.concat(
-                        [validation_reference_df, validation_new_reference_df]
+                        [
+                            _dedupe_dataframe_column_names(
+                                validation_reference_df
+                            ).reset_index(drop=True),
+                            _dedupe_dataframe_column_names(
+                                validation_new_reference_df
+                            ).reset_index(drop=True),
+                        ],
+                        ignore_index=True,
                     ).dropna(how="all")
 
             # Rebuild topic_summary_df from accumulated reference_df to ensure consistency
@@ -895,7 +948,6 @@ def validate_topics(
         # Deduplicate topics after each batch if enabled and conditions are met
         if (
             ENABLE_BATCH_DEDUPLICATION
-            and force_zero_shot_radio == "No"
             and produce_structured_summary_radio == "No"
             and not validation_reference_df.empty
             and not validation_topic_summary_df.empty
@@ -909,21 +961,20 @@ def validate_topics(
             reference_table_file_name = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_reference"
             unique_topics_table_file_name = f"{file_name_clean}_val_batch_{validation_latest_batch_completed}_unique_topics"
 
-            # Prepare file_data for deduplication if available
-            in_data_files_for_dedup = None
             validation_num_batches = None
-            validation_data_file_names_textbox = None
-            if not file_data.empty and chosen_cols:
-                # Pass file_data as DataFrame and calculate num_batches
-                in_data_files_for_dedup = file_data
-                validation_num_batches = (len(file_data) + batch_size - 1) // batch_size
-                validation_data_file_names_textbox = file_name
+            validation_data_file_names_textbox = file_name if file_name else None
 
             # Clean General topic and Subtopic columns using the same process as zero-shot topics
             for col_name in ["General topic", "Subtopic"]:
                 for df in [validation_reference_df, validation_topic_summary_df]:
                     if col_name in df.columns and not df[col_name].isnull().all():
                         df[col_name] = df[col_name].apply(normalize_topic_name_for_llm)
+            validation_reference_df = apply_forced_unassessed_general_topics(
+                validation_reference_df, force_zero_shot_radio
+            )
+            validation_topic_summary_df = apply_forced_unassessed_general_topics(
+                validation_topic_summary_df, force_zero_shot_radio
+            )
 
             try:
                 topics_before = validation_topic_summary_df.drop_duplicates(
@@ -955,8 +1006,12 @@ def validate_topics(
                     in_excel_sheets="",  # in_excel_sheets not available in validate_topics
                     merge_sentiment="No",
                     merge_general_topics="No",
-                    score_threshold=95,
-                    in_data_files=in_data_files_for_dedup,
+                    score_threshold=(
+                        FORCE_ZERO_SHOT_FUZZY_THRESHOLD
+                        if force_zero_shot_radio == "Yes"
+                        else 95
+                    ),
+                    in_data_files=None,
                     chosen_cols=(
                         chosen_cols
                         if isinstance(chosen_cols, list)
@@ -1229,6 +1284,7 @@ def validate_topics_wrapper(
     aws_region_textbox: str = "",
     api_url: str = None,
     max_topics_number: int = MAXIMUM_ALLOWED_TOPICS,
+    candidate_topics: gr.FileData = None,
     progress=gr.Progress(track_tqdm=True),
 ) -> Tuple[pd.DataFrame, pd.DataFrame, List[dict], str, int, int, int, List[str]]:
     """
@@ -1251,7 +1307,7 @@ def validate_topics_wrapper(
         reasoning_suffix (str): Suffix for reasoning.
         group_name (str): Name of the group.
         produce_structured_summary_radio (str): Whether to produce structured summaries ("Yes" or "No").
-        force_zero_shot_radio (str): Whether to force zero-shot ("Yes" or "No").
+        force_zero_shot_radio (str): Whether to force assignment into submitted candidate topics ("Yes" or "No"). Only has an effect when an initial candidate topics file/list is provided.
         force_single_topic_radio (str): Whether to force single topic ("Yes" or "No").
         context_textbox (str): Context for the validation.
         additional_instructions_summary_format (str): Additional instructions for summary format.
@@ -1430,6 +1486,7 @@ def validate_topics_wrapper(
                 aws_region_textbox=aws_region_textbox,
                 api_url=api_url,
                 max_topics_number=max_topics_number,
+                candidate_topics=candidate_topics,
             )
 
             # Accumulate results
@@ -1730,31 +1787,39 @@ def data_file_to_markdown_table(
         file_data, chosen_cols, verify_titles=verify_titles
     )
 
-    file_len = int(len(basic_response_data["Response ID"]))
+    file_len = int(len(basic_response_data))
     batch_size = int(batch_size)
     batch_number = int(batch_number)
 
-    # Subset the data for the current batch
+    # Subset the data for the current batch with positional slicing so the
+    # final remainder batch (e.g. 41 rows, batch size 10 → 1 row) is included.
     start_row = int(batch_number * batch_size)
+    empty_batch = basic_response_data.iloc[0:0][
+        ["Response ID", "Response", "Original Response ID"]
+    ].copy()
 
-    if start_row > file_len + 1:
+    if start_row >= file_len:
         print("Start row greater than file row length")
-        return simplified_csv_table_path, normalised_simple_markdown_table, file_name
+        return (
+            simplified_csv_table_path,
+            normalised_simple_markdown_table,
+            start_row,
+            start_row,
+            empty_batch,
+        )
     if start_row < 0:
         raise Exception("Start row is below 0")
 
-    if ((start_row + batch_size) - 1) <= file_len + 1:
-        end_row = int((start_row + batch_size) - 1)
-    else:
-        end_row = file_len + 1
+    end_exclusive = min(start_row + batch_size, file_len)
+    end_row = end_exclusive - 1
 
-    batch_basic_response_data = basic_response_data.loc[
-        start_row:end_row, ["Response ID", "Response", "Original Response ID"]
-    ]  # Select the current batch
+    batch_basic_response_data = basic_response_data.iloc[start_row:end_exclusive][
+        ["Response ID", "Response", "Original Response ID"]
+    ].copy()
 
     # Now replace the reference numbers with numbers starting from 1
-    batch_basic_response_data.loc[:, "Response ID"] = (
-        batch_basic_response_data["Response ID"] - start_row
+    batch_basic_response_data["Response ID"] = (
+        batch_basic_response_data["Response ID"].astype(int) - start_row
     )
 
     # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
@@ -2016,19 +2081,38 @@ def _find_parsed_table_column(df: pd.DataFrame, standard_name: str) -> str | Non
     return None
 
 
-def _four_column_table_has_sentiment(df: pd.DataFrame) -> bool:
+def _four_column_table_has_sentiment(
+    df: pd.DataFrame, assess_sentiment: bool = True
+) -> bool:
     """Distinguish 4-column tables with Sentiment (batch_size==1) from those without."""
-    if _find_parsed_table_column(df, "Sentiment") is not None:
-        return True
-    if _find_parsed_table_column(df, "Response ID") is not None:
-        return False
+    has_sentiment_header = _find_parsed_table_column(df, "Sentiment") is not None
+    has_response_id_header = _find_parsed_table_column(df, "Response ID") is not None
+
+    if not assess_sentiment:
+        # Prompt asked for Response ID, not Sentiment. Keep ID columns even if
+        # a Sentiment header is also present.
+        if has_response_id_header:
+            return False
+        if has_sentiment_header:
+            return True
+    else:
+        if has_sentiment_header:
+            return True
+        if has_response_id_header:
+            return False
+
     if df.shape[1] < 3:
         return False
     col2 = df.iloc[:, 2].astype(str).str.strip().str.lower()
     sentiment_values = {"negative", "neutral", "positive", "not assessed"}
     if col2.empty:
         return False
-    return col2.isin(sentiment_values).mean() >= 0.5
+    looks_like_sentiment = col2.isin(sentiment_values).mean() >= 0.5
+    if not assess_sentiment and looks_like_sentiment:
+        # Do not treat numeric ID cells as sentiment.
+        looks_like_ids = col2.str.contains(r"\d", regex=True, na=False).mean() >= 0.5
+        return not looks_like_ids
+    return looks_like_sentiment
 
 
 TOPIC_TABLE_EXPECTED_COLS = [
@@ -2042,7 +2126,7 @@ TOPIC_TABLE_EXPECTED_COLS = [
 
 def _dedupe_dataframe_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """Make column labels unique so later selection/concat cannot hit reindex errors."""
-    if df is None or df.empty:
+    if df is None:
         return df
     if not df.columns.duplicated().any():
         return df
@@ -2084,8 +2168,26 @@ def _column_as_string_series(values: Any, length: int) -> pd.Series:
     return series
 
 
+def _column_fill_order(assess_sentiment: bool) -> List[str]:
+    """Order unused parsed columns should fill standard fields.
+
+    When sentiment is not requested, Response ID and Summary must be filled
+    before Sentiment so topic/summary text is not consumed as a missing
+    Sentiment column.
+    """
+    if assess_sentiment:
+        return list(TOPIC_TABLE_EXPECTED_COLS)
+    return [
+        "General topic",
+        "Subtopic",
+        "Response ID",
+        "Summary",
+        "Sentiment",
+    ]
+
+
 def _ensure_standard_topic_table_columns(
-    df: pd.DataFrame, batch_size_number: int
+    df: pd.DataFrame, batch_size_number: int, assess_sentiment: bool = True
 ) -> pd.DataFrame:
     """
     Force a topic-analysis table into exactly the five expected columns.
@@ -2119,11 +2221,29 @@ def _ensure_standard_topic_table_columns(
         used_cols.add(found)
 
     unused_cols = [c for c in working.columns if c not in used_cols]
-    for standard_name in expected:
+    for standard_name in _column_fill_order(assess_sentiment):
         if standard_name in mapped:
             continue
         if not unused_cols:
             break
+        # When sentiment was not requested, leave Sentiment for the default
+        # rather than consuming Response ID or Summary values.
+        if not assess_sentiment and standard_name == "Sentiment":
+            continue
+        # Short/malformed tables (e.g. force-zero-shot Placeholder + Subtopic +
+        # IDs) should not treat numeric response IDs as Sentiment.
+        if standard_name == "Sentiment":
+            candidate_vals = _column_as_string_series(working[unused_cols[0]], n_rows)
+            looks_like_ids = (
+                candidate_vals.str.contains(r"\d", regex=True, na=False).mean() >= 0.5
+            )
+            sentiment_values = {"negative", "neutral", "positive", "not assessed"}
+            looks_like_sentiment = (
+                candidate_vals.str.strip().str.lower().isin(sentiment_values).mean()
+                >= 0.5
+            )
+            if looks_like_ids and not looks_like_sentiment:
+                continue
         col = unused_cols.pop(0)
         mapped[standard_name] = _column_as_string_series(working[col], n_rows)
         used_cols.add(col)
@@ -2220,6 +2340,91 @@ def convert_response_text_to_dataframe(
     return out_df, is_error
 
 
+def _effective_parse_batch_size(
+    batch_basic_response_df: pd.DataFrame, configured_batch_size: int
+) -> int:
+    """Use the actual number of responses in this batch when parsing LLM tables.
+
+    Remainder batches (e.g. 41 rows with batch size 10 → last batch of 1) must
+    not inherit the configured batch size. Otherwise blank Response IDs are
+    dropped and references are not forced to the single row, so that last
+    response never appears in the outputs.
+    """
+    if (
+        isinstance(batch_basic_response_df, pd.DataFrame)
+        and not batch_basic_response_df.empty
+    ):
+        return int(len(batch_basic_response_df))
+    return int(configured_batch_size)
+
+
+def _is_positive_response_id(value: object) -> bool:
+    try:
+        return int(float(value)) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _series_id_as_int_string(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+
+
+def _lookup_original_response_id(
+    ref: object,
+    batch_basic_response_df: pd.DataFrame,
+    start_row: int,
+    batch_size_number: int,
+) -> object | None:
+    """Map an LLM Response ID to Original Response ID. Never returns 0."""
+    try:
+        ref_int = int(float(str(ref).strip()))
+    except (TypeError, ValueError):
+        return None
+    if ref_int <= 0:
+        return None
+
+    if (
+        isinstance(batch_basic_response_df, pd.DataFrame)
+        and not batch_basic_response_df.empty
+    ):
+        ref_str = str(ref_int)
+        if "Response ID" in batch_basic_response_df.columns:
+            matches = batch_basic_response_df.loc[
+                _series_id_as_int_string(batch_basic_response_df["Response ID"])
+                == ref_str,
+                "Original Response ID",
+            ]
+            if not matches.empty and _is_positive_response_id(matches.iloc[0]):
+                return matches.iloc[0]
+
+        if "Original Response ID" in batch_basic_response_df.columns:
+            matches = batch_basic_response_df.loc[
+                _series_id_as_int_string(
+                    batch_basic_response_df["Original Response ID"]
+                )
+                == ref_str,
+                "Original Response ID",
+            ]
+            if not matches.empty and _is_positive_response_id(matches.iloc[0]):
+                return matches.iloc[0]
+
+        # Batch-relative ID that did not match due to dtype quirks
+        if 1 <= ref_int <= int(batch_size_number) and ref_int <= len(
+            batch_basic_response_df
+        ):
+            original_id = batch_basic_response_df.iloc[ref_int - 1][
+                "Original Response ID"
+            ]
+            if _is_positive_response_id(original_id):
+                return original_id
+        return None
+
+    computed = ref_int + int(start_row)
+    if computed > 0:
+        return computed
+    return None
+
+
 def write_llm_output_and_logs(
     response_text: str,
     whole_conversation: List[str],
@@ -2237,6 +2442,8 @@ def write_llm_output_and_logs(
     produce_structured_summary_radio: str = "No",
     return_logs: bool = False,
     output_folder: str = OUTPUT_FOLDER,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
 ) -> Tuple:
     """
     Writes the output of the large language model requests and logs to files.
@@ -2258,6 +2465,11 @@ def write_llm_output_and_logs(
     - produce_structured_summary_radio (str, optional): Whether the option to produce structured summaries has been selected.
     - return_logs (bool): A boolean indicating if logs should be returned. Defaults to False.
     - output_folder (str): The name of the folder where output files are saved.
+    - sentiment_checkbox (str, optional): Sentiment analysis option. When
+      "Do not assess sentiment", 4-column tables are treated as having
+      Response ID rather than Sentiment.
+    - force_zero_shot_radio (str, optional): When "Yes", overwrite General topic
+      to 'Not assessed' if the model ignored the Placeholder instruction.
     """
     topic_summary_df_out_path = list()
     topic_table_out_path = "topic_table_error.csv"
@@ -2286,6 +2498,9 @@ def write_llm_output_and_logs(
         columns=["General topic", "Subtopic", "Sentiment"]
     )
     is_error = False  # If there was an error in parsing, return boolean saying error
+    batch_size_number = _effective_parse_batch_size(
+        batch_basic_response_df, batch_size_number
+    )
 
     if produce_structured_summary_radio == "Yes":
         existing_topics_df.rename(
@@ -2454,20 +2669,48 @@ def write_llm_output_and_logs(
         if parsed_column_count < 3 or parsed_column_count not in (4, 5):
             has_incomplete_output = True
 
+    assess_sentiment = _assess_sentiment(sentiment_checkbox)
+    has_sentiment_header = (
+        _find_parsed_table_column(topic_with_response_df, "Sentiment") is not None
+    )
+    has_response_id_header = (
+        _find_parsed_table_column(topic_with_response_df, "Response ID") is not None
+    )
+
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
     if topic_with_response_df.shape[1] == 5:
-        new_column_names = {
-            topic_with_response_df.columns[0]: "General topic",
-            topic_with_response_df.columns[1]: "Subtopic",
-            topic_with_response_df.columns[2]: "Sentiment",
-            topic_with_response_df.columns[3]: "Response ID",
-            topic_with_response_df.columns[4]: "Summary",
-        }
-
-        topic_with_response_df = topic_with_response_df.rename(columns=new_column_names)
+        if not assess_sentiment and not has_sentiment_header:
+            # Prompt asked for 4 columns; a 5th is usually a trailing empty cell.
+            # Do not treat column 3 as Sentiment or Response ID values are lost.
+            if not has_response_id_header:
+                new_column_names = {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Response ID",
+                    topic_with_response_df.columns[3]: "Summary",
+                }
+                topic_with_response_df = topic_with_response_df.rename(
+                    columns=new_column_names
+                )
+            topic_with_response_df["Sentiment"] = pd.Series(
+                ["Not assessed"] * len(topic_with_response_df), dtype=str
+            )
+        else:
+            new_column_names = {
+                topic_with_response_df.columns[0]: "General topic",
+                topic_with_response_df.columns[1]: "Subtopic",
+                topic_with_response_df.columns[2]: "Sentiment",
+                topic_with_response_df.columns[3]: "Response ID",
+                topic_with_response_df.columns[4]: "Summary",
+            }
+            topic_with_response_df = topic_with_response_df.rename(
+                columns=new_column_names
+            )
     elif topic_with_response_df.shape[1] == 4:
-        if _four_column_table_has_sentiment(topic_with_response_df):
+        if _four_column_table_has_sentiment(
+            topic_with_response_df, assess_sentiment=assess_sentiment
+        ):
             # batch_size==1: General topic, Subtopic, Sentiment, Summary (no Response ID)
             rename_map = {}
             for standard_name in [
@@ -2496,15 +2739,43 @@ def write_llm_output_and_logs(
             )
         else:
             # 4-column case without Sentiment (Response ID present instead)
-            new_column_names = {
-                topic_with_response_df.columns[0]: "General topic",
-                topic_with_response_df.columns[1]: "Subtopic",
-                topic_with_response_df.columns[2]: "Response ID",
-                topic_with_response_df.columns[3]: "Summary",
-            }
-            topic_with_response_df = topic_with_response_df.rename(
-                columns=new_column_names
-            )
+            if has_response_id_header:
+                rename_map = {}
+                for standard_name in [
+                    "General topic",
+                    "Subtopic",
+                    "Response ID",
+                    "Summary",
+                ]:
+                    found_col = _find_parsed_table_column(
+                        topic_with_response_df, standard_name
+                    )
+                    if found_col is not None:
+                        rename_map[found_col] = standard_name
+                if len(rename_map) == 4:
+                    topic_with_response_df = topic_with_response_df.rename(
+                        columns=rename_map
+                    )
+                else:
+                    new_column_names = {
+                        topic_with_response_df.columns[0]: "General topic",
+                        topic_with_response_df.columns[1]: "Subtopic",
+                        topic_with_response_df.columns[2]: "Response ID",
+                        topic_with_response_df.columns[3]: "Summary",
+                    }
+                    topic_with_response_df = topic_with_response_df.rename(
+                        columns=new_column_names
+                    )
+            else:
+                new_column_names = {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Response ID",
+                    topic_with_response_df.columns[3]: "Summary",
+                }
+                topic_with_response_df = topic_with_response_df.rename(
+                    columns=new_column_names
+                )
             topic_with_response_df["Sentiment"] = pd.Series(
                 ["Not assessed"] * len(topic_with_response_df), dtype=str
             )
@@ -2521,8 +2792,14 @@ def write_llm_output_and_logs(
     # "General topic" when another column is already named that), which previously
     # caused: Reindexing only valid with uniquely valued Index objects.
     topic_with_response_df = _ensure_standard_topic_table_columns(
-        topic_with_response_df, batch_size_number
+        topic_with_response_df,
+        batch_size_number,
+        assess_sentiment=assess_sentiment,
     )
+    if produce_structured_summary_radio != "Yes":
+        topic_with_response_df = apply_forced_unassessed_general_topics(
+            topic_with_response_df, force_zero_shot_radio
+        )
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
@@ -2661,23 +2938,6 @@ def write_llm_output_and_logs(
         if batch_size_number == 1:
             references = ["1"]
 
-        # Filter out references that are outside the valid range
-        if references:
-            try:
-                # Convert all references to integers and keep only those within valid range
-                ref_numbers = [int(ref) for ref in references]
-                references = [
-                    ref
-                    for ref in ref_numbers
-                    if 1 <= int(ref) <= int(batch_size_number)
-                ]
-            except ValueError:
-                # If any reference can't be converted to int, skip this row
-                print("Response value could not be converted to number:", references)
-                continue
-        else:
-            references = []
-
         topic = row.iloc[0] if pd.notna(row.iloc[0]) else ""
         subtopic = row.iloc[1] if pd.notna(row.iloc[1]) else ""
         sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
@@ -2690,59 +2950,40 @@ def write_llm_output_and_logs(
         if produce_structured_summary_radio != "Yes":
             summary = row_number_string_start + summary
 
-        # Check if the 'references' list exists and is not empty
+        resolved_ids = []
+        seen_ids = set()
+        for ref in references:
+            response_ref_no = _lookup_original_response_id(
+                ref,
+                batch_basic_response_df,
+                start_row,
+                batch_size_number,
+            )
+            if response_ref_no is None:
+                print(f"Response ID '{ref}' not found in the DataFrame.")
+                continue
+            id_key = str(int(float(response_ref_no)))
+            if id_key in seen_ids:
+                continue
+            seen_ids.add(id_key)
+            resolved_ids.append(response_ref_no)
 
-        if references:
-            existing_reference_numbers = True
+        if (
+            not resolved_ids
+            and batch_size_number == 1
+            and isinstance(batch_basic_response_df, pd.DataFrame)
+            and not batch_basic_response_df.empty
+        ):
+            fallback_id = batch_basic_response_df["Original Response ID"].iloc[0]
+            if _is_positive_response_id(fallback_id):
+                resolved_ids = [fallback_id]
 
-            # We process one reference at a time to create one dictionary entry per reference.
-            for ref in references:
-                # This variable will hold the final reference number for the current 'ref'
-                response_ref_no = None
+        if not resolved_ids:
+            print("Skipping topic row with no valid Response ID")
+            continue
 
-                # Now, we decide how to calculate 'response_ref_no' for the current 'ref'
-                if batch_basic_response_df.empty:
-                    # --- Scenario 1: The DataFrame is empty, so we calculate the reference ---
-                    try:
-                        response_ref_no = int(ref) + int(start_row)
-                    except ValueError:
-                        print(f"Response ID '{ref}' is not a number and was skipped.")
-                        continue  # Skip to the next 'ref' in the loop
-
-                else:
-                    # --- Scenario 2: The DataFrame is NOT empty, so we look up the reference ---
-                    matching_series = batch_basic_response_df.loc[
-                        batch_basic_response_df["Response ID"] == str(ref),
-                        "Original Response ID",
-                    ]
-
-                    if not matching_series.empty:
-                        # If found, get the first match
-                        response_ref_no = matching_series.iloc[0]
-                    else:
-                        # If not found, report it and skip this reference
-                        print(f"Response ID '{ref}' not found in the DataFrame.")
-                        continue  # Skip to the next 'ref' in the loop
-
-                # This code runs for every *valid* reference that wasn't skipped by 'continue'.
-                # It uses the 'response_ref_no' calculated in the if/else block above.
-                reference_data.append(
-                    {
-                        "Response ID": str(response_ref_no),
-                        "General topic": topic,
-                        "Subtopic": subtopic,
-                        "Sentiment": sentiment,
-                        "Summary": summary,
-                        "Start row of group": start_row_reported,
-                    }
-                )
-
-        # This 'else' corresponds to the 'if references:' at the top
-        else:
-            # This block runs only if the 'references' list was empty or None to begin with
-            existing_reference_numbers = False
-            response_ref_no = 0  # Default value when no references are provided
-
+        existing_reference_numbers = True
+        for response_ref_no in resolved_ids:
             reference_data.append(
                 {
                     "Response ID": str(response_ref_no),
@@ -2805,6 +3046,11 @@ def write_llm_output_and_logs(
         for col in required_cols:
             if col not in out_reference_df.columns:
                 out_reference_df[col] = ""
+
+    # Response ID 0 is a placeholder and does not exist in source data
+    if not out_reference_df.empty and "Response ID" in out_reference_df.columns:
+        numeric_ids = pd.to_numeric(out_reference_df["Response ID"], errors="coerce")
+        out_reference_df = out_reference_df.loc[numeric_ids.fillna(0) > 0].copy()
 
     # Remove duplicate Response ID for the same topic
     # Only if out_reference_df is not empty and has the required columns
@@ -2975,6 +3221,17 @@ def write_llm_output_and_logs(
 
     out_topic_summary_df["Group"] = group_name
 
+    if produce_structured_summary_radio != "Yes":
+        topic_with_response_df = apply_forced_unassessed_general_topics(
+            topic_with_response_df, force_zero_shot_radio
+        )
+        out_reference_df = apply_forced_unassessed_general_topics(
+            out_reference_df, force_zero_shot_radio
+        )
+        out_topic_summary_df = apply_forced_unassessed_general_topics(
+            out_topic_summary_df, force_zero_shot_radio
+        )
+
     topic_summary_df_out_path = (
         output_folder
         + batch_file_path_details
@@ -3031,6 +3288,8 @@ def process_batch_with_llm(
     task_type: str,
     assistant_prefill: str = "",
     api_url: str = None,
+    sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
 ):
     """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
 
@@ -3090,7 +3349,7 @@ def process_batch_with_llm(
 
     # Prepare clients before query
     if "Gemini" in model_source:
-        print("Using Gemini model:", model_choice)
+        # print("Using Gemini model:", model_choice)
         client, client_config = construct_gemini_generative_model(
             in_api_key=in_api_key,
             temperature=temperature,
@@ -3099,20 +3358,20 @@ def process_batch_with_llm(
             max_tokens=max_tokens,
         )
     elif "Azure/OpenAI" in model_source:
-        print("Using Azure/OpenAI AI Inference model:", model_choice)
+        # print("Using Azure/OpenAI AI Inference model:", model_choice)
         if azure_api_key_textbox:
             os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
         client, client_config = construct_azure_client(
             in_api_key=azure_api_key_textbox, endpoint=azure_endpoint_textbox
         )
     elif "AWS" in model_source:
-        print("Using AWS Bedrock model:", model_choice)
+        # print("Using AWS Bedrock model:", model_choice)
         pass
     elif "Local" in model_source:
-        print("Using local model:", model_choice)
+        # print("Using local model:", model_choice)
         pass
     elif "inference-server" in model_source:
-        print("Using inference-server model:", model_choice)
+        # print("Using inference-server model:", model_choice)
         pass
     else:
         raise ValueError(f"Unsupported model source: {model_source}")
@@ -3196,11 +3455,13 @@ def process_batch_with_llm(
     current_temperature = temperature
 
     while retry_needed and retry_count < max_retries:
-        # Increase temperature by 0.1 on each retry (not on first attempt)
+        # Adjust temperature on each retry (not on first attempt). Bedrock rejects values above 1.0.
         if retry_count > 0:
-            current_temperature = original_temperature + (retry_count * 0.1)
+            current_temperature = adjust_retry_temperature(
+                original_temperature, retry_count
+            )
             print(
-                f"Increasing temperature to {current_temperature:.1f} for retry attempt {retry_count + 1}"
+                f"Adjusting temperature to {current_temperature:.1f} for retry attempt {retry_count + 1}"
             )
 
             # Recreate client with updated temperature if using Gemini
@@ -3269,6 +3530,8 @@ def process_batch_with_llm(
             group_name,
             produce_structured_summary_radio,
             output_folder=output_folder,
+            sentiment_checkbox=sentiment_checkbox,
+            force_zero_shot_radio=force_zero_shot_radio,
         )
 
         # Check if output has unexpected column count (incomplete / malformed format)
@@ -3276,10 +3539,12 @@ def process_batch_with_llm(
         if has_incomplete_output:
             retry_count += 1
             if retry_count < max_retries:
-                next_temperature = original_temperature + (retry_count * 0.1)
+                next_temperature = adjust_retry_temperature(
+                    original_temperature, retry_count
+                )
                 print(
                     f"LLM output table has unexpected column count (incomplete/malformed format). "
-                    f"Retrying LLM call with increased temperature {next_temperature:.1f} "
+                    f"Retrying LLM call with temperature {next_temperature:.1f} "
                     f"(attempt {retry_count + 1}/{max_retries})..."
                 )
                 retry_needed = True
@@ -3430,7 +3695,7 @@ def extract_topics(
     - context_textbox (str, optional): A string giving some context to the consultation/task.
     - time_taken (float, optional): The amount of time taken to process the responses up until this point.
     - sentiment_checkbox (str, optional): What type of sentiment analysis should the topic modeller do?
-    - force_zero_shot_radio (str, optional): Should responses be forced into a zero shot topic or not.
+    - force_zero_shot_radio (str, optional): Should responses be forced into submitted candidate topics. Only has an effect when an initial candidate topics file/list is submitted.
     - in_excel_sheets (List[str], optional): List of excel sheets to load from input file.
     - force_single_topic_radio (str, optional): Should the model be forced to assign only one single topic to each response (effectively a classifier).
     - produce_structured_summary_radio (str, optional): Should the model create a structured summary instead of extracting topics.
@@ -3459,6 +3724,10 @@ def extract_topics(
 
     # Ensure custom model_choice is registered in model_name_map
     ensure_model_in_map(model_choice, model_name_map)
+
+    force_zero_shot_radio = effective_force_zero_shot_radio(
+        force_zero_shot_radio, candidate_topics
+    )
 
     tic = time.perf_counter()
 
@@ -3759,14 +4028,19 @@ def extract_topics(
             if not batch_basic_response_df.empty:
 
                 # If this is the second batch, the master table will refer back to the current master table when assigning topics to the new table. Also runs if there is an existing list of topics supplied by the user
-                if latest_batch_completed >= 1 or candidate_topics is not None:
+                if latest_batch_completed >= 1 or has_submitted_candidate_topics(
+                    candidate_topics
+                ):
 
                     formatted_system_prompt = add_existing_topics_system_prompt.format(
                         consultation_context=context_textbox, column_name=chosen_cols
                     )
 
                     # Preparing candidate topics if no topics currently exist
-                    if candidate_topics and existing_topic_summary_df.empty:
+                    if (
+                        has_submitted_candidate_topics(candidate_topics)
+                        and existing_topic_summary_df.empty
+                    ):
 
                         # 'Zero shot topics' are those supplied by the user
                         # Handle both string paths (CLI) and gr.FileData objects (Gradio)
@@ -3815,7 +4089,10 @@ def extract_topics(
                         else:
                             existing_topic_summary_df = zero_shot_topics_df
 
-                    if candidate_topics and not zero_shot_topics_df.empty:
+                    if (
+                        has_submitted_candidate_topics(candidate_topics)
+                        and not zero_shot_topics_df.empty
+                    ):
                         # If you have already created revised zero shot topics, concat to the current
                         existing_topic_summary_df = pd.concat(
                             [existing_topic_summary_df, zero_shot_topics_df]
@@ -3916,7 +4193,7 @@ def extract_topics(
                             ["Main heading", "Subheading"], ascending=[True, True]
                         )
 
-                    print("Number of topics:", topics_df_for_markdown.shape[0])
+                    # print("Number of topics:", topics_df_for_markdown.shape[0])
 
                     # Clean topic names before converting to markdown to ensure consistent formatting
                     if "General topic" in topics_df_for_markdown.columns:
@@ -4034,9 +4311,11 @@ def extract_topics(
                         task_type=task_type,
                         assistant_prefill=add_existing_topics_assistant_prefill,
                         api_url=api_url,
+                        sentiment_checkbox=sentiment_checkbox,
+                        force_zero_shot_radio=force_zero_shot_radio,
                     )
 
-                    print("Completed batch processing")
+                    # print("Completed batch processing")
 
                     all_prompts_content.append(current_prompt_content_logged)
                     all_responses_content.append(current_summary_content_logged)
@@ -4193,6 +4472,8 @@ def extract_topics(
                         task_type=task_type,
                         assistant_prefill=initial_table_assistant_prefill,
                         api_url=api_url,
+                        sentiment_checkbox=sentiment_checkbox,
+                        force_zero_shot_radio=force_zero_shot_radio,
                     )
 
                     all_prompts_content.append(current_prompt_content_logged)
@@ -4278,11 +4559,19 @@ def extract_topics(
                 ]:
                     if col_name in df.columns and not df[col_name].isnull().all():
                         df[col_name] = df[col_name].apply(normalize_topic_name_for_llm)
+            existing_reference_df = apply_forced_unassessed_general_topics(
+                existing_reference_df, force_zero_shot_radio
+            )
+            existing_topic_summary_df = apply_forced_unassessed_general_topics(
+                existing_topic_summary_df, force_zero_shot_radio
+            )
+            existing_topics_table = apply_forced_unassessed_general_topics(
+                existing_topics_table, force_zero_shot_radio
+            )
 
             # Deduplicate topics after each batch if enabled and conditions are met
             if (
                 ENABLE_BATCH_DEDUPLICATION
-                and force_zero_shot_radio == "No"
                 and produce_structured_summary_radio == "No"
                 and not existing_reference_df.empty
                 and not existing_topic_summary_df.empty
@@ -4297,15 +4586,8 @@ def extract_topics(
                     f"{file_name_clean}_batch_{latest_batch_completed}_unique_topics"
                 )
 
-                # Prepare file_data for deduplication if available
-                in_data_files_for_dedup = in_data_file
-                extract_num_batches = None
-                extract_data_file_names_textbox = None
-                if not file_data.empty and chosen_cols:
-                    # Pass file_data as DataFrame and use available num_batches and file_name
-                    in_data_files_for_dedup = file_data
-                    extract_num_batches = num_batches
-                    extract_data_file_names_textbox = file_name
+                extract_num_batches = num_batches
+                extract_data_file_names_textbox = file_name
 
                 try:
                     original_topic_summary_df = existing_topic_summary_df.copy()
@@ -4342,8 +4624,12 @@ def extract_topics(
                         ),
                         merge_sentiment="No",
                         merge_general_topics="No",
-                        score_threshold=95,
-                        in_data_files=in_data_files_for_dedup,
+                        score_threshold=(
+                            FORCE_ZERO_SHOT_FUZZY_THRESHOLD
+                            if force_zero_shot_radio == "Yes"
+                            else 95
+                        ),
+                        in_data_files=None,
                         chosen_cols=(
                             chosen_cols
                             if isinstance(chosen_cols, list)
@@ -4587,6 +4873,7 @@ def extract_topics(
                 logged_content=group_combined_logged_content,
                 api_url=api_url,
                 max_topics_number=max_topics_number,
+                candidate_topics=candidate_topics,
             )
 
             # Add validation conversation metadata to the main conversation metadata
@@ -4659,10 +4946,8 @@ def extract_topics(
 
         ## Response ID table mapping response numbers to topics
         # Ensure Group is present for grouped pipelines and downstream concatenation
-        if "Group" not in existing_reference_df.columns:
-            existing_reference_df["Group"] = group_name
-        else:
-            existing_reference_df["Group"] = group_name
+        existing_reference_df = _dedupe_dataframe_column_names(existing_reference_df)
+        existing_reference_df["Group"] = group_name
 
         existing_reference_df.to_csv(
             reference_table_out_path, index=None, encoding="utf-8-sig"
@@ -4718,6 +5003,9 @@ def extract_topics(
         out_file_paths = [x for x in out_file_paths if "_final_" in x]
 
         ## Response ID table mapping response numbers to topics
+        existing_reference_df_pivot = _dedupe_dataframe_column_names(
+            existing_reference_df_pivot
+        )
         existing_reference_df_pivot["Group"] = group_name
         existing_reference_df_pivot.drop(
             ["1", "2", "3"], axis=1, errors="ignore"
@@ -4895,7 +5183,7 @@ def wrapper_extract_topics_per_column_value(
     :param batch_size: Number of rows to process in each batch for the LLM.
     :param context_textbox: Additional context provided by the user.
     :param sentiment_checkbox: Choice for sentiment assessment (e.g., "Negative, Neutral, or Positive").
-    :param force_zero_shot_radio: Option to force responses into zero-shot topics.
+    :param force_zero_shot_radio: Option to force responses into submitted candidate topics. Only has an effect when candidate_topics is provided.
     :param in_excel_sheets: List of Excel sheet names if applicable.
     :param force_single_topic_radio: Option to force a single topic per response.
     :param produce_structured_summary_radio: Option to produce a structured summary.
@@ -5004,6 +5292,7 @@ def wrapper_extract_topics_per_column_value(
     acc_logged_content = list()
 
     wrapper_first_loop = initial_first_loop_state
+    last_segment_error = None
 
     if len(unique_values) == 1:
         # If only one unique value, no need for progress bar, iterate directly
@@ -5134,27 +5423,39 @@ def wrapper_extract_topics_per_column_value(
             # Aggregate results
             # The DFs returned by extract_topics are already cumulative for *its own run*.
             # We now make them cumulative for the *wrapper's run*.
-            # Reset indices before concatenation to avoid reindexing errors
+            # Reset indices and drop duplicate column labels before concatenation
             if not acc_reference_df.empty:
-                acc_reference_df = acc_reference_df.reset_index(drop=True)
+                acc_reference_df = _dedupe_dataframe_column_names(
+                    acc_reference_df
+                ).reset_index(drop=True)
             if not seg_reference_df.empty:
-                seg_reference_df = seg_reference_df.reset_index(drop=True)
+                seg_reference_df = _dedupe_dataframe_column_names(
+                    seg_reference_df
+                ).reset_index(drop=True)
             acc_reference_df = pd.concat(
                 [acc_reference_df, seg_reference_df], ignore_index=True
             )
 
             if not acc_topic_summary_df.empty:
-                acc_topic_summary_df = acc_topic_summary_df.reset_index(drop=True)
+                acc_topic_summary_df = _dedupe_dataframe_column_names(
+                    acc_topic_summary_df
+                ).reset_index(drop=True)
             if not seg_topic_summary_df.empty:
-                seg_topic_summary_df = seg_topic_summary_df.reset_index(drop=True)
+                seg_topic_summary_df = _dedupe_dataframe_column_names(
+                    seg_topic_summary_df
+                ).reset_index(drop=True)
             acc_topic_summary_df = pd.concat(
                 [acc_topic_summary_df, seg_topic_summary_df], ignore_index=True
             )
 
             if not acc_reference_df_pivot.empty:
-                acc_reference_df_pivot = acc_reference_df_pivot.reset_index(drop=True)
+                acc_reference_df_pivot = _dedupe_dataframe_column_names(
+                    acc_reference_df_pivot
+                ).reset_index(drop=True)
             if not seg_reference_df_pivot.empty:
-                seg_reference_df_pivot = seg_reference_df_pivot.reset_index(drop=True)
+                seg_reference_df_pivot = _dedupe_dataframe_column_names(
+                    seg_reference_df_pivot
+                ).reset_index(drop=True)
             acc_reference_df_pivot = pd.concat(
                 [acc_reference_df_pivot, seg_reference_df_pivot], ignore_index=True
             )
@@ -5195,9 +5496,14 @@ def wrapper_extract_topics_per_column_value(
 
         except Exception as e:
             print(f"Error processing segment {grouping_col} = {group_value}: {e}")
+            traceback.print_exc()
+            last_segment_error = e
             # Optionally, decide if you want to continue with other segments or stop
             # For now, it will continue
             continue
+
+    if acc_reference_df.empty and last_segment_error is not None:
+        raise last_segment_error
 
     overall_file_name = clean_column_name(original_file_name, max_length=20)
     model_choice_clean = model_name_map[model_choice]["short_name"]
@@ -5556,18 +5862,10 @@ def discover_topics_from_sample(
             "Set 'Ask the model to produce structured summaries' to No."
         )
 
-    if candidate_topics is not None:
-        has_candidate = False
-        if isinstance(candidate_topics, list):
-            has_candidate = bool(candidate_topics)
-        elif isinstance(candidate_topics, str):
-            has_candidate = bool(candidate_topics.strip())
-        elif getattr(candidate_topics, "name", None):
-            has_candidate = True
-        if has_candidate:
-            warnings.append(
-                "Uploaded candidate topics were ignored for this discovery run."
-            )
+    if has_submitted_candidate_topics(candidate_topics):
+        warnings.append(
+            "Uploaded candidate topics were ignored for this discovery run."
+        )
 
     try:
         sample_fraction_percent = float(sample_fraction_percent)
@@ -6135,7 +6433,7 @@ def all_in_one_pipeline(
         batch_size (int): Size of each processing batch.
         context_text (str): Additional context for the LLM.
         sentiment_choice (str): Choice for sentiment analysis (e.g., "Yes", "No").
-        force_zero_shot_choice (str): Choice to force zero-shot prompting.
+        force_zero_shot_choice (str): Choice to force assignment into submitted candidate topics. Only has an effect when an initial candidate topics file/list is provided.
         in_excel_sheets (List[str]): List of sheet names in the input Excel file.
         force_single_topic_choice (str): Choice to force single topic extraction.
         produce_structures_summary_choice (str): Choice to produce structured summaries.
@@ -6171,6 +6469,10 @@ def all_in_one_pipeline(
 
     # Ensure custom model_choice is registered in model_name_map_state
     ensure_model_in_map(model_choice, model_name_map_state)
+
+    force_zero_shot_choice = effective_force_zero_shot_radio(
+        force_zero_shot_choice, candidate_topics
+    )
 
     # Load local model if it's not already loaded
     if (
@@ -6386,7 +6688,25 @@ def all_in_one_pipeline(
             "errors. Cannot continue to deduplication."
         )
 
-    print("Deduplicating topic names with fuzzy matching")
+    skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
+    if skip_llm_taxonomy_dedup:
+        reference_df_for_dedup = apply_forced_unassessed_general_topics(
+            reference_df_for_dedup, force_zero_shot_choice
+        )
+        topic_summary_for_dedup = apply_forced_unassessed_general_topics(
+            topic_summary_for_dedup, force_zero_shot_choice
+        )
+        light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
+        print(
+            "Running light fuzzy topic merge for forced zero-shot taxonomy "
+            f"(threshold={light_threshold}; case, apostrophes, near-identical names)."
+        )
+        fuzzy_threshold = light_threshold
+        fuzzy_merge_general_topics = "No"
+    else:
+        print("Deduplicating topic names with fuzzy matching")
+        fuzzy_threshold = score_threshold
+        fuzzy_merge_general_topics = merge_general_topics
     (
         ref_df_after_dedup,
         unique_df_after_dedup,
@@ -6400,16 +6720,22 @@ def all_in_one_pipeline(
         unique_topics_table_file_name=unique_topics_table_file_name_textbox,
         in_excel_sheets=in_excel_sheets,
         merge_sentiment=merge_sentiment,
-        merge_general_topics=merge_general_topics,
-        score_threshold=score_threshold,
+        merge_general_topics=fuzzy_merge_general_topics,
+        score_threshold=fuzzy_threshold,
         in_data_files=in_data_files,
         chosen_cols=chosen_cols,
         output_folder=output_folder,
         sentiment_checkbox=sentiment_choice,
+        deduplicate_topics="Yes",
     )
 
     # LLM-based deduplication if enabled
-    if force_zero_shot_choice == "No" and ALL_IN_ONE_USE_LLM_DEDUP:
+    if skip_llm_taxonomy_dedup:
+        print(
+            "Skipping LLM topic merge because force zero-shot is enabled "
+            "with a submitted candidate topics list."
+        )
+    elif ALL_IN_ONE_USE_LLM_DEDUP:
         # Set up model source and bedrock runtime if needed
 
         print("Deduplicating topic names with LLM")
