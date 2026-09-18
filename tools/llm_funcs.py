@@ -1132,12 +1132,17 @@ def call_aws_bedrock(
 
     # Anthropic Bedrock models reject temperature together with top_p/top_k.
     # Prefer temperature when set; keep topP for other Bedrock model families.
-    is_anthropic = "anthropic" in model_choice.lower()
+    model_choice_lower = model_choice.lower()
+    is_anthropic = "anthropic" in model_choice_lower
     if not is_anthropic:
         inference_config["topP"] = 0.999
 
-    # Using an assistant prefill only works for Anthropic models.
-    if assistant_prefill and "anthropic" in model_choice:
+    # Assistant prefill is only supported on older Anthropic Claude 3.x models.
+    # Claude 4+ on Bedrock rejects ending the conversation with an assistant turn.
+    supports_prefill = is_anthropic and not re.search(
+        r"claude-(?:sonnet-|opus-|haiku-)?4", model_choice_lower
+    )
+    if assistant_prefill and supports_prefill:
         assistant_prefill_added = True
         messages = [
             {
