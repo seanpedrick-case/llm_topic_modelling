@@ -50,6 +50,7 @@ from tools.dedup_summaries import (
     wrapper_summarise_output_topics_per_group,
 )
 from tools.helper_functions import (
+    apply_forced_unassessed_general_topics,
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
@@ -827,6 +828,7 @@ def validate_topics(
                 assistant_prefill=add_existing_topics_assistant_prefill,
                 api_url=api_url,
                 sentiment_checkbox=sentiment_checkbox,
+                force_zero_shot_radio=force_zero_shot_radio,
             )
 
             if validation_new_topic_df.empty:
@@ -967,6 +969,12 @@ def validate_topics(
                 for df in [validation_reference_df, validation_topic_summary_df]:
                     if col_name in df.columns and not df[col_name].isnull().all():
                         df[col_name] = df[col_name].apply(normalize_topic_name_for_llm)
+            validation_reference_df = apply_forced_unassessed_general_topics(
+                validation_reference_df, force_zero_shot_radio
+            )
+            validation_topic_summary_df = apply_forced_unassessed_general_topics(
+                validation_topic_summary_df, force_zero_shot_radio
+            )
 
             try:
                 topics_before = validation_topic_summary_df.drop_duplicates(
@@ -2435,6 +2443,7 @@ def write_llm_output_and_logs(
     return_logs: bool = False,
     output_folder: str = OUTPUT_FOLDER,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
 ) -> Tuple:
     """
     Writes the output of the large language model requests and logs to files.
@@ -2459,6 +2468,8 @@ def write_llm_output_and_logs(
     - sentiment_checkbox (str, optional): Sentiment analysis option. When
       "Do not assess sentiment", 4-column tables are treated as having
       Response ID rather than Sentiment.
+    - force_zero_shot_radio (str, optional): When "Yes", overwrite General topic
+      to 'Not assessed' if the model ignored the Placeholder instruction.
     """
     topic_summary_df_out_path = list()
     topic_table_out_path = "topic_table_error.csv"
@@ -2785,6 +2796,10 @@ def write_llm_output_and_logs(
         batch_size_number,
         assess_sentiment=assess_sentiment,
     )
+    if produce_structured_summary_radio != "Yes":
+        topic_with_response_df = apply_forced_unassessed_general_topics(
+            topic_with_response_df, force_zero_shot_radio
+        )
 
     # Fill in NA rows with values from above (topics seem to be included only on one row):
     topic_with_response_df = topic_with_response_df.ffill()
@@ -3206,6 +3221,17 @@ def write_llm_output_and_logs(
 
     out_topic_summary_df["Group"] = group_name
 
+    if produce_structured_summary_radio != "Yes":
+        topic_with_response_df = apply_forced_unassessed_general_topics(
+            topic_with_response_df, force_zero_shot_radio
+        )
+        out_reference_df = apply_forced_unassessed_general_topics(
+            out_reference_df, force_zero_shot_radio
+        )
+        out_topic_summary_df = apply_forced_unassessed_general_topics(
+            out_topic_summary_df, force_zero_shot_radio
+        )
+
     topic_summary_df_out_path = (
         output_folder
         + batch_file_path_details
@@ -3263,6 +3289,7 @@ def process_batch_with_llm(
     assistant_prefill: str = "",
     api_url: str = None,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    force_zero_shot_radio: str = "No",
 ):
     """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
 
@@ -3504,6 +3531,7 @@ def process_batch_with_llm(
             produce_structured_summary_radio,
             output_folder=output_folder,
             sentiment_checkbox=sentiment_checkbox,
+            force_zero_shot_radio=force_zero_shot_radio,
         )
 
         # Check if output has unexpected column count (incomplete / malformed format)
@@ -4284,6 +4312,7 @@ def extract_topics(
                         assistant_prefill=add_existing_topics_assistant_prefill,
                         api_url=api_url,
                         sentiment_checkbox=sentiment_checkbox,
+                        force_zero_shot_radio=force_zero_shot_radio,
                     )
 
                     # print("Completed batch processing")
@@ -4444,6 +4473,7 @@ def extract_topics(
                         assistant_prefill=initial_table_assistant_prefill,
                         api_url=api_url,
                         sentiment_checkbox=sentiment_checkbox,
+                        force_zero_shot_radio=force_zero_shot_radio,
                     )
 
                     all_prompts_content.append(current_prompt_content_logged)
@@ -4529,6 +4559,15 @@ def extract_topics(
                 ]:
                     if col_name in df.columns and not df[col_name].isnull().all():
                         df[col_name] = df[col_name].apply(normalize_topic_name_for_llm)
+            existing_reference_df = apply_forced_unassessed_general_topics(
+                existing_reference_df, force_zero_shot_radio
+            )
+            existing_topic_summary_df = apply_forced_unassessed_general_topics(
+                existing_topic_summary_df, force_zero_shot_radio
+            )
+            existing_topics_table = apply_forced_unassessed_general_topics(
+                existing_topics_table, force_zero_shot_radio
+            )
 
             # Deduplicate topics after each batch if enabled and conditions are met
             if (
@@ -6651,6 +6690,12 @@ def all_in_one_pipeline(
 
     skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
     if skip_llm_taxonomy_dedup:
+        reference_df_for_dedup = apply_forced_unassessed_general_topics(
+            reference_df_for_dedup, force_zero_shot_choice
+        )
+        topic_summary_for_dedup = apply_forced_unassessed_general_topics(
+            topic_summary_for_dedup, force_zero_shot_choice
+        )
         light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
         print(
             "Running light fuzzy topic merge for forced zero-shot taxonomy "

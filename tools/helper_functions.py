@@ -546,6 +546,28 @@ def _is_unassessed_topic_label(value: object) -> bool:
     return text.casefold() == "not assessed"
 
 
+UNASSESSED_GENERAL_TOPIC_LABEL = "Not assessed"
+
+
+def apply_forced_unassessed_general_topics(
+    df: pd.DataFrame, force_zero_shot_radio: str = "No"
+) -> pd.DataFrame:
+    """Overwrite General topic when force-zero-shot asked for 'Not assessed'.
+
+    The prompt tells the model to put 'Not assessed' in the Placeholder /
+    General topic column. If it invents names instead, replace them afterwards.
+    """
+    if force_zero_shot_radio != "Yes":
+        return df
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return df
+    if "General topic" not in df.columns:
+        return df
+    out = df.copy()
+    out["General topic"] = UNASSESSED_GENERAL_TOPIC_LABEL
+    return out
+
+
 def _flatten_pivot_column_label(col) -> str:
     """Join MultiIndex pivot parts, omitting 'Not assessed' general topics/sentiment."""
     if isinstance(col, str):
