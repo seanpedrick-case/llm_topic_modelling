@@ -1127,9 +1127,14 @@ def call_aws_bedrock(
 
     inference_config = {
         "maxTokens": max_tokens,
-        "topP": 0.999,
         "temperature": temperature,
     }
+
+    # Anthropic Bedrock models reject temperature together with top_p/top_k.
+    # Prefer temperature when set; keep topP for other Bedrock model families.
+    is_anthropic = "anthropic" in model_choice.lower()
+    if not is_anthropic:
+        inference_config["topP"] = 0.999
 
     # Using an assistant prefill only works for Anthropic models.
     if assistant_prefill and "anthropic" in model_choice:
@@ -1540,7 +1545,7 @@ def send_request(
                 )
                 time.sleep(timeout_wait)
 
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,
