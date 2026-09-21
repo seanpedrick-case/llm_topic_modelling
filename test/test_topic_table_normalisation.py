@@ -418,6 +418,24 @@ class TestTopicConfidenceColumn(unittest.TestCase):
         self.assertIn("0.90", markdown)
         self.assertIn("0.40", markdown)
 
+    def test_main_heading_alias_maps_to_general_topic(self):
+        df = pd.DataFrame(
+            {
+                "Main heading": ["Behaviour at school"],
+                "Subheading": ["Absences"],
+                "Summary": ["Alex had increasing absences."],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df, batch_size_number=5, assess_sentiment=False
+        )
+
+        self.assertEqual(out.loc[0, "General topic"], "Behaviour at school")
+        self.assertEqual(out.loc[0, "Subtopic"], "Absences")
+        self.assertEqual(out.loc[0, "Summary"], "Alex had increasing absences.")
+        self.assertNotEqual(out.loc[0, "Sentiment"], "Alex had increasing absences.")
+
 
 if __name__ == "__main__":
     unittest.main()

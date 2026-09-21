@@ -60,7 +60,6 @@ from tools.config import (
     DIRECT_MODE_SHOW_PREVIOUS_TABLE,
     DIRECT_MODE_SIMILARITY_THRESHOLD,
     DIRECT_MODE_SUMMARY_FORMAT,
-    # Direct mode variables
     DIRECT_MODE_TASK,
     DIRECT_MODE_TEMPERATURE,
     DIRECT_MODE_TEXT_COLUMN,
@@ -73,6 +72,7 @@ from tools.config import (
     FEEDBACK_LOG_FILE_NAME,
     FEEDBACK_LOGS_FOLDER,
     FILE_INPUT_HEIGHT,
+    FILL_SCREEN_WIDTH,
     GEMINI_API_KEY,
     GET_COST_CODES,
     GRADIO_SERVER_PORT,
@@ -285,7 +285,7 @@ div[class*="tab-nav"] button {
 
 # Create the gradio interface
 app = gr.Blocks(
-    fill_width=False,
+    fill_width=FILL_SCREEN_WIDTH,
     analytics_enabled=False,
     title="LLM topic modelling",
     delete_cache=(43200, 43200),
@@ -752,7 +752,7 @@ with app:
         # Check if required example files exist before creating Examples
         # This prevents errors in CI environments where example files may not be present
         required_example_files = [
-            "example_data/dummy_consultation_response.csv",
+            "example_data/improved_dummy_consultation_responses.csv",
             "example_data/combined_case_notes.csv",
         ]
         example_files_exist = all(os.path.exists(f) for f in required_example_files)
@@ -763,12 +763,12 @@ with app:
                 examples = gr.Examples(
                     examples=[
                         [
-                            ["example_data/dummy_consultation_response.csv"],
+                            ["example_data/improved_dummy_consultation_responses.csv"],
                             "Response text",
                             "Consultation for the construction of flats on Main Street",
-                            "dummy_consultation_response.csv",
+                            " improved_dummy_consultation_responses.csv",
                             [
-                                "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis.xlsx"
+                                "example_data/improved_dummy_consu_col_Response_text_gemini_flash_lite_theme_analysis.xlsx"
                             ],
                             dummy_consultation_table,
                             "Example output from the dummy consultation dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
@@ -783,7 +783,7 @@ with app:
                             "Social Care case notes for young people",
                             "combined_case_notes.csv",
                             [
-                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis.xlsx"
+                                "example_data/combined_case_notes_col_Case_Note_gemini_flash_lite_theme_analysis.xlsx"
                             ],
                             case_notes_table,
                             "Example output from the case notes dataset successfully loaded. Download the xlsx outputs to the right to see full outputs.",
@@ -793,16 +793,16 @@ with app:
                             5,
                         ],
                         [
-                            ["example_data/dummy_consultation_response.csv"],
+                            ["example_data/improved_dummy_consultation_responses.csv"],
                             "Response text",
                             "Consultation for the construction of flats on Main Street",
-                            "dummy_consultation_response.csv",
+                            " improved_dummy_consultation_responses.csv",
                             [
-                                "example_data/dummy_consultation_r_col_Response_text_Gemma_3_4B_topic_analysis_zero_shot.xlsx"
+                                "example_data/improved_dummy_consu_col_Response_text_gemini_flash_lite_theme_analysis_zero_shot.xlsx"
                             ],
                             dummy_consultation_table_zero_shot,
                             "Example output from the dummy consultation dataset with suggested topics successfully loaded. Download the xlsx outputs to the right to see full outputs.",
-                            "example_data/dummy_consultation_response_themes.csv",
+                            "example_data/improved_dummy_consultation_response_themes.csv",
                             "No",
                             None,
                             5,
@@ -813,7 +813,7 @@ with app:
                             "Social Care case notes for young people",
                             "combined_case_notes.csv",
                             [
-                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_topic_analysis_grouped.xlsx"
+                                "example_data/combined_case_notes_col_Case_Note_gemini_flash_lite_theme_analysis_grouped.xlsx"
                             ],
                             case_notes_table_grouped,
                             "Example data from the case notes dataset with groups successfully loaded. Download the xlsx outputs to the right to see full outputs.",
@@ -828,7 +828,7 @@ with app:
                             "Social Care case notes for young people",
                             "combined_case_notes.csv",
                             [
-                                "example_data/combined_case_notes_col_Case_Note_Gemma_3_4B_structured_summaries.xlsx"
+                                "example_data/combined_case_notes_col_Case_Note_gemini_flash_lite_structured_summaries.xlsx"
                             ],
                             case_notes_table_structured_summary,
                             "Example data from the case notes dataset for structured summaries successfully loaded. Download the xlsx outputs to the right to see full outputs.",
@@ -1743,6 +1743,15 @@ with app:
             produce_structured_summary_radio,
             candidate_topics,
             create_topics_csv_radio,
+            number_of_calls_num,
+            input_tokens_num,
+            output_tokens_num,
+            estimated_time_taken_number,
+            temperature_slide,
+            batch_size_number,
+            force_zero_shot_radio,
+            force_single_topic_radio,
+            sentiment_checkbox,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
         api_visibility="undocumented",
@@ -1897,6 +1906,15 @@ with app:
             produce_structured_summary_radio,
             candidate_topics,
             create_topics_csv_radio,
+            number_of_calls_num,
+            input_tokens_num,
+            output_tokens_num,
+            estimated_time_taken_number,
+            temperature_slide,
+            batch_size_number,
+            force_zero_shot_radio,
+            force_single_topic_radio,
+            sentiment_checkbox,
         ],
         outputs=[topic_extraction_output_files_xlsx, summary_xlsx_output_files_list],
         api_visibility="undocumented",
@@ -2200,6 +2218,15 @@ with app:
             produce_structured_summary_radio,
             candidate_topics,
             create_topics_csv_radio,
+            number_of_calls_num,
+            input_tokens_num,
+            output_tokens_num,
+            estimated_time_taken_number,
+            temperature_slide,
+            batch_size_number,
+            force_zero_shot_radio,
+            force_single_topic_radio,
+            sentiment_checkbox,
         ],
         outputs=[summary_output_files_xlsx, summary_xlsx_output_files_list],
         api_visibility="undocumented",
@@ -2316,6 +2343,15 @@ with app:
             produce_structured_summary_radio,
             candidate_topics,
             create_topics_csv_radio,
+            number_of_calls_num,
+            input_tokens_num,
+            output_tokens_num,
+            estimated_time_taken_number,
+            temperature_slide,
+            batch_size_number,
+            force_zero_shot_radio,
+            force_single_topic_radio,
+            sentiment_checkbox,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
         api_visibility="undocumented",
@@ -2621,6 +2657,15 @@ with app:
             produce_structured_summary_radio,
             candidate_topics,
             create_topics_csv_radio,
+            number_of_calls_num,
+            input_tokens_num,
+            output_tokens_num,
+            estimated_time_taken_number,
+            temperature_slide,
+            batch_size_number,
+            force_zero_shot_radio,
+            force_single_topic_radio,
+            sentiment_checkbox,
         ],
         outputs=[overall_summary_output_files_xlsx, summary_xlsx_output_files_list],
         api_visibility="undocumented",
@@ -2833,6 +2878,15 @@ with app:
             produce_structured_summary_radio,
             candidate_topics,
             create_topics_csv_radio,
+            number_of_calls_num,
+            input_tokens_num,
+            output_tokens_num,
+            estimated_time_taken_number,
+            temperature_slide,
+            batch_size_number,
+            force_zero_shot_radio,
+            force_single_topic_radio,
+            sentiment_checkbox,
         ],
         outputs=[out_xlsx_files, summary_xlsx_output_files_list],
         api_name="export_xlsx",

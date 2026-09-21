@@ -1325,6 +1325,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1622,6 +1631,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1731,8 +1749,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             if summarisation_input_files:
                 print("Generated Files:", sorted(summarisation_input_files))
 
-            # Initialize task_usage_log_path
+            # Initialize task_usage_log_path and usage stats
             task_usage_log_path = None
+            llm_input_tokens = 0
+            llm_output_tokens = 0
+            llm_calls = 0
+            llm_time = processing_time
 
             # Write usage log (only for LLM deduplication which has token counts)
             if args.method == "llm":
@@ -1795,6 +1817,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=llm_calls,
+                        input_tokens=llm_input_tokens,
+                        output_tokens=llm_output_tokens,
+                        time_taken=llm_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1943,6 +1974,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2067,6 +2107,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2270,6 +2319,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")

@@ -12,7 +12,9 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 from tools.config import (
+    ALL_IN_ONE_USE_LLM_DEDUP,
     ENABLE_ORIGINAL_DATA_REDACTION,
+    ENABLE_VALIDATION,
     EXPORT_FORMAT,
     INCLUDE_RESPONSE_LEVEL_SUMMARY,
     OUTPUT_FOLDER,
@@ -203,6 +205,85 @@ def _resolve_candidate_topics_file_name(candidate_topics) -> str:
     return ""
 
 
+def _coerce_usage_number(value, cast=int, default=0):
+    """Coerce Gradio/CLI usage values to int or float; return default on failure."""
+    if value is None or value == "":
+        return default
+    try:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return default
+        return cast(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_llm_usage_stats(
+    usage_logs_location: str,
+    reference_data_file_name_textbox: str,
+    model_choice: str,
+    chosen_cols,
+    llm_call_number=None,
+    input_tokens=None,
+    output_tokens=None,
+    time_taken=None,
+) -> tuple[int, int, int, float]:
+    """
+    Resolve LLM usage stats for the cover sheet.
+
+    Prefer in-memory values from the current run when they indicate real usage.
+    Fall back to filtering the usage logs CSV when direct values are absent/zero.
+    """
+    direct_calls = _coerce_usage_number(llm_call_number, int, 0)
+    direct_input = _coerce_usage_number(input_tokens, int, 0)
+    direct_output = _coerce_usage_number(output_tokens, int, 0)
+    direct_time = _coerce_usage_number(time_taken, float, 0.0)
+
+    if direct_calls or direct_input or direct_output or direct_time:
+        return direct_calls, direct_input, direct_output, direct_time
+
+    if not usage_logs_location:
+        print("LLM call logs location not provided")
+        return 0, 0, 0, 0.0
+
+    try:
+        usage_logs = pd.read_csv(usage_logs_location)
+        column_for_filter = (
+            chosen_cols[0]
+            if isinstance(chosen_cols, list) and chosen_cols
+            else chosen_cols
+        )
+        relevant_logs = usage_logs.loc[
+            (
+                usage_logs["Response ID data file name"]
+                == reference_data_file_name_textbox
+            )
+            & (
+                usage_logs[
+                    "Large language model for topic extraction and summarisation"
+                ]
+                == model_choice
+            )
+            & (
+                usage_logs[
+                    "Select the open text column of interest. In an Excel file, this shows columns across all sheets."
+                ]
+                == column_for_filter
+            ),
+            :,
+        ]
+        return (
+            int(sum(relevant_logs["Total LLM calls"].astype(int))),
+            int(sum(relevant_logs["Total input tokens"].astype(int))),
+            int(sum(relevant_logs["Total output tokens"].astype(int))),
+            float(sum(relevant_logs["Estimated time taken (seconds)"].astype(float))),
+        )
+    except Exception as e:
+        print("Could not obtain usage logs due to:", e)
+        return 0, 0, 0, 0.0
+
+
 def _resolve_excel_sheet_display_name(
     file_path: str, excel_sheets: Union[str, List[str], None]
 ) -> str:
@@ -224,6 +305,75 @@ def _resolve_excel_sheet_display_name(
         return ""
 
 
+def _yes_no_label(value) -> str:
+    """Normalise common truthy/falsey values to Yes/No for cover-sheet display."""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if text in ("True", "1", "true", "TRUE", "Yes", "yes"):
+        return "Yes"
+    if text in ("False", "0", "false", "FALSE", "No", "no"):
+        return "No"
+    return text
+
+
+def _build_run_settings_metadata(
+    temperature=None,
+    batch_size=None,
+    force_zero_shot: str = "",
+    force_single_topic: str = "",
+    structured_summaries=False,
+    sentiment_analysis: str = "",
+    validation_used: str = "",
+    llm_deduplication_used: str = "",
+) -> dict:
+    """Build ordered cover-sheet metadata describing analysis run settings."""
+    metadata = {}
+
+    if temperature is not None and str(temperature).strip() != "":
+        try:
+            metadata["Model temperature"] = float(temperature)
+        except (TypeError, ValueError):
+            metadata["Model temperature"] = temperature
+
+    if batch_size is not None and str(batch_size).strip() != "":
+        try:
+            metadata["Batch size"] = int(batch_size)
+        except (TypeError, ValueError):
+            metadata["Batch size"] = batch_size
+
+    force_zero_shot_label = _yes_no_label(force_zero_shot)
+    if force_zero_shot_label:
+        metadata["Force responses into suggested topics"] = force_zero_shot_label
+
+    force_single_topic_label = _yes_no_label(force_single_topic)
+    if force_single_topic_label:
+        metadata["Force single topic assignment"] = force_single_topic_label
+
+    metadata["Produce structured summary"] = _yes_no_label(structured_summaries) or (
+        "Yes" if structured_summaries else "No"
+    )
+
+    if sentiment_analysis and str(sentiment_analysis).strip():
+        metadata["Sentiment analysis"] = str(sentiment_analysis).strip()
+
+    validation_label = _yes_no_label(validation_used)
+    if not validation_label:
+        validation_label = "Yes" if ENABLE_VALIDATION == "True" else "No"
+    metadata["LLM validation used"] = validation_label
+
+    llm_dedup_label = _yes_no_label(llm_deduplication_used)
+    if not llm_dedup_label:
+        llm_dedup_label = "Yes" if ALL_IN_ONE_USE_LLM_DEDUP else "No"
+    metadata["LLM deduplication used"] = llm_dedup_label
+
+    return metadata
+
+
 def add_cover_sheet(
     wb: Workbook,
     intro_paragraphs: list[str],
@@ -243,6 +393,7 @@ def add_cover_sheet(
     excel_sheet_name: str = "",
     candidate_topics_file_name: str = "",
     custom_title: str = "Cover sheet",
+    run_settings: Optional[dict] = None,
 ):
     ws = wb.create_sheet(title=custom_title, index=0)
 
@@ -280,6 +431,12 @@ def add_cover_sheet(
             "Model name": model_name,
             "Analysis date": analysis_date,
             # "Analysis cost": analysis_cost,
+        }
+    )
+    if run_settings:
+        metadata.update(run_settings)
+    metadata.update(
+        {
             "Number of responses": number_of_responses,
             "Number of responses with text": number_of_responses_with_text,
             "Number of responses with text five plus words": number_of_responses_with_text_five_plus_words,
@@ -293,6 +450,8 @@ def add_cover_sheet(
 
     # Define which metadata fields should have number formatting with thousand separators
     number_format_fields = {
+        "Model temperature": "0.00",
+        "Batch size": "#,##0",
         "Number of responses": "#,##0",
         "Number of responses with text": "#,##0",
         "Number of responses with text five plus words": "#,##0",
@@ -322,7 +481,7 @@ def add_cover_sheet(
                 cell.number_format = number_format_fields[label]
 
         # Optional: Adjust column widths
-        ws.column_dimensions["A"].width = 50
+        ws.column_dimensions["A"].width = 55
         ws.column_dimensions["B"].width = 75
 
     # Ensure first row cells are wrapped on the cover sheet
@@ -355,6 +514,7 @@ def csvs_to_excel(
     excel_sheet_name: str = "",
     candidate_topics_file_name: str = "",
     unique_reference_numbers: list = [],
+    run_settings: Optional[dict] = None,
 ):
     if intro_text is None:
         intro_text = list()
@@ -481,6 +641,7 @@ def csvs_to_excel(
         number_of_responses_with_topic_assignment=number_of_responses_with_topic_assignment,
         excel_sheet_name=excel_sheet_name,
         candidate_topics_file_name=candidate_topics_file_name,
+        run_settings=run_settings,
     )
 
     wb.save(output_filename)
@@ -559,6 +720,17 @@ def collect_output_csvs_and_create_excel_output(
     structured_summaries: str = "No",
     candidate_topics=None,
     create_topics_csv: str = "Yes",
+    llm_call_number=None,
+    input_tokens=None,
+    output_tokens=None,
+    time_taken=None,
+    temperature=None,
+    batch_size=None,
+    force_zero_shot: str = "",
+    force_single_topic: str = "",
+    sentiment_analysis: str = "",
+    validation_used: str = "",
+    llm_deduplication_used: str = "",
 ):
     """
     Collect together output CSVs from various output boxes and combine them into a single output Excel file.
@@ -581,6 +753,18 @@ def collect_output_csvs_and_create_excel_output(
         candidate_topics (optional): Suggested topics file uploaded by the user (path string or Gradio FileData).
         create_topics_csv (str, optional): Whether to write a suggested-topics CSV with unique
             General topic / Subtopic pairs from the analysis. Defaults to "Yes".
+        llm_call_number (optional): In-memory LLM call count from the current run.
+        input_tokens (optional): In-memory input token count from the current run.
+        output_tokens (optional): In-memory output token count from the current run.
+        time_taken (optional): In-memory LLM time taken (seconds) from the current run.
+        temperature (optional): LLM temperature used for the run.
+        batch_size (optional): Batch size used for the run.
+        force_zero_shot (str, optional): Whether responses were forced into suggested topics.
+        force_single_topic (str, optional): Whether responses were forced to a single topic.
+        sentiment_analysis (str, optional): Sentiment analysis option used for the run.
+        validation_used (str, optional): Whether LLM validation was used. Defaults from ENABLE_VALIDATION.
+        llm_deduplication_used (str, optional): Whether LLM deduplication was used.
+            Defaults from ALL_IN_ONE_USE_LLM_DEDUP.
 
     Returns:
         tuple: A tuple containing:
@@ -598,6 +782,17 @@ def collect_output_csvs_and_create_excel_output(
         structured_summaries = True
     else:
         structured_summaries = False
+
+    run_settings = _build_run_settings_metadata(
+        temperature=temperature,
+        batch_size=batch_size,
+        force_zero_shot=force_zero_shot,
+        force_single_topic=force_single_topic,
+        structured_summaries=structured_summaries,
+        sentiment_analysis=sentiment_analysis,
+        validation_used=validation_used,
+        llm_deduplication_used=llm_deduplication_used,
+    )
 
     if not chosen_cols:
         raise Exception("Could not find chosen column")
@@ -684,14 +879,20 @@ def collect_output_csvs_and_create_excel_output(
         column_widths["Overall summary"] = {"A": 15, "B": 120}
         wrap_text_columns["Overall summary"] = ["A", "B"]
 
+    # Always load response-level source data for cover-sheet stats (and for the
+    # pivot when reference rows exist). Previously this only ran when
+    # master_reference_df_state was non-empty, which crashed structured-summary
+    # runs that produced no Response ID assignments.
+    file_data, file_name, num_batches = load_in_data_file(
+        in_data_files, chosen_cols, 1, in_excel_sheets=excel_sheets
+    )
+    basic_response_data = get_basic_response_data(
+        file_data, chosen_cols, verify_titles="No"
+    )
+    short_file_name = os.path.basename(file_name)
+
     if not master_reference_df_state.empty:
         # Simplify table to just responses column and the Response reference number
-        file_data, file_name, num_batches = load_in_data_file(
-            in_data_files, chosen_cols, 1, in_excel_sheets=excel_sheets
-        )
-        basic_response_data = get_basic_response_data(
-            file_data, chosen_cols, verify_titles="No"
-        )
         reference_pivot_table = convert_reference_table_to_pivot_table(
             master_reference_df_state, basic_response_data
         )
@@ -716,17 +917,21 @@ def collect_output_csvs_and_create_excel_output(
             "Sentiment",
             "Confidence",
             "Summary",
+            "Revised summary",
             "Start row of group",
             "Group",
             "Topic number",
         ]
         response_level_df = master_reference_df_state
+        response_level_summary_cols = ["Summary", "Revised summary"]
         if not INCLUDE_RESPONSE_LEVEL_SUMMARY:
             preferred_reference_cols = [
-                col for col in preferred_reference_cols if col != "Summary"
+                col
+                for col in preferred_reference_cols
+                if col not in response_level_summary_cols
             ]
             response_level_df = master_reference_df_state.drop(
-                columns=["Summary"], errors="ignore"
+                columns=response_level_summary_cols, errors="ignore"
             )
         existing_reference_cols = [
             col for col in preferred_reference_cols if col in response_level_df.columns
@@ -800,7 +1005,10 @@ def collect_output_csvs_and_create_excel_output(
             csv_files.append(reference_table_csv_path)
             sheet_names.append("Response level data")
             has_confidence_col = "Confidence" in response_level_df.columns
-            has_summary_col = "Summary" in response_level_df.columns
+            has_summary_col = any(
+                col in response_level_df.columns
+                for col in ("Summary", "Revised summary")
+            )
             if has_confidence_col and has_summary_col:
                 column_widths["Response level data"] = {
                     "A": 12,
@@ -933,55 +1141,17 @@ def collect_output_csvs_and_create_excel_output(
         & (basic_response_data["Response"].str.split().str.len() >= 5)
     ).sum()
 
-    # Get number of LLM calls, input and output tokens
-    if usage_logs_location:
-        try:
-            usage_logs = pd.read_csv(usage_logs_location)
-
-            relevant_logs = usage_logs.loc[
-                (
-                    usage_logs["Response ID data file name"]
-                    == reference_data_file_name_textbox
-                )
-                & (
-                    usage_logs[
-                        "Large language model for topic extraction and summarisation"
-                    ]
-                    == model_choice
-                )
-                & (
-                    usage_logs[
-                        "Select the open text column of interest. In an Excel file, this shows columns across all sheets."
-                    ]
-                    == (
-                        chosen_cols[0]
-                        if isinstance(chosen_cols, list) and chosen_cols
-                        else chosen_cols
-                    )
-                ),
-                :,
-            ]
-
-            llm_call_number = sum(relevant_logs["Total LLM calls"].astype(int))
-            input_tokens = sum(relevant_logs["Total input tokens"].astype(int))
-            output_tokens = sum(relevant_logs["Total output tokens"].astype(int))
-            time_taken = sum(
-                relevant_logs["Estimated time taken (seconds)"].astype(float)
-            )
-        except Exception as e:
-            print("Could not obtain usage logs due to:", e)
-            usage_logs = pd.DataFrame()
-            llm_call_number = 0
-            input_tokens = 0
-            output_tokens = 0
-            time_taken = 0
-    else:
-        print("LLM call logs location not provided")
-        usage_logs = pd.DataFrame()
-        llm_call_number = 0
-        input_tokens = 0
-        output_tokens = 0
-        time_taken = 0
+    # Prefer in-memory stats from the current run; fall back to usage logs CSV
+    llm_call_number, input_tokens, output_tokens, time_taken = _resolve_llm_usage_stats(
+        usage_logs_location=usage_logs_location,
+        reference_data_file_name_textbox=reference_data_file_name_textbox,
+        model_choice=model_choice,
+        chosen_cols=chosen_cols,
+        llm_call_number=llm_call_number,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        time_taken=time_taken,
+    )
 
     # Create short filename:
     model_choice_clean_short = clean_column_name(
@@ -1035,6 +1205,7 @@ def collect_output_csvs_and_create_excel_output(
         excel_sheet_name=excel_sheet_display_name,
         candidate_topics_file_name=candidate_topics_file_name,
         unique_reference_numbers=unique_reference_numbers,
+        run_settings=run_settings,
     )
 
     xlsx_output_filenames = [xlsx_output_filename]

@@ -99,6 +99,83 @@ class TestDeduplicateTopicsMemory(unittest.TestCase):
         self.assertIn("Damp in kitchen", summary)
         self.assertIn("Broken boiler", summary)
 
+    def test_confidence_column_kept_when_no_topic_remaps(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 2],
+                "General topic": ["Housing", "Transport"],
+                "Subtopic": ["Repairs", "Buses"],
+                "Sentiment": ["Negative", "Negative"],
+                "Summary": ["Damp in kitchen", "Need more buses"],
+                "Start row of group": [1, 6],
+                "Group": ["All", "All"],
+                "Confidence": [0.82, 0.31],
+            }
+        )
+        topic_summary_df = pd.DataFrame(
+            {
+                "General topic": ["Housing", "Transport"],
+                "Subtopic": ["Repairs", "Buses"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Topic number": [1, 2],
+            }
+        )
+
+        out_ref, _, _, _, _ = deduplicate_topics(
+            reference_df=reference_df,
+            topic_summary_df=topic_summary_df,
+            reference_table_file_name="test_ref",
+            unique_topics_table_file_name="test_topics",
+            output_files="False",
+            in_data_files=None,
+        )
+
+        self.assertIn("Confidence", out_ref.columns)
+        repairs = out_ref[out_ref["Subtopic"] == "Repairs"]
+        buses = out_ref[out_ref["Subtopic"] == "Buses"]
+        self.assertAlmostEqual(float(repairs.iloc[0]["Confidence"]), 0.82)
+        self.assertAlmostEqual(float(buses.iloc[0]["Confidence"]), 0.31)
+
+    def test_confidence_column_survives_row_collapse(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 1, 2],
+                "General topic": ["Housing", "Housing", "Transport"],
+                "Subtopic": ["Repairs", "Repairs", "Buses"],
+                "Sentiment": ["Negative", "Negative", "Negative"],
+                "Summary": ["Damp in kitchen", "Broken boiler", "Need more buses"],
+                "Start row of group": [1, 1, 6],
+                "Group": ["All", "All", "All"],
+                "Confidence": [0.4, 0.9, 0.75],
+            }
+        )
+        topic_summary_df = pd.DataFrame(
+            {
+                "General topic": ["Housing", "Transport"],
+                "Subtopic": ["Repairs", "Buses"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Topic number": [1, 2],
+            }
+        )
+
+        out_ref, _, _, _, _ = deduplicate_topics(
+            reference_df=reference_df,
+            topic_summary_df=topic_summary_df,
+            reference_table_file_name="test_ref",
+            unique_topics_table_file_name="test_topics",
+            output_files="False",
+            in_data_files=None,
+        )
+
+        self.assertIn("Confidence", out_ref.columns)
+        repair_rows = out_ref[
+            (out_ref["Response ID"] == 1) & (out_ref["Subtopic"] == "Repairs")
+        ]
+        self.assertEqual(len(repair_rows), 1)
+        self.assertAlmostEqual(float(repair_rows.iloc[0]["Confidence"]), 0.9)
+
 
 class TestLightNearDuplicateTopicMerge(unittest.TestCase):
     def _run(self, subtopics, threshold=92):

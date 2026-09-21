@@ -2149,10 +2149,19 @@ def _normalize_parsed_table_column_name(name: object) -> str:
     return str(name).lower().strip().replace("_", " ")
 
 
+# Structured-summary prompts use Main heading / Subheading; topic extraction uses
+# General topic / Subtopic. Treat them as equivalent when matching parsed headers.
+_PARSED_TABLE_COLUMN_ALIASES = {
+    "general topic": frozenset({"general topic", "main heading"}),
+    "subtopic": frozenset({"subtopic", "subheading"}),
+}
+
+
 def _find_parsed_table_column(df: pd.DataFrame, standard_name: str) -> str | None:
     target = _normalize_parsed_table_column_name(standard_name)
+    accepted = _PARSED_TABLE_COLUMN_ALIASES.get(target, frozenset({target}))
     for col in df.columns:
-        if _normalize_parsed_table_column_name(col) == target:
+        if _normalize_parsed_table_column_name(col) in accepted:
             return col
     return None
 
@@ -2541,7 +2550,7 @@ def write_llm_output_and_logs(
     output_folder: str = OUTPUT_FOLDER,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
     force_zero_shot_radio: str = "No",
-    include_topic_confidence_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
 ) -> Tuple:
     """
     Writes the output of the large language model requests and logs to files.
@@ -2766,11 +2775,15 @@ def write_llm_output_and_logs(
     )
     assess_sentiment = _assess_sentiment(sentiment_checkbox)
     include_confidence = _include_topic_confidence(include_topic_confidence_radio)
+    # Structured summaries are prompted for 3 columns: Main heading, Subheading, Summary
     valid_column_counts = {4, 5}
+    if produce_structured_summary_radio == "Yes":
+        valid_column_counts.add(3)
     if include_confidence:
         valid_column_counts.add(6)
     if not is_error and not topic_with_response_df.empty:
-        # Valid topic tables are 4 or 5 columns (6 when confidence is requested)
+        # Valid topic tables are 4 or 5 columns (6 when confidence is requested);
+        # structured summaries are valid with 3 columns.
         if parsed_column_count < 3 or parsed_column_count not in valid_column_counts:
             has_incomplete_output = True
     has_sentiment_header = (
@@ -2782,7 +2795,37 @@ def write_llm_output_and_logs(
 
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
-    if topic_with_response_df.shape[1] == 5:
+    if topic_with_response_df.shape[1] == 3 and (
+        produce_structured_summary_radio == "Yes"
+        or (
+            _find_parsed_table_column(topic_with_response_df, "Summary") is not None
+            and _find_parsed_table_column(topic_with_response_df, "Response ID") is None
+            and not has_sentiment_header
+        )
+    ):
+        # Main heading / Subheading / Summary (structured summary), or equivalent.
+        # Must map Summary before _ensure_standard_topic_table_columns so summary
+        # text is not consumed as Sentiment or Response ID.
+        rename_map = {}
+        for standard_name in ["General topic", "Subtopic", "Summary"]:
+            found_col = _find_parsed_table_column(
+                topic_with_response_df, standard_name
+            )
+            if found_col is not None:
+                rename_map[found_col] = standard_name
+        if len(rename_map) < 3:
+            rename_map.update(
+                {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Summary",
+                }
+            )
+        topic_with_response_df = topic_with_response_df.rename(columns=rename_map)
+        topic_with_response_df["Sentiment"] = pd.Series(
+            ["Not assessed"] * len(topic_with_response_df), dtype=str
+        )
+    elif topic_with_response_df.shape[1] == 5:
         if include_confidence and not assess_sentiment:
             has_confidence_header = (
                 _find_parsed_table_column(topic_with_response_df, "Confidence")
@@ -3131,6 +3174,24 @@ def write_llm_output_and_logs(
             if _is_positive_response_id(fallback_id):
                 resolved_ids = [fallback_id]
 
+        # Structured summaries omit Response ID; attach each heading summary to
+        # every response in the current batch so rows are not dropped.
+        if (
+            not resolved_ids
+            and produce_structured_summary_radio == "Yes"
+            and isinstance(batch_basic_response_df, pd.DataFrame)
+            and not batch_basic_response_df.empty
+            and "Original Response ID" in batch_basic_response_df.columns
+        ):
+            for fallback_id in batch_basic_response_df["Original Response ID"].tolist():
+                if not _is_positive_response_id(fallback_id):
+                    continue
+                id_key = str(int(float(fallback_id)))
+                if id_key in seen_ids:
+                    continue
+                seen_ids.add(id_key)
+                resolved_ids.append(fallback_id)
+
         if not resolved_ids:
             print("Skipping topic row with no valid Response ID")
             continue
@@ -3454,7 +3515,7 @@ def process_batch_with_llm(
     api_url: str = None,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
     force_zero_shot_radio: str = "No",
-    include_topic_confidence_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
 ):
     """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
 

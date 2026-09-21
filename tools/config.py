@@ -108,6 +108,30 @@ if APP_CONFIG_PATH:
     else:
         print("App config file not found at location:", APP_CONFIG_PATH)
 
+
+# App options
+
+INTRO_TEXT = get_or_create_env_var(
+    "INTRO_TEXT",
+    """# Extract topics and create thematic summaries from open text data
+
+Extract topics and summarise open text using Large Language Models (LLMs). The model will loop through all text rows to find the most relevant general topics and subtopics, and provide a short summary of each. If you have specific topics in mind, you can enter them in 'Provide a list of specific topics' below.
+
+NOTE: LLMs are not 100% accurate and may produce biased or incorrect responses. All files downloaded from this app **need to be checked by a human** before they are used in further outputs. Best results come from providing a clear, unambiguous list of suggested topics to the LLM so that it will follow your standard analysis procedure as closely as possible.""",
+)
+
+# Read in intro text from a text file if it is a path to a text file
+if INTRO_TEXT.endswith(".txt"):
+    INTRO_TEXT = open(INTRO_TEXT, "r").read()
+
+INTRO_TEXT = INTRO_TEXT.strip('"').strip("'")
+
+# Should the app fill the screen width?
+FILL_SCREEN_WIDTH = convert_string_to_boolean(
+    get_or_create_env_var("FILL_SCREEN_WIDTH", "False")
+)
+
+
 ###
 # AWS OPTIONS
 ###
@@ -201,7 +225,7 @@ EXPORT_FORMAT = get_or_create_env_var(
 if EXPORT_FORMAT not in ["xlsx", "ods"]:
     EXPORT_FORMAT = "xlsx"  # Default to xlsx if invalid value provided
 
-# Include per-row Summary text on the Response level data sheet.
+# Include per-row Summary / Revised summary text on the Response level data sheet.
 # Off by default: summaries are duplicated for every topic row and inflate xlsx size.
 INCLUDE_RESPONSE_LEVEL_SUMMARY = convert_string_to_boolean(
     get_or_create_env_var("INCLUDE_RESPONSE_LEVEL_SUMMARY", "False")
@@ -403,21 +427,6 @@ RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 
 RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var("GEMINI_API_KEY", "")
-
-INTRO_TEXT = get_or_create_env_var(
-    "INTRO_TEXT",
-    """# Extract topics and create thematic summaries from open text data
-
-Extract topics and summarise open text using Large Language Models (LLMs). The model will loop through all text rows to find the most relevant general topics and subtopics, and provide a short summary of each. If you have specific topics in mind, you can enter them in 'Provide a list of specific topics' below.
-
-NOTE: LLMs are not 100% accurate and may produce biased or incorrect responses. All files downloaded from this app **need to be checked by a human** before they are used in further outputs. Best results come from providing a clear, unambiguous list of suggested topics to the LLM so that it will follow your standard analysis procedure as closely as possible.""",
-)
-
-# Read in intro text from a text file if it is a path to a text file
-if INTRO_TEXT.endswith(".txt"):
-    INTRO_TEXT = open(INTRO_TEXT, "r").read()
-
-INTRO_TEXT = INTRO_TEXT.strip('"').strip("'")
 
 # Azure/OpenAI AI Inference settings
 RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")

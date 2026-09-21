@@ -1064,7 +1064,13 @@ def construct_gemini_generative_model(
         raise Warning("Error constructing Gemini generative model:", e)
 
     config = types.GenerateContentConfig(
-        temperature=temperature, max_output_tokens=max_tokens, seed=random_seed
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+        seed=random_seed,
+        # Disable default AFC; we don't pass tools (avoids SDK advisory warning).
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(
+            disable=True
+        ),
     )
 
     return client, config
@@ -1987,7 +1993,13 @@ def call_llm_with_markdown_table_checks(
 
     # Update Gemini config with the new temperature settings
     client_config = types.GenerateContentConfig(
-        temperature=call_temperature, max_output_tokens=max_tokens, seed=random_seed
+        temperature=call_temperature,
+        max_output_tokens=max_tokens,
+        seed=random_seed,
+        # Disable default AFC; we don't pass tools (avoids SDK advisory warning).
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(
+            disable=True
+        ),
     )
 
     for attempt in range(MAX_OUTPUT_VALIDATION_ATTEMPTS):
