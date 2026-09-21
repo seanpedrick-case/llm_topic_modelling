@@ -280,3 +280,31 @@ create_general_topics_prompt = """Subtopics known to be relevant to this dataset
 Your task is to create a General topic name for each Subtopic. The new Topics table should have the columns 'General topic' and 'Subtopic' only. Write a 'General topic' text label relevant to the Subtopic next to it in the new table. The text label should describe the general theme of the Subtopic. Do not add any other text, thoughts, or notes to your response.
 
 New Topics table:"""
+
+###
+# Improve abbreviated / ambiguous topic names from assigned responses
+###
+
+improve_topic_names_system_prompt = system_prompt + markdown_additional_prompt
+
+improve_topic_names_assistant_prefill = "|"
+
+improve_topic_names_prompt = """An officer previously labelled a set of consultation responses with the topic name '{current_topic_name}'. That name may be abbreviated or ambiguous. A sample of responses that were assigned this topic is shown below:
+
+{response_table}
+
+Your task is to infer the core meaning the officer was trying to express, then suggest clearer topic labels for reuse in future analyses.
+Create a markdown table with exactly four columns:
+1. 'Current topic' - repeat the current topic name exactly as given above.
+2. 'Suggested General topic' - a short broad theme label (can be empty only if the topic is already highly specific).
+3. 'Suggested Subtopic' - a concise but descriptive specific label that fully captures the shared meaning of the sampled responses. This must never be empty. Prefer plain language over abbreviations.
+4. 'Rationale' - one short sentence explaining why this label fits the sampled responses.
+
+Rules:
+- Stay faithful to the officer's intended meaning; do not invent unrelated themes.
+- Prefer descriptive names that another analyst could assign accurately without seeing the original short label.
+- Do not include sentiment words (Positive, Negative, Neutral) in the suggested names unless sentiment is clearly the topic itself.
+- Output only one data row in the table.
+- Do not add any other text to your response.
+
+Output markdown table:"""

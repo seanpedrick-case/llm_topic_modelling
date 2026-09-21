@@ -60,17 +60,22 @@ from tools.helper_functions import (
     ensure_model_in_map,
     generate_zero_shot_topics_df,
     get_basic_response_data,
+    get_file_name_no_ext,
     has_submitted_candidate_topics,
     load_in_data_file,
     load_in_previous_data_files,
+    load_topic_response_pivot,
     normalize_topic_name_for_llm,
     order_topics_for_batch_prompt,
     parse_topic_confidence_value,
     put_columns_in_df,
     read_file,
+    resolve_uploaded_file_path,
+    sample_responses_for_topic,
     subsample_responses_for_topic_discovery,
     wrap_text,
     write_candidate_topics_csv,
+    write_improved_topics_csv,
     write_topic_discovery_manifest_csv,
 )
 from tools.llm_funcs import (
@@ -95,6 +100,9 @@ from tools.prompts import (
     default_sentiment_prompt,
     force_existing_topics_prompt,
     force_single_topic_prompt,
+    improve_topic_names_assistant_prefill,
+    improve_topic_names_prompt,
+    improve_topic_names_system_prompt,
     initial_table_assistant_prefill,
     initial_table_prompt,
     initial_table_system_prompt,
@@ -2808,9 +2816,7 @@ def write_llm_output_and_logs(
         # text is not consumed as Sentiment or Response ID.
         rename_map = {}
         for standard_name in ["General topic", "Subtopic", "Summary"]:
-            found_col = _find_parsed_table_column(
-                topic_with_response_df, standard_name
-            )
+            found_col = _find_parsed_table_column(topic_with_response_df, standard_name)
             if found_col is not None:
                 rename_map[found_col] = standard_name
         if len(rename_map) < 3:
@@ -7308,3 +7314,451 @@ def deduplicate_topics_llm_wrapper(
         azure_api_key_textbox,
         sentiment_checkbox=sentiment_checkbox,
     )
+
+
+def _setup_improve_topic_names_clients(
+    model_choice: str,
+    model_source: str,
+    in_api_key: str,
+    temperature: float,
+    system_prompt: str,
+    aws_access_key_textbox: str,
+    aws_secret_key_textbox: str,
+    aws_region_textbox: str,
+    azure_api_key_textbox: str,
+    azure_endpoint: str,
+    api_url: str | None,
+    model_name_map_dict: dict,
+):
+    """Set up LLM clients for improve-topic-names calls (mirrors LLM dedupe setup)."""
+    client = None
+    config = None
+    bedrock_runtime = None
+
+    if "Gemini" in model_source:
+        client, config = construct_gemini_generative_model(
+            in_api_key,
+            temperature,
+            model_choice,
+            system_prompt,
+            max_tokens,
+            LLM_SEED,
+        )
+    elif "Azure/OpenAI" in model_source:
+        if azure_api_key_textbox:
+            os.environ["AZURE_INFERENCE_CREDENTIAL"] = azure_api_key_textbox
+        client, config = construct_azure_client(
+            in_api_key=azure_api_key_textbox, endpoint=azure_endpoint
+        )
+    elif "AWS" in model_source:
+        bedrock_runtime = connect_to_bedrock_runtime(
+            model_name_map_dict,
+            model_choice,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
+        )
+    elif "Local" in model_source:
+        pass
+    elif "inference-server" in model_source:
+        if api_url is None:
+            raise ValueError(
+                "api_url is required when model_source is 'inference-server'"
+            )
+    else:
+        raise ValueError(f"Unsupported model source: {model_source}")
+
+    return client, config, bedrock_runtime
+
+
+def _parse_improve_topic_name_response(
+    response_text: str,
+    current_topic: str,
+) -> tuple[str, str, str]:
+    """Parse LLM markdown table into suggested General topic, Subtopic, and Rationale."""
+    parsed_df, is_error = convert_response_text_to_dataframe(response_text)
+    if is_error or parsed_df is None or parsed_df.empty:
+        raise ValueError("Could not parse improve-topic-name markdown table from LLM.")
+
+    general_col = _find_parsed_table_column(parsed_df, "Suggested General topic")
+    if general_col is None:
+        general_col = _find_parsed_table_column(parsed_df, "General topic")
+    subtopic_col = _find_parsed_table_column(parsed_df, "Suggested Subtopic")
+    if subtopic_col is None:
+        subtopic_col = _find_parsed_table_column(parsed_df, "Subtopic")
+    rationale_col = _find_parsed_table_column(parsed_df, "Rationale")
+
+    if subtopic_col is None:
+        raise ValueError(
+            "LLM response missing 'Suggested Subtopic' column for topic rename."
+        )
+
+    row = parsed_df.iloc[0]
+    suggested_general = (
+        normalize_topic_name_for_llm(row.get(general_col, "")) if general_col else ""
+    )
+    suggested_subtopic = normalize_topic_name_for_llm(row.get(subtopic_col, ""))
+    rationale = str(row.get(rationale_col, "") or "").strip() if rationale_col else ""
+
+    if not suggested_subtopic:
+        suggested_subtopic = normalize_topic_name_for_llm(current_topic)
+
+    return suggested_general, suggested_subtopic, rationale
+
+
+def suggest_improved_topic_names(
+    pivot_file,
+    selected_topics: List[str],
+    model_choice: str,
+    in_api_key: str = "",
+    temperature: float = 0.6,
+    sample_size: int = 12,
+    random_seed: int = LLM_SEED,
+    context_textbox: str = "",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
+    azure_api_key_textbox: str = "",
+    azure_endpoint_textbox: str = "",
+    api_url: str = None,
+    output_folder: str = OUTPUT_FOLDER,
+    model_name_map_dict: dict = model_name_map,
+    local_model=None,
+    tokenizer=None,
+    progress=Progress(track_tqdm=True),
+) -> Tuple[pd.DataFrame, str, int, int, int, float]:
+    """
+    Suggest clearer General topic / Subtopic names for selected pivot-table topics.
+
+    For each selected topic, samples assigned responses and asks the LLM for a
+    descriptive rename. Returns a review dataframe for accept/reject in the UI.
+    """
+    ensure_model_in_map(model_choice, model_name_map_dict)
+    model_source = model_name_map_dict[model_choice]["source"]
+
+    file_path = resolve_uploaded_file_path(pivot_file)
+    pivot_df, topic_columns, response_col, id_col = load_topic_response_pivot(file_path)
+
+    if not selected_topics:
+        raise ValueError("Select at least one topic to rename.")
+
+    missing = [t for t in selected_topics if t not in topic_columns]
+    if missing:
+        raise ValueError(
+            "Selected topics not found in pivot table: " + ", ".join(missing[:5])
+        )
+
+    try:
+        sample_size = int(sample_size)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"sample_size must be an integer, got {sample_size!r}"
+        ) from exc
+    if sample_size < 1:
+        raise ValueError("sample_size must be at least 1.")
+
+    consultation_context = ""
+    if context_textbox and str(context_textbox).strip():
+        consultation_context = str(context_textbox).strip()
+
+    system_prompt = improve_topic_names_system_prompt.format(
+        column_name=response_col,
+        consultation_context=consultation_context,
+    )
+
+    client, config, bedrock_runtime = _setup_improve_topic_names_clients(
+        model_choice=model_choice,
+        model_source=model_source,
+        in_api_key=in_api_key,
+        temperature=temperature,
+        system_prompt=system_prompt,
+        aws_access_key_textbox=aws_access_key_textbox,
+        aws_secret_key_textbox=aws_secret_key_textbox,
+        aws_region_textbox=aws_region_textbox,
+        azure_api_key_textbox=azure_api_key_textbox,
+        azure_endpoint=azure_endpoint_textbox,
+        api_url=api_url,
+        model_name_map_dict=model_name_map_dict,
+    )
+
+    review_rows = []
+    whole_conversation_metadata: list[str] = []
+    number_of_calls = 0
+    skipped: list[str] = []
+    tic = time.perf_counter()
+
+    for topic_name in tqdm(
+        selected_topics, desc="Improving topic names", total=len(selected_topics)
+    ):
+        sample_df, assigned_count = sample_responses_for_topic(
+            pivot_df=pivot_df,
+            topic_column=topic_name,
+            response_column=response_col,
+            sample_size=sample_size,
+            random_seed=int(random_seed),
+            id_column=id_col,
+            max_response_chars=min(1500, max_comment_character_length),
+        )
+        if sample_df.empty:
+            skipped.append(topic_name)
+            review_rows.append(
+                {
+                    "Current topic": topic_name,
+                    "Suggested General topic": "",
+                    "Suggested Subtopic": topic_name,
+                    "Rationale": "No assigned responses found for this topic.",
+                    "Sample size": 0,
+                    "Accept": "No",
+                }
+            )
+            continue
+
+        response_table = sample_df[["Response ID", "Response"]].to_markdown(index=False)
+        formatted_prompt = improve_topic_names_prompt.format(
+            current_topic_name=topic_name,
+            response_table=response_table,
+        )
+
+        conversation_history: list = []
+        whole_conversation: list = []
+        topic_metadata: list = []
+
+        (
+            _responses,
+            conversation_history,
+            whole_conversation,
+            topic_metadata,
+            response_text,
+        ) = call_llm_with_markdown_table_checks(
+            batch_prompts=[formatted_prompt],
+            system_prompt=system_prompt,
+            conversation_history=conversation_history,
+            whole_conversation=whole_conversation,
+            whole_conversation_metadata=topic_metadata,
+            client=client,
+            client_config=config,
+            model_choice=model_choice,
+            temperature=temperature,
+            reported_batch_no=number_of_calls + 1,
+            local_model=local_model,
+            tokenizer=tokenizer,
+            bedrock_runtime=bedrock_runtime,
+            model_source=model_source,
+            MAX_OUTPUT_VALIDATION_ATTEMPTS=3,
+            assistant_prefill=improve_topic_names_assistant_prefill,
+            master=False,
+            CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
+            random_seed=int(random_seed),
+            api_url=api_url,
+        )
+        number_of_calls += 1
+        whole_conversation_metadata.extend(topic_metadata)
+
+        try:
+            suggested_general, suggested_subtopic, rationale = (
+                _parse_improve_topic_name_response(response_text, topic_name)
+            )
+            accept_value = "Yes"
+        except Exception as e:
+            print(f"Failed to parse rename suggestion for '{topic_name}': {e}")
+            suggested_general = ""
+            suggested_subtopic = topic_name
+            rationale = f"Could not parse LLM suggestion ({e})."
+            accept_value = "No"
+
+        review_rows.append(
+            {
+                "Current topic": topic_name,
+                "Suggested General topic": suggested_general,
+                "Suggested Subtopic": suggested_subtopic,
+                "Rationale": rationale,
+                "Sample size": len(sample_df),
+                "Accept": accept_value,
+            }
+        )
+
+    review_df = pd.DataFrame(review_rows)
+    if review_df.empty:
+        review_df = pd.DataFrame(
+            columns=[
+                "Current topic",
+                "Suggested General topic",
+                "Suggested Subtopic",
+                "Rationale",
+                "Sample size",
+                "Accept",
+            ]
+        )
+
+    total_input_tokens = 0
+    total_output_tokens = 0
+    for metadata in whole_conversation_metadata:
+        if not isinstance(metadata, str):
+            continue
+        if "input_tokens:" in metadata and "output_tokens:" in metadata:
+            try:
+                total_input_tokens += int(
+                    metadata.split("input_tokens: ")[1].split(" ")[0]
+                )
+                total_output_tokens += int(
+                    metadata.split("output_tokens: ")[1].split(" ")[0]
+                )
+            except (IndexError, ValueError):
+                pass
+
+    elapsed = time.perf_counter() - tic
+    message = (
+        f"Suggested improved names for {len(selected_topics) - len(skipped)} of "
+        f"{len(selected_topics)} selected topics "
+        f"({number_of_calls} LLM calls, {elapsed:.1f}s)."
+    )
+    if skipped:
+        message += (
+            f" Skipped {len(skipped)} topic(s) with no assigned responses: "
+            + ", ".join(skipped[:5])
+            + ("..." if len(skipped) > 5 else "")
+            + "."
+        )
+    message += (
+        " Review the table, set Accept to Yes/No, then save the suggested topics CSV."
+    )
+
+    # Touch output_folder so callers can keep using it; CSV is written on save.
+    os.makedirs(output_folder, exist_ok=True)
+
+    return (
+        review_df,
+        message,
+        total_input_tokens,
+        total_output_tokens,
+        number_of_calls,
+        elapsed,
+    )
+
+
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def suggest_improved_topic_names_wrapper(
+    pivot_file,
+    selected_topics: List[str],
+    model_choice: str,
+    in_api_key: str = "",
+    temperature: float = 0.6,
+    sample_size: int = 12,
+    random_seed: int = LLM_SEED,
+    context_textbox: str = "",
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    aws_region_textbox: str = "",
+    azure_api_key_textbox: str = "",
+    azure_endpoint_textbox: str = "",
+    api_url: str = None,
+    output_folder: str = OUTPUT_FOLDER,
+    progress=Progress(track_tqdm=True),
+) -> Tuple[pd.DataFrame, str, int, int, int, float]:
+    """Gradio wrapper for suggest_improved_topic_names."""
+    return suggest_improved_topic_names(
+        pivot_file=pivot_file,
+        selected_topics=selected_topics,
+        model_choice=model_choice,
+        in_api_key=in_api_key,
+        temperature=temperature,
+        sample_size=sample_size,
+        random_seed=random_seed,
+        context_textbox=context_textbox,
+        aws_access_key_textbox=aws_access_key_textbox,
+        aws_secret_key_textbox=aws_secret_key_textbox,
+        aws_region_textbox=aws_region_textbox,
+        azure_api_key_textbox=azure_api_key_textbox,
+        azure_endpoint_textbox=azure_endpoint_textbox,
+        api_url=api_url,
+        output_folder=output_folder,
+        progress=progress,
+    )
+
+
+def load_pivot_topics_for_ui(pivot_file):
+    """Load pivot upload and return topic CheckboxGroup update plus status message."""
+    if pivot_file is None:
+        return (
+            gr.CheckboxGroup(choices=[], value=[]),
+            [],
+            "Upload a Topic response pivot table (xlsx or csv).",
+        )
+    try:
+        file_path = resolve_uploaded_file_path(pivot_file)
+        pivot_df, topic_columns, _response_col, _id_col = load_topic_response_pivot(
+            file_path
+        )
+        message = (
+            f"Loaded pivot with {len(pivot_df)} responses and "
+            f"{len(topic_columns)} topics. Select topics to rename."
+        )
+        return (
+            gr.CheckboxGroup(choices=topic_columns, value=topic_columns),
+            topic_columns,
+            message,
+        )
+    except Exception as e:
+        return (
+            gr.CheckboxGroup(choices=[], value=[]),
+            [],
+            f"Could not load pivot table: {e}",
+        )
+
+
+def select_all_improve_topics(topic_list):
+    """Select all topics currently available in the CheckboxGroup."""
+    if not topic_list:
+        return []
+    return list(topic_list)
+
+
+def clear_all_improve_topics():
+    """Clear topic selection."""
+    return []
+
+
+def set_all_improve_accept(review_df: pd.DataFrame, accept_value: str = "Yes"):
+    """Set Accept column for all review rows."""
+    empty_cols = [
+        "Current topic",
+        "Suggested General topic",
+        "Suggested Subtopic",
+        "Rationale",
+        "Sample size",
+        "Accept",
+    ]
+    if review_df is None or (isinstance(review_df, pd.DataFrame) and review_df.empty):
+        return pd.DataFrame(columns=empty_cols)
+    df = review_df.copy()
+    df["Accept"] = accept_value
+    return df
+
+
+def save_improved_topics_csv(
+    review_df: pd.DataFrame,
+    pivot_file=None,
+    output_folder: str = OUTPUT_FOLDER,
+) -> Tuple[str | None, str]:
+    """Save accepted/rejected review rows as a suggested-topics CSV."""
+    if review_df is None or (isinstance(review_df, pd.DataFrame) and review_df.empty):
+        return None, "No review table to save. Suggest topic names first."
+
+    os.makedirs(output_folder, exist_ok=True)
+    base_name = "improved_topics"
+    if pivot_file is not None:
+        try:
+            file_path = resolve_uploaded_file_path(pivot_file)
+            base_name = clean_column_name(
+                get_file_name_no_ext(file_path), max_length=30, front_characters=True
+            )
+        except Exception:
+            pass
+
+    output_path = os.path.join(
+        output_folder, f"{base_name}_improved_suggested_topics.csv"
+    )
+    written = write_improved_topics_csv(review_df, output_path)
+    if not written:
+        return None, "No topics to write. Check Accept / Suggested Subtopic values."
+    return written, f"Saved suggested topics CSV: {written}"

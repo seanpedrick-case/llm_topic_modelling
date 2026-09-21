@@ -221,6 +221,9 @@ def run_cli_topics(
         # Enable mock mode
         env["USE_MOCK_LLM"] = "1"
         env["TEST_MODE"] = "1"
+        # Keep CLI tests independent of local app_config.env redaction settings
+        env["ENABLE_INPUT_REDACTION"] = "0"
+        env["ENABLE_ORIGINAL_DATA_REDACTION"] = "0"
 
         result = subprocess.Popen(
             command,
@@ -485,6 +488,9 @@ def run_app_direct_mode(
     env["RUN_INFERENCE_SERVER"] = "1"
     env["USE_MOCK_LLM"] = "1"
     env["TEST_MODE"] = "1"
+    # Keep direct-mode tests independent of local app_config.env redaction settings
+    env["ENABLE_INPUT_REDACTION"] = "0"
+    env["ENABLE_ORIGINAL_DATA_REDACTION"] = "0"
 
     # Enable direct mode
     env["RUN_DIRECT_MODE"] = "1"

@@ -841,8 +841,11 @@ def create_topic_summary_df_from_reference_table(
 
     if "Confidence" in reference_df.columns:
         confidence_numeric = reference_df.copy()
-        confidence_numeric["Confidence"] = confidence_numeric["Confidence"].map(
-            parse_topic_confidence_value
+        # Force float dtype so all-missing scores aggregate to NaN (not object)
+        # and .round() does not raise TypeError.
+        confidence_numeric["Confidence"] = pd.to_numeric(
+            confidence_numeric["Confidence"].map(parse_topic_confidence_value),
+            errors="coerce",
         )
         confidence_stats = (
             confidence_numeric.groupby(groupby_cols)["Confidence"]
@@ -858,12 +861,12 @@ def create_topic_summary_df_from_reference_table(
         out_topic_summary_df = out_topic_summary_df.merge(
             confidence_stats, on=groupby_cols, how="left"
         )
-        out_topic_summary_df["Mean confidence"] = out_topic_summary_df[
-            "Mean confidence"
-        ].round(2)
-        out_topic_summary_df["Min confidence"] = out_topic_summary_df[
-            "Min confidence"
-        ].round(2)
+        out_topic_summary_df["Mean confidence"] = pd.to_numeric(
+            out_topic_summary_df["Mean confidence"], errors="coerce"
+        ).round(2)
+        out_topic_summary_df["Min confidence"] = pd.to_numeric(
+            out_topic_summary_df["Min confidence"], errors="coerce"
+        ).round(2)
 
     # Calculate number of responses from the Response ID string
     # (count comma-separated values)
@@ -1861,6 +1864,270 @@ def write_topic_discovery_manifest_csv(
     )
     manifest_df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"Topic discovery manifest saved as '{output_path}'")
+    return output_path
+
+
+PIVOT_SHEET_NAME = "Topic response pivot table"
+_PIVOT_RESPONSE_COL_ALIASES = (
+    "response",
+    "response text",
+    "response_text",
+    "comment",
+    "comments",
+    "open text",
+    "open_text",
+)
+_PIVOT_ID_COL_ALIASES = (
+    "original response id",
+    "response id",
+    "original_response_id",
+    "response_id",
+)
+_PIVOT_RESERVED_COLS = {"all"}
+
+
+def resolve_uploaded_file_path(file_obj: Any) -> str:
+    """Resolve a Gradio File / FileData / path string to a filesystem path."""
+    if file_obj is None:
+        raise ValueError("No file uploaded.")
+    if isinstance(file_obj, (list, tuple)):
+        if not file_obj:
+            raise ValueError("No file uploaded.")
+        return resolve_uploaded_file_path(file_obj[0])
+    if isinstance(file_obj, str):
+        path = file_obj.strip().strip("'\"")
+        if not path:
+            raise ValueError("No file uploaded.")
+        return path
+    path = getattr(file_obj, "name", None)
+    if path:
+        return str(path)
+    raise ValueError("Could not resolve uploaded file path.")
+
+
+def _normalise_header_key(name: object) -> str:
+    return str(name).strip().lower().replace("_", " ")
+
+
+def identify_pivot_response_column(columns: List[str]) -> str:
+    """Return the response text column name from a pivot table."""
+    normalised = {_normalise_header_key(col): col for col in columns}
+    for alias in _PIVOT_RESPONSE_COL_ALIASES:
+        if alias in normalised:
+            return normalised[alias]
+    raise ValueError(
+        "Could not find a response text column in the pivot table. "
+        "Expected a column named 'Response' (or similar)."
+    )
+
+
+def identify_pivot_id_column(columns: List[str]) -> Optional[str]:
+    """Return an ID column name from a pivot table if present."""
+    normalised = {_normalise_header_key(col): col for col in columns}
+    for alias in _PIVOT_ID_COL_ALIASES:
+        if alias in normalised:
+            return normalised[alias]
+    return None
+
+
+def identify_pivot_topic_columns(
+    columns: List[str],
+    response_col: str,
+    id_col: Optional[str] = None,
+) -> List[str]:
+    """Return topic assignment columns from a pivot table."""
+    reserved = set(_PIVOT_RESERVED_COLS)
+    reserved.add(_normalise_header_key(response_col))
+    if id_col:
+        reserved.add(_normalise_header_key(id_col))
+    topic_cols = [col for col in columns if _normalise_header_key(col) not in reserved]
+    if not topic_cols:
+        raise ValueError("No topic columns found in the pivot table.")
+    return topic_cols
+
+
+def load_topic_response_pivot(
+    file_path: str,
+) -> tuple[pd.DataFrame, List[str], str, Optional[str]]:
+    """
+    Load a Topic response pivot table from CSV or XLSX.
+
+    Prefers the sheet named 'Topic response pivot table' when present in an Excel file.
+
+    Returns:
+        pivot_df, topic_columns, response_column, id_column (or None)
+    """
+    path = resolve_uploaded_file_path(file_path)
+    file_type = detect_file_type(path)
+
+    if file_type == "xlsx":
+        excel = pd.ExcelFile(path)
+        try:
+            if PIVOT_SHEET_NAME in excel.sheet_names:
+                pivot_df = pd.read_excel(excel, sheet_name=PIVOT_SHEET_NAME)
+            else:
+                pivot_df = pd.read_excel(excel, sheet_name=excel.sheet_names[0])
+        finally:
+            excel.close()
+    elif file_type == "csv":
+        pivot_df = read_file(path)
+    else:
+        raise ValueError(
+            f"Unsupported file type for pivot upload: {file_type}. Use CSV or XLSX."
+        )
+
+    if pivot_df is None or pivot_df.empty:
+        raise ValueError("Pivot table is empty.")
+
+    columns = [str(col) for col in pivot_df.columns]
+    pivot_df = pivot_df.copy()
+    pivot_df.columns = columns
+
+    response_col = identify_pivot_response_column(columns)
+    id_col = identify_pivot_id_column(columns)
+    topic_cols = identify_pivot_topic_columns(columns, response_col, id_col)
+    return pivot_df, topic_cols, response_col, id_col
+
+
+def responses_assigned_to_topic_mask(series: pd.Series) -> pd.Series:
+    """True where a pivot cell indicates the topic was assigned (score > 0)."""
+    numeric = pd.to_numeric(series, errors="coerce").fillna(0)
+    return numeric > 0
+
+
+def sample_responses_for_topic(
+    pivot_df: pd.DataFrame,
+    topic_column: str,
+    response_column: str,
+    sample_size: int = 12,
+    random_seed: int = 42,
+    id_column: Optional[str] = None,
+    max_response_chars: int = 1500,
+) -> tuple[pd.DataFrame, int]:
+    """
+    Sample responses assigned to a topic column in a pivot table.
+
+    Returns:
+        sample_df with columns Response ID and Response, and total assigned count.
+    """
+    if topic_column not in pivot_df.columns:
+        raise ValueError(f"Topic column not found in pivot table: {topic_column}")
+    if response_column not in pivot_df.columns:
+        raise ValueError(f"Response column not found in pivot table: {response_column}")
+
+    try:
+        sample_size = int(sample_size)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"sample_size must be a positive integer, got {sample_size!r}"
+        ) from exc
+    if sample_size < 1:
+        raise ValueError(f"sample_size must be >= 1, got {sample_size}")
+
+    assigned_mask = responses_assigned_to_topic_mask(pivot_df[topic_column])
+    assigned_df = pivot_df.loc[assigned_mask].copy()
+    assigned_count = len(assigned_df)
+    if assigned_count == 0:
+        return pd.DataFrame(columns=["Response ID", "Response"]), 0
+
+    n_sample = min(sample_size, assigned_count)
+    sampled = assigned_df.sample(n=n_sample, random_state=int(random_seed))
+
+    out = pd.DataFrame()
+    if id_column and id_column in sampled.columns:
+        out["Response ID"] = sampled[id_column].astype(str)
+    else:
+        out["Response ID"] = (sampled.index.astype(int) + 1).astype(str)
+
+    responses = sampled[response_column].astype(str).fillna("")
+    responses = responses.str.replace(r"[\x00-\x1F\x7F]", " ", regex=True)
+    responses = responses.str.replace(r"\s+", " ", regex=True).str.strip()
+    if max_response_chars and max_response_chars > 0:
+        responses = responses.str.slice(0, int(max_response_chars))
+    out["Response"] = responses.values
+
+    out = out.loc[
+        ~out["Response"].isin(["", "None", "nan", "NaN"]) & out["Response"].notna()
+    ].reset_index(drop=True)
+    return out, assigned_count
+
+
+def create_candidate_topics_df_from_improved_names(
+    review_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Build a General topic / Subtopic candidate CSV frame from an improve-names review table.
+
+    Accepted rows use suggested names. Rejected rows keep the current topic name as Subtopic.
+    """
+    if review_df is None or review_df.empty:
+        return pd.DataFrame(columns=["General topic", "Subtopic"])
+
+    df = review_df.copy()
+    col_map = {_normalise_header_key(c): c for c in df.columns}
+
+    def _col(*aliases: str) -> Optional[str]:
+        for alias in aliases:
+            if alias in col_map:
+                return col_map[alias]
+        return None
+
+    current_col = _col("current topic", "current topic name")
+    general_col = _col("suggested general topic", "general topic")
+    subtopic_col = _col("suggested subtopic", "subtopic")
+    accept_col = _col("accept")
+
+    if current_col is None or subtopic_col is None:
+        raise ValueError(
+            "Review table must include 'Current topic' and 'Suggested Subtopic' columns."
+        )
+
+    rows = []
+    for _, row in df.iterrows():
+        current_name = str(row.get(current_col, "") or "").strip()
+        suggested_general = (
+            str(row.get(general_col, "") or "").strip() if general_col else ""
+        )
+        suggested_subtopic = str(row.get(subtopic_col, "") or "").strip()
+
+        accept_raw = row.get(accept_col, "Yes") if accept_col else "Yes"
+        if isinstance(accept_raw, bool):
+            accepted = accept_raw
+        else:
+            accepted = str(accept_raw).strip().lower() in {
+                "yes",
+                "y",
+                "true",
+                "1",
+                "accept",
+            }
+
+        if accepted:
+            general = suggested_general
+            subtopic = suggested_subtopic or current_name
+        else:
+            general = ""
+            subtopic = current_name
+
+        if not subtopic:
+            continue
+        rows.append({"General topic": general, "Subtopic": subtopic})
+
+    out_df = pd.DataFrame(rows, columns=["General topic", "Subtopic"])
+    if out_df.empty:
+        return out_df
+    out_df = out_df.drop_duplicates(subset=["General topic", "Subtopic"], keep="first")
+    out_df = out_df.sort_values(["General topic", "Subtopic"], ascending=[True, True])
+    return out_df.reset_index(drop=True)
+
+
+def write_improved_topics_csv(review_df: pd.DataFrame, output_path: str) -> str:
+    """Write accepted/rejected improve-names review rows to a suggested-topics CSV."""
+    topics_df = create_candidate_topics_df_from_improved_names(review_df)
+    if topics_df.empty:
+        return ""
+    topics_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Improved suggested topics CSV saved as '{output_path}'")
     return output_path
 
 

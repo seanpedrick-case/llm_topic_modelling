@@ -154,9 +154,15 @@ from tools.helper_functions import (
 )
 from tools.llm_api_call import (
     all_in_one_pipeline,
+    clear_all_improve_topics,
     deduplicate_topics_llm_wrapper,
     discover_topics_from_sample_wrapper,
+    load_pivot_topics_for_ui,
     modify_existing_output_tables,
+    save_improved_topics_csv,
+    select_all_improve_topics,
+    set_all_improve_accept,
+    suggest_improved_topic_names_wrapper,
     validate_topics_wrapper,
     wrapper_extract_topics_per_column_value,
 )
@@ -242,6 +248,59 @@ topic_discovery_random_seed = gr.Number(
 )
 discover_topics_output_file = gr.File(
     label="Suggested topics CSV from sample discovery",
+    scale=1,
+    interactive=False,
+    file_count="single",
+)
+improve_topics_pivot_file = gr.File(
+    height=FILE_INPUT_HEIGHT,
+    label="Upload Topic response pivot table (xlsx sheet 'Topic response pivot table', or CSV in the same format)",
+    file_count="single",
+    file_types=[".xlsx", ".xls", ".csv"],
+)
+improve_topics_checkbox = gr.CheckboxGroup(
+    label="Topics to rename",
+    choices=[],
+    value=[],
+)
+improve_topics_sample_size = gr.Number(
+    label="Sample size of assigned responses per topic",
+    value=12,
+    precision=0,
+    minimum=1,
+    maximum=50,
+)
+improve_topics_random_seed = gr.Number(
+    label="Random seed for response sampling",
+    value=LLM_SEED,
+    precision=0,
+)
+improve_topics_review_df = gr.Dataframe(
+    value=pd.DataFrame(
+        columns=[
+            "Current topic",
+            "Suggested General topic",
+            "Suggested Subtopic",
+            "Rationale",
+            "Sample size",
+            "Accept",
+        ]
+    ),
+    headers=[
+        "Current topic",
+        "Suggested General topic",
+        "Suggested Subtopic",
+        "Rationale",
+        "Sample size",
+        "Accept",
+    ],
+    label="Review suggested topic names (edit Accept to Yes/No, or edit suggested names)",
+    interactive=True,
+    type="pandas",
+    wrap=True,
+)
+improve_topics_output_file = gr.File(
+    label="Improved suggested topics CSV",
     scale=1,
     interactive=False,
     file_count="single",
@@ -723,6 +782,7 @@ with app:
 
         # State to store loaded log data
         log_data_state = gr.State(value=[])
+        improve_topic_list_state = gr.State(value=[])
 
     ###
     # UI LAYOUT
@@ -960,6 +1020,36 @@ with app:
                     "Discover topics from sample", variant="secondary"
                 )
                 discover_topics_output_file.render()
+
+            with gr.Accordion("Improve topic names from previous analysis", open=False):
+                gr.Markdown(
+                    "Upload a previous consultation analysis in **Topic response pivot table** format "
+                    "(response text on the left, one column per topic with 1s or confidence scores). "
+                    "Select topics, suggest clearer General topic / Subtopic names from sampled assigned "
+                    "responses, then save a suggested-topics CSV to reuse above."
+                )
+                improve_topics_pivot_file.render()
+                with gr.Row():
+                    improve_topics_load_btn = gr.Button(
+                        "Load topics from pivot", variant="secondary"
+                    )
+                    improve_topics_select_all_btn = gr.Button("Select all topics")
+                    improve_topics_clear_btn = gr.Button("Clear selection")
+                improve_topics_checkbox.render()
+                with gr.Row(equal_height=True):
+                    improve_topics_sample_size.render()
+                    improve_topics_random_seed.render()
+                improve_topics_suggest_btn = gr.Button(
+                    "Suggest new topic names", variant="primary"
+                )
+                improve_topics_review_df.render()
+                with gr.Row():
+                    improve_topics_accept_all_btn = gr.Button("Accept all")
+                    improve_topics_reject_all_btn = gr.Button("Reject all")
+                    improve_topics_save_btn = gr.Button(
+                        "Save suggested topics CSV", variant="secondary"
+                    )
+                improve_topics_output_file.render()
 
             with gr.Row(equal_height=True):
                 force_zero_shot_radio = gr.Radio(
@@ -2477,6 +2567,124 @@ with app:
         ],
         api_name="discover_topics_from_sample",
         show_progress_on=[output_messages_textbox, discover_topics_output_file],
+    )
+
+    # Improve topic names from pivot table
+    improve_topics_load_btn.click(
+        fn=load_pivot_topics_for_ui,
+        inputs=[improve_topics_pivot_file],
+        outputs=[
+            improve_topics_checkbox,
+            improve_topic_list_state,
+            output_messages_textbox,
+        ],
+        api_name="load_pivot_topics_for_improve",
+    )
+    improve_topics_pivot_file.upload(
+        fn=load_pivot_topics_for_ui,
+        inputs=[improve_topics_pivot_file],
+        outputs=[
+            improve_topics_checkbox,
+            improve_topic_list_state,
+            output_messages_textbox,
+        ],
+        api_visibility="undocumented",
+    )
+    improve_topics_select_all_btn.click(
+        fn=select_all_improve_topics,
+        inputs=[improve_topic_list_state],
+        outputs=[improve_topics_checkbox],
+        api_visibility="undocumented",
+    )
+    improve_topics_clear_btn.click(
+        fn=clear_all_improve_topics,
+        inputs=None,
+        outputs=[improve_topics_checkbox],
+        api_visibility="undocumented",
+    )
+    improve_topics_accept_all_btn.click(
+        fn=lambda df: set_all_improve_accept(df, "Yes"),
+        inputs=[improve_topics_review_df],
+        outputs=[improve_topics_review_df],
+        api_visibility="undocumented",
+    )
+    improve_topics_reject_all_btn.click(
+        fn=lambda df: set_all_improve_accept(df, "No"),
+        inputs=[improve_topics_review_df],
+        outputs=[improve_topics_review_df],
+        api_visibility="undocumented",
+    )
+    improve_topics_suggest_btn.click(
+        fn=enforce_cost_codes,
+        inputs=[
+            enforce_cost_code_textbox,
+            cost_code_choice_drop,
+            cost_code_dataframe_base,
+        ],
+        api_visibility="undocumented",
+    ).success(
+        fn=suggest_improved_topic_names_wrapper,
+        inputs=[
+            improve_topics_pivot_file,
+            improve_topics_checkbox,
+            model_choice,
+            google_api_key_textbox,
+            temperature_slide,
+            improve_topics_sample_size,
+            improve_topics_random_seed,
+            context_textbox,
+            aws_access_key_textbox,
+            aws_secret_key_textbox,
+            aws_region_textbox,
+            azure_api_key_textbox,
+            azure_endpoint_textbox,
+            api_url_textbox,
+            output_folder_state,
+        ],
+        outputs=[
+            improve_topics_review_df,
+            output_messages_textbox,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            estimated_time_taken_number,
+        ],
+        api_name="suggest_improved_topic_names",
+        show_progress_on=[output_messages_textbox, improve_topics_review_df],
+    ).success(
+        lambda *args: usage_callback.flag(
+            list(args),
+            save_to_csv=SAVE_LOGS_TO_CSV,
+            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
+            dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+            replacement_headers=CSV_USAGE_LOG_HEADERS,
+        ),
+        [
+            session_hash_textbox,
+            original_data_file_name_textbox,
+            in_colnames,
+            model_choice,
+            conversation_metadata_textbox_placeholder,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            estimated_time_taken_number,
+            cost_code_choice_drop,
+        ],
+        None,
+        preprocess=False,
+        api_name="usage_logs_improve_topic_names",
+    )
+    improve_topics_save_btn.click(
+        fn=save_improved_topics_csv,
+        inputs=[
+            improve_topics_review_df,
+            improve_topics_pivot_file,
+            output_folder_state,
+        ],
+        outputs=[improve_topics_output_file, output_messages_textbox],
+        api_name="save_improved_topics_csv",
     )
 
     # All in one button

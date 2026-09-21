@@ -405,9 +405,7 @@ class TestStructuredSummaryThreeColumnTable(unittest.TestCase):
             str(absences.iloc[0]["Summary"]).lower(),
         )
         # Summary must not have been mis-mapped into Sentiment
-        self.assertTrue(
-            (reference_df["Sentiment"].str.lower() == "not assessed").all()
-        )
+        self.assertTrue((reference_df["Sentiment"].str.lower() == "not assessed").all())
         self.assertFalse(summary_df.empty)
         self.assertIn("Behaviour at school", set(summary_df["General topic"]))
 

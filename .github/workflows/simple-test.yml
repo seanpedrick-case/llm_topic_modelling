@@ -16,6 +16,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        lfs: true
     
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
@@ -34,6 +36,11 @@ jobs:
         ls -la example_data/ || echo "example_data directory not found"
         echo "Checking for specific CSV files:"
         ls -la example_data/*.csv || echo "No CSV files found"
+        # Fail early if Git LFS pointers were not materialized
+        if head -n 1 example_data/combined_case_notes.csv | grep -q 'git-lfs.github.com'; then
+          echo "ERROR: example_data CSVs are still Git LFS pointers. Ensure checkout uses lfs: true."
+          exit 1
+        fi
     
     - name: Run CLI and GUI tests
       run: |

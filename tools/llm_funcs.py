@@ -1068,9 +1068,7 @@ def construct_gemini_generative_model(
         max_output_tokens=max_tokens,
         seed=random_seed,
         # Disable default AFC; we don't pass tools (avoids SDK advisory warning).
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(
-            disable=True
-        ),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
     return client, config
@@ -1997,9 +1995,7 @@ def call_llm_with_markdown_table_checks(
         max_output_tokens=max_tokens,
         seed=random_seed,
         # Disable default AFC; we don't pass tools (avoids SDK advisory warning).
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(
-            disable=True
-        ),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
     for attempt in range(MAX_OUTPUT_VALIDATION_ATTEMPTS):

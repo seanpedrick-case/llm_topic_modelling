@@ -220,6 +220,29 @@ class TestTopicSummaryConfidenceAggregation(unittest.TestCase):
         self.assertAlmostEqual(float(out.loc[0, "Mean confidence"]), 0.65)
         self.assertAlmostEqual(float(out.loc[0, "Min confidence"]), 0.4)
 
+    def test_missing_confidence_values_do_not_raise(self):
+        """Confidence column present but empty must not break summary aggregation."""
+        reference_df = pd.DataFrame(
+            {
+                "General topic": ["Housing", "Housing"],
+                "Subtopic": ["Repairs", "Repairs"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Response ID": [1, 2],
+                "Summary": ["Damp", "Damp"],
+                "Start row of group": [1, 6],
+                "Confidence": [None, ""],
+            }
+        )
+
+        out = create_topic_summary_df_from_reference_table(reference_df)
+
+        self.assertEqual(len(out), 1)
+        self.assertIn("Mean confidence", out.columns)
+        self.assertIn("Min confidence", out.columns)
+        self.assertTrue(pd.isna(out.loc[0, "Mean confidence"]))
+        self.assertTrue(pd.isna(out.loc[0, "Min confidence"]))
+
 
 if __name__ == "__main__":
     unittest.main()
