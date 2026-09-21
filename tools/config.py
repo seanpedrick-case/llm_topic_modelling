@@ -406,11 +406,11 @@ GEMINI_API_KEY = get_or_create_env_var("GEMINI_API_KEY", "")
 
 INTRO_TEXT = get_or_create_env_var(
     "INTRO_TEXT",
-    """# Large language model topic modelling
+    """# Extract topics and create thematic summaries from open text data
 
-Extract topics and summarise outputs using Large Language Models (LLMs), either local or cloud based (AWS, Azure, Gemini). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets below. API keys for cloud services can be entered on the settings page.
+Extract topics and summarise open text using Large Language Models (LLMs). The model will loop through all text rows to find the most relevant general topics and subtopics, and provide a short summary of each. If you have specific topics in mind, you can enter them in 'Provide a list of specific topics' below.
 
-NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""",
+NOTE: LLMs are not 100% accurate and may produce biased or incorrect responses. All files downloaded from this app **need to be checked by a human** before they are used in further outputs. Best results come from providing a clear, unambiguous list of suggested topics to the LLM so that it will follow your standard analysis procedure as closely as possible.""",
 )
 
 # Read in intro text from a text file if it is a path to a text file
@@ -534,11 +534,38 @@ if RUN_GEMINI_MODELS == "1":
     model_source.extend(["Gemini"] * len(gemini_models))
 
 # Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)
+# GPT reasoning models from: https://ai.azure.com/catalog/models?capabilities=reasoning&publisher=openai
 if RUN_AZURE_MODELS == "1":
     # Example deployments; adjust to the deployments you actually create in Azure/OpenAI
-    azure_models = ["gpt-5-mini", "gpt-4o-mini"]
+    azure_models = [
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.5",
+        "gpt-5.4-pro",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+        "gpt-5.3-codex",
+        "gpt-5.2-codex",
+        "gpt-5.2",
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex",
+        "gpt-5.1-codex-mini",
+        "gpt-5.1",
+        "gpt-5-pro",
+        "gpt-5",
+        "gpt-5-codex",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-oss-120b",
+        "gpt-oss-20b",
+        "gpt-oss-safeguard-120b",
+        "gpt-oss-safeguard-20b",
+    ]
     model_full_names.extend(azure_models)
-    model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
+    model_short_names.extend(azure_models)
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
 # Register inference-server models
@@ -546,15 +573,17 @@ CHOSEN_INFERENCE_SERVER_MODEL = ""
 if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
     inference_server_models = [
-        "unnamed-inference-server-model",
-        "gpt_oss_20b",
-        "gemma_3_12b",
-        "ministral_3_14b_it",
-        "Qwen 3.5 27b",
-        "Qwen 3.5 35b a3b",
+        "Unnamed inference server model",
+        "GPT OSS 20B",
+        "Ministral 3 14B",
+        "Qwen 3.5 27B",
+        "Qwen 3.5 35B",
+        "Qwen 3.6 27B",
+        "Qwen 3.8 27B",
+        "Gemma 3 12B",
         "Gemma 4 12B",
-        "Gemma 4 26b a4b",
-        "Gemma 4 31b",
+        "Gemma 4 26B",
+        "Gemma 4 31B",
     ]
     model_full_names.extend(inference_server_models)
     model_short_names.extend(inference_server_models)
