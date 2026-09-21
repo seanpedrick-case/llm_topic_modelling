@@ -37,6 +37,7 @@ from tools.config import (
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     HF_TOKEN,
+    INCLUDE_TOPIC_CONFIDENCE,
     INPUT_FOLDER,
     LLM_MAX_NEW_TOKENS,
     LLM_SEED,
@@ -52,6 +53,7 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
+    SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS,
     UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS,
     UPLOAD_USAGE_LOG_TO_S3_OUTPUTS,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
@@ -827,6 +829,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         help="Ask the model to assign responses to only a single topic. Default: No",
     )
     extract_group.add_argument(
+        "--include_topic_confidence",
+        choices=["Yes", "No"],
+        default="Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+        help="Ask the model to score how confident it is in each topic assignment (0 to 1). Default: No unless INCLUDE_TOPIC_CONFIDENCE is enabled.",
+    )
+    extract_group.add_argument(
         "--produce_structured_summary",
         choices=["Yes", "No"],
         default="No",
@@ -851,6 +859,14 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         "--enable_batch_deduplication",
         default=ENABLE_BATCH_DEDUPLICATION,
         help=f"Enable deduplication after each batch during topic extraction (True/False). Default: {ENABLE_BATCH_DEDUPLICATION}",
+    )
+    extract_group.add_argument(
+        "--shuffle_candidate_topics_in_batch_prompts",
+        default=SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS,
+        help=(
+            "Shuffle suggested/candidate topics in each batch prompt (True/False). "
+            f"Default: {SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS}"
+        ),
     )
     extract_group.add_argument(
         "--maximum_allowed_topics",
@@ -1095,7 +1111,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     import tools.config as config_module
 
     if hasattr(args, "enable_batch_deduplication"):
-        config_module.ENABLE_BATCH_DEDUPLICATION = args.enable_batch_deduplication
+        config_module.ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
+            str(args.enable_batch_deduplication)
+        )
+    if hasattr(args, "shuffle_candidate_topics_in_batch_prompts"):
+        config_module.SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS = (
+            convert_string_to_boolean(
+                str(args.shuffle_candidate_topics_in_batch_prompts)
+            )
+        )
     if hasattr(args, "maximum_allowed_topics"):
         config_module.MAXIMUM_ALLOWED_TOPICS = args.maximum_allowed_topics
 
@@ -1219,6 +1243,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 force_zero_shot_radio=args.force_zero_shot,
                 in_excel_sheets=args.excel_sheets,
                 force_single_topic_radio=args.force_single_topic,
+                include_topic_confidence_radio=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 produce_structured_summary_radio=args.produce_structured_summary,
                 aws_access_key_textbox=args.aws_access_key,
                 aws_secret_key_textbox=args.aws_secret_key,
@@ -1374,6 +1403,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 force_zero_shot_radio=args.force_zero_shot,
                 in_excel_sheets=args.excel_sheets,
                 force_single_topic_radio=args.force_single_topic,
+                include_topic_confidence_radio=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 produce_structured_summary_radio=args.produce_structured_summary,
                 aws_access_key_textbox=args.aws_access_key,
                 aws_secret_key_textbox=args.aws_secret_key,
@@ -1514,6 +1548,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 produce_structured_summary_radio=args.produce_structured_summary,
                 force_zero_shot_radio=args.force_zero_shot,
                 force_single_topic_radio=args.force_single_topic,
+                include_topic_confidence_radio=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 context_textbox=args.context,
                 additional_instructions_summary_format=args.additional_summary_instructions,
                 output_folder=args.output_dir,
@@ -2141,6 +2180,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 force_zero_shot_choice=args.force_zero_shot,
                 in_excel_sheets=args.excel_sheets,
                 force_single_topic_choice=args.force_single_topic,
+                include_topic_confidence_choice=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 produce_structures_summary_choice=args.produce_structured_summary,
                 aws_access_key_text=args.aws_access_key,
                 aws_secret_key_text=args.aws_secret_key,

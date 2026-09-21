@@ -201,6 +201,12 @@ EXPORT_FORMAT = get_or_create_env_var(
 if EXPORT_FORMAT not in ["xlsx", "ods"]:
     EXPORT_FORMAT = "xlsx"  # Default to xlsx if invalid value provided
 
+# Include per-row Summary text on the Response level data sheet.
+# Off by default: summaries are duplicated for every topic row and inflate xlsx size.
+INCLUDE_RESPONSE_LEVEL_SUMMARY = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_RESPONSE_LEVEL_SUMMARY", "False")
+)
+
 ###
 # LOGGING OPTIONS
 ###
@@ -346,10 +352,45 @@ ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "True")
 )  # Whether to deduplicate topics after each batch during extraction. Will use basic deduplication to check for typos in effectively duplicate topic names, and if candidate topics are not provided, will use LLM deduplication to merge similar topics if the current number of topics exceeds the maximum allowed number of topics (MAXIMUM_ALLOWED_TOPICS, or defined in GUI by user)
 
+# Optional Presidio/spaCy PII redaction (off by default so existing runs are unchanged)
+ENABLE_INPUT_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_INPUT_REDACTION", "False")
+)  # Redact chosen text column(s) after load, before LLM topic extraction
+
+ENABLE_ORIGINAL_DATA_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_ORIGINAL_DATA_REDACTION", "False")
+)  # Redact every cell on the Excel 'Original data' tab
+
+REDACTION_ENTITIES = get_or_create_env_var(
+    "REDACTION_ENTITIES",
+    "['EMAIL_ADDRESS', 'PHONE_NUMBER', 'CREDIT_CARD', 'IBAN_CODE', 'UK_NHS', 'UKPOSTCODE', 'IP_ADDRESS', 'STREETNAME']",
+)  # Presidio entity types to redact when either redaction flag is on
+
+REDACTION_STRATEGY = get_or_create_env_var(
+    "REDACTION_STRATEGY", "entity_type"
+)  # entity_type (replace with <ENTITY_NAME>), redact_replace (REDACTED), or redact
+
+SPACY_MODEL = get_or_create_env_var("SPACY_MODEL", "en_core_web_sm")
+
+SPACY_MODEL_PATH = get_or_create_env_var("SPACY_MODEL_PATH", "")
+
 # Run batch deduplication only when the number of completed batches is a multiple of this value (1 = every batch; e.g. 5 = after batches 5, 10, 15, ...). Values below 1 are treated as 1.
 BATCH_DEDUPLICATION_EVERY_N_BATCHES = max(
     1,
     int(get_or_create_env_var("BATCH_DEDUPLICATION_EVERY_N_BATCHES", "5")),
+)
+
+# Shuffle the suggested/candidate topics table shown in each extraction (and validation)
+# batch prompt. Reduces primacy bias from a fixed alphabetical topic order. Each batch
+# gets a different order; the same LLM_SEED + batch number combination is reproducible.
+SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS = convert_string_to_boolean(
+    get_or_create_env_var("SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS", "False")
+)
+
+# Ask the LLM to return a 0-1 confidence score with each topic assignment.
+# When False, Excel pivot cells stay as 1/0 presence indicators.
+INCLUDE_TOPIC_CONFIDENCE = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_TOPIC_CONFIDENCE", "False")
 )
 
 ###
@@ -394,6 +435,15 @@ API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
 # so this should often be higher than the general retry sleep.
 INFERENCE_SERVER_READ_TIMEOUT_SECONDS = int(
     get_or_create_env_var("INFERENCE_SERVER_READ_TIMEOUT_SECONDS", "120")
+)
+
+# AWS Bedrock Converse can take several minutes for large prompts / long outputs
+# (e.g. overall summaries). boto3's default read timeout is 60s.
+BEDROCK_READ_TIMEOUT_SECONDS = int(
+    get_or_create_env_var("BEDROCK_READ_TIMEOUT_SECONDS", "600")
+)
+BEDROCK_CONNECT_TIMEOUT_SECONDS = int(
+    get_or_create_env_var("BEDROCK_CONNECT_TIMEOUT_SECONDS", "180")
 )
 
 # When we cannot do server-side token counting for inference-server, our local estimates can be low.
@@ -960,9 +1010,16 @@ DIRECT_MODE_TEMPERATURE = get_or_create_env_var(
 DIRECT_MODE_BATCH_SIZE = get_or_create_env_var(
     "DIRECT_MODE_BATCH_SIZE", str(BATCH_SIZE_DEFAULT)
 )
+# Capture whether DIRECT_MODE_MAX_TOKENS was explicitly set before applying default.
+_direct_mode_max_tokens_explicit = os.environ.get("DIRECT_MODE_MAX_TOKENS") is not None
 DIRECT_MODE_MAX_TOKENS = get_or_create_env_var(
     "DIRECT_MODE_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS)
 )
+# In direct mode, an explicit DIRECT_MODE_MAX_TOKENS overrides LLM_MAX_NEW_TOKENS so
+# Bedrock/local paths that use the module-level max (e.g. overall summary) honour it.
+if RUN_DIRECT_MODE == "1" and _direct_mode_max_tokens_explicit:
+    LLM_MAX_NEW_TOKENS = int(DIRECT_MODE_MAX_TOKENS)
+    os.environ["LLM_MAX_NEW_TOKENS"] = str(LLM_MAX_NEW_TOKENS)
 DIRECT_MODE_CONTEXT = get_or_create_env_var("DIRECT_MODE_CONTEXT", "")
 DIRECT_MODE_CANDIDATE_TOPICS = get_or_create_env_var("DIRECT_MODE_CANDIDATE_TOPICS", "")
 DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var(
@@ -970,6 +1027,10 @@ DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var(
 )  # Only has an effect when DIRECT_MODE_CANDIDATE_TOPICS is set
 DIRECT_MODE_FORCE_SINGLE_TOPIC = get_or_create_env_var(
     "DIRECT_MODE_FORCE_SINGLE_TOPIC", "No"
+)
+DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE = get_or_create_env_var(
+    "DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE",
+    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
 )
 DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY = get_or_create_env_var(
     "DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY", "No"
@@ -1076,6 +1137,24 @@ if ENFORCE_COST_CODES == "True":
 ###
 # VALIDATE FOLDERS AND CONFIG OPTIONS
 ###
+
+
+def _parse_entity_list(value: str) -> List[str]:
+    """Parse a list env var that may be Python-list style or comma-separated."""
+    value = (value or "").strip()
+    if not value:
+        return []
+    if (value.startswith("[") and value.endswith("]")) or (
+        value.startswith("(") and value.endswith(")")
+    ):
+        return _get_env_list(value)
+    return [s.strip().strip("'\"") for s in value.split(",") if s.strip().strip("'\"")]
+
+
+if REDACTION_ENTITIES:
+    REDACTION_ENTITIES = _parse_entity_list(REDACTION_ENTITIES)
+else:
+    REDACTION_ENTITIES = []
 
 
 # Convert string environment variables to string or list

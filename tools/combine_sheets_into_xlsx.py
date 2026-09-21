@@ -1,7 +1,7 @@
 import os
 import re
 from datetime import date, datetime
-from typing import List, Union
+from typing import List, Optional, Union
 
 import pandas as pd
 from openpyxl import Workbook
@@ -11,7 +11,12 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-from tools.config import EXPORT_FORMAT, OUTPUT_FOLDER
+from tools.config import (
+    ENABLE_ORIGINAL_DATA_REDACTION,
+    EXPORT_FORMAT,
+    INCLUDE_RESPONSE_LEVEL_SUMMARY,
+    OUTPUT_FOLDER,
+)
 from tools.config import model_name_map as global_model_name_map
 from tools.helper_functions import (
     clean_column_name,
@@ -19,6 +24,7 @@ from tools.helper_functions import (
     ensure_model_in_map,
     get_basic_response_data,
     load_in_data_file,
+    read_file,
     write_candidate_topics_csv,
 )
 
@@ -492,6 +498,47 @@ def csvs_to_excel(
     return output_filename
 
 
+def stage_original_data_csv(
+    original_data_file_path: str,
+    output_folder: str,
+    excel_sheets: str = "",
+    redact: Optional[bool] = None,
+) -> tuple:
+    """Prepare the Original data sheet CSV.
+
+    When redaction is off and the source is already a CSV, the original path is
+    used. Otherwise a temp CSV is written (redacted across all cells when enabled).
+
+    Returns:
+        tuple: (csv_path, is_temp_file)
+    """
+    if redact is None:
+        redact = ENABLE_ORIGINAL_DATA_REDACTION
+
+    original_ext = os.path.splitext(original_data_file_path)[1].lower()
+    if not redact and original_ext == ".csv":
+        return original_data_file_path, False
+
+    if original_ext not in (".csv", ".xlsx", ".parquet"):
+        raise Exception(f"Unsupported file type for original data: {original_ext}")
+
+    df = read_file(original_data_file_path, excel_sheets if excel_sheets else "")
+
+    if redact:
+        from tools.data_redaction import redact_dataframe
+
+        df = redact_dataframe(df)
+        print("Applied PII redaction to Original data tab (all columns).")
+
+    original_data_csv_path = os.path.join(
+        output_folder,
+        os.path.splitext(os.path.basename(original_data_file_path))[0]
+        + "_for_xlsx.csv",
+    )
+    df.to_csv(original_data_csv_path, index=False)
+    return original_data_csv_path, True
+
+
 ###
 # Run the functions
 ###
@@ -661,12 +708,45 @@ def collect_output_csvs_and_create_excel_output(
         except Exception as e:
             print("Could not rename Topic_number due to", e)
 
+        preferred_reference_cols = [
+            "Response ID",
+            "Original Response ID",
+            "General topic",
+            "Subtopic",
+            "Sentiment",
+            "Confidence",
+            "Summary",
+            "Start row of group",
+            "Group",
+            "Topic number",
+        ]
+        response_level_df = master_reference_df_state
+        if not INCLUDE_RESPONSE_LEVEL_SUMMARY:
+            preferred_reference_cols = [
+                col for col in preferred_reference_cols if col != "Summary"
+            ]
+            response_level_df = master_reference_df_state.drop(
+                columns=["Summary"], errors="ignore"
+            )
+        existing_reference_cols = [
+            col for col in preferred_reference_cols if col in response_level_df.columns
+        ]
+        remaining_reference_cols = [
+            col
+            for col in response_level_df.columns
+            if col not in existing_reference_cols
+        ]
+        if existing_reference_cols:
+            response_level_df = response_level_df[
+                existing_reference_cols + remaining_reference_cols
+            ]
+
         number_of_responses_with_topic_assignment = len(
-            master_reference_df_state["Response ID"].unique()
+            response_level_df["Response ID"].unique()
         )
 
         reference_table_csv_path = output_folder + "reference_df_for_xlsx.csv"
-        master_reference_df_state.to_csv(reference_table_csv_path, index=None)
+        response_level_df.to_csv(reference_table_csv_path, index=None)
         temp_csv_files_for_cleanup.append(reference_table_csv_path)
 
         reference_pivot_table_csv_path = (
@@ -719,14 +799,48 @@ def collect_output_csvs_and_create_excel_output(
         else:
             csv_files.append(reference_table_csv_path)
             sheet_names.append("Response level data")
-            column_widths["Response level data"] = {
-                "A": 12,
-                "B": 30,
-                "C": 40,
-                "D": 10,
-                "H": 100,
-            }
-            wrap_text_columns["Response level data"] = ["C", "G"]
+            has_confidence_col = "Confidence" in response_level_df.columns
+            has_summary_col = "Summary" in response_level_df.columns
+            if has_confidence_col and has_summary_col:
+                column_widths["Response level data"] = {
+                    "A": 12,
+                    "B": 30,
+                    "C": 40,
+                    "D": 10,
+                    "E": 12,
+                    "F": 12,
+                    "G": 100,
+                }
+                wrap_text_columns["Response level data"] = ["C", "G"]
+            elif has_confidence_col:
+                column_widths["Response level data"] = {
+                    "A": 12,
+                    "B": 30,
+                    "C": 40,
+                    "D": 10,
+                    "E": 12,
+                    "F": 12,
+                }
+                wrap_text_columns["Response level data"] = ["C"]
+            elif has_summary_col:
+                column_widths["Response level data"] = {
+                    "A": 12,
+                    "B": 30,
+                    "C": 40,
+                    "D": 10,
+                    "E": 10,
+                    "F": 100,
+                }
+                wrap_text_columns["Response level data"] = ["C", "F"]
+            else:
+                column_widths["Response level data"] = {
+                    "A": 12,
+                    "B": 30,
+                    "C": 40,
+                    "D": 10,
+                    "E": 10,
+                }
+                wrap_text_columns["Response level data"] = ["C"]
     else:
         print("Relevant reference files not found, excluding from xlsx output.")
 
@@ -777,29 +891,13 @@ def collect_output_csvs_and_create_excel_output(
         print("Relevant missing responses files not found, excluding from xlsx output.")
 
     # Original data file
-    original_ext = os.path.splitext(original_data_file_path)[1].lower()
-    if original_ext == ".csv":
-        csv_files.append(original_data_file_path)
-    else:
-        # Read and convert to CSV
-        if original_ext == ".xlsx":
-            if excel_sheets:
-                df = pd.read_excel(original_data_file_path, sheet_name=excel_sheets)
-            else:
-                df = pd.read_excel(original_data_file_path)
-        elif original_ext == ".parquet":
-            df = pd.read_parquet(original_data_file_path)
-        else:
-            raise Exception(f"Unsupported file type for original data: {original_ext}")
-
-        # Save as CSV in output folder
-        original_data_csv_path = os.path.join(
-            output_folder,
-            os.path.splitext(os.path.basename(original_data_file_path))[0]
-            + "_for_xlsx.csv",
-        )
-        df.to_csv(original_data_csv_path, index=False)
-        csv_files.append(original_data_csv_path)
+    original_data_csv_path, original_data_is_temp = stage_original_data_csv(
+        original_data_file_path,
+        output_folder,
+        excel_sheets=excel_sheets,
+    )
+    csv_files.append(original_data_csv_path)
+    if original_data_is_temp:
         temp_csv_files_for_cleanup.append(original_data_csv_path)
 
     sheet_names.append("Original data")

@@ -36,6 +36,7 @@ def run_cli_topics(
     candidate_topics: Optional[str] = None,
     force_zero_shot: Optional[str] = None,
     force_single_topic: Optional[str] = None,
+    include_topic_confidence: Optional[str] = None,
     produce_structured_summary: Optional[str] = None,
     sentiment: Optional[str] = None,
     additional_summary_instructions: Optional[str] = None,
@@ -153,6 +154,8 @@ def run_cli_topics(
         command.extend(["--force_zero_shot", force_zero_shot])
     if force_single_topic:
         command.extend(["--force_single_topic", force_single_topic])
+    if include_topic_confidence:
+        command.extend(["--include_topic_confidence", include_topic_confidence])
     if produce_structured_summary:
         command.extend(["--produce_structured_summary", produce_structured_summary])
     if sentiment:
@@ -410,6 +413,7 @@ def run_app_direct_mode(
     candidate_topics: Optional[str] = None,
     force_zero_shot: Optional[str] = None,
     force_single_topic: Optional[str] = None,
+    include_topic_confidence: Optional[str] = None,
     produce_structured_summary: Optional[str] = None,
     sentiment: Optional[str] = None,
     additional_summary_instructions: Optional[str] = None,
@@ -530,6 +534,8 @@ def run_app_direct_mode(
         env["DIRECT_MODE_FORCE_ZERO_SHOT"] = force_zero_shot
     if force_single_topic:
         env["DIRECT_MODE_FORCE_SINGLE_TOPIC"] = force_single_topic
+    if include_topic_confidence:
+        env["DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE"] = include_topic_confidence
     if produce_structured_summary:
         env["DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY"] = produce_structured_summary
     if sentiment:

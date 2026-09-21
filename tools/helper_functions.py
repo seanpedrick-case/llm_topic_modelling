@@ -2,7 +2,7 @@ import codecs
 import math
 import os
 import re
-from typing import Any, List
+from typing import Any, List, Optional
 
 import boto3
 import gradio as gr
@@ -14,6 +14,7 @@ from tools.config import (
     AWS_USER_POOL_ID,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
+    ENABLE_INPUT_REDACTION,
     INPUT_FOLDER,
     MAXIMUM_ALLOWED_TOPICS,
     OUTPUT_FOLDER,
@@ -267,6 +268,14 @@ def load_in_data_file(
         file_data = pd.DataFrame()
         file_name = ""
         num_batches = 1
+        return file_data, file_name, num_batches
+
+    if ENABLE_INPUT_REDACTION and file_data is not None and not file_data.empty:
+        from tools.data_redaction import redact_dataframe
+
+        text_cols = [col for col in in_colnames if col and col != "NA"]
+        file_data = redact_dataframe(file_data, columns=text_cols)
+        print(f"Applied PII redaction to input column(s): {', '.join(text_cols)}")
 
     return file_data, file_name, num_batches
 
@@ -568,6 +577,40 @@ def apply_forced_unassessed_general_topics(
     return out
 
 
+def parse_topic_confidence_value(value) -> Optional[float]:
+    """Parse an LLM confidence cell into a 0-1 float, or None if invalid."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if pd.isna(value):
+            return None
+        number = float(value)
+    else:
+        text = str(value).strip()
+        if not text or text.lower() in {"nan", "none", "na", "<na>", "nat"}:
+            return None
+        had_percent = "%" in text
+        text = text.replace("%", "").strip()
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            match = re.search(r"-?\d+(?:\.\d+)?", text)
+            if not match:
+                return None
+            number = float(match.group(0))
+        if had_percent and number > 1:
+            number = number / 100.0
+    if 1 < number <= 100:
+        number = number / 100.0
+    if number < 0:
+        return 0.0
+    if number > 1:
+        return 1.0
+    return number
+
+
 def _flatten_pivot_column_label(col) -> str:
     """Join MultiIndex pivot parts, omitting 'Not assessed' general topics/sentiment."""
     if isinstance(col, str):
@@ -579,7 +622,9 @@ def _flatten_pivot_column_label(col) -> str:
 
 
 def convert_reference_table_to_pivot_table(
-    df: pd.DataFrame, basic_response_data: pd.DataFrame = pd.DataFrame()
+    df: pd.DataFrame,
+    basic_response_data: pd.DataFrame = pd.DataFrame(),
+    include_confidence: bool | None = None,
 ):
     df = df.copy()
     if df.columns.duplicated().any():
@@ -587,30 +632,53 @@ def convert_reference_table_to_pivot_table(
     if "Sentiment" not in df.columns:
         df["Sentiment"] = "Not assessed"
 
-    df_in = df[["Response ID", "General topic", "Subtopic", "Sentiment"]].copy()
+    if include_confidence is None:
+        include_confidence = "Confidence" in df.columns
+
+    id_topic_cols = ["Response ID", "General topic", "Subtopic", "Sentiment"]
+    df_in = df[id_topic_cols].copy()
 
     # Convert to numeric first (handles float strings like '1.0'), then to int
     df_in["Response ID"] = pd.to_numeric(df_in["Response ID"], errors="coerce").astype(
         "Int64"
     )
 
-    # Create a combined category column
-    df_in["Category"] = (
-        df_in["General topic"] + " - " + df_in["Subtopic"] + " - " + df_in["Sentiment"]
-    )
+    if include_confidence:
+        if "Confidence" in df.columns:
+            parsed_confidence = df["Confidence"].map(parse_topic_confidence_value)
+        else:
+            parsed_confidence = pd.Series([None] * len(df), index=df.index)
+        df_in["Confidence"] = parsed_confidence
+        # Assigned rows with unparseable scores still need a pivot cell, so
+        # fill 1.0 only for the wide matrix. The long table keeps NaN.
+        df_in["Confidence"] = df_in["Confidence"].fillna(1.0)
 
-    # Create pivot table counting occurrences of each unique combination
-    pivot_table = pd.crosstab(
-        index=df_in["Response ID"],
-        columns=[df_in["General topic"], df_in["Subtopic"], df_in["Sentiment"]],
-        margins=True,
-    )
-
-    # Flatten column names, dropping placeholder 'Not assessed' general topics
-    # (and sentiment) so subtopic-only zero-shot headers are not all prefixed.
-    pivot_table.columns = [
-        _flatten_pivot_column_label(col) for col in pivot_table.columns
-    ]
+        pivot_table = pd.pivot_table(
+            df_in,
+            index="Response ID",
+            columns=["General topic", "Subtopic", "Sentiment"],
+            values="Confidence",
+            aggfunc="max",
+        )
+        pivot_table.columns = [
+            _flatten_pivot_column_label(col) for col in pivot_table.columns
+        ]
+        assignment_counts = (
+            df_in.dropna(subset=["Response ID"])
+            .groupby("Response ID")
+            .size()
+            .rename("All")
+        )
+        pivot_table = pivot_table.join(assignment_counts, how="left")
+    else:
+        pivot_table = pd.crosstab(
+            index=df_in["Response ID"],
+            columns=[df_in["General topic"], df_in["Subtopic"], df_in["Sentiment"]],
+            margins=True,
+        )
+        pivot_table.columns = [
+            _flatten_pivot_column_label(col) for col in pivot_table.columns
+        ]
 
     pivot_table.reset_index(inplace=True)
 
@@ -771,6 +839,32 @@ def create_topic_summary_df_from_reference_table(
         .reset_index()
     )
 
+    if "Confidence" in reference_df.columns:
+        confidence_numeric = reference_df.copy()
+        confidence_numeric["Confidence"] = confidence_numeric["Confidence"].map(
+            parse_topic_confidence_value
+        )
+        confidence_stats = (
+            confidence_numeric.groupby(groupby_cols)["Confidence"]
+            .agg(["mean", "min"])
+            .reset_index()
+            .rename(
+                columns={
+                    "mean": "Mean confidence",
+                    "min": "Min confidence",
+                }
+            )
+        )
+        out_topic_summary_df = out_topic_summary_df.merge(
+            confidence_stats, on=groupby_cols, how="left"
+        )
+        out_topic_summary_df["Mean confidence"] = out_topic_summary_df[
+            "Mean confidence"
+        ].round(2)
+        out_topic_summary_df["Min confidence"] = out_topic_summary_df[
+            "Min confidence"
+        ].round(2)
+
     # Calculate number of responses from the Response ID string
     # (count comma-separated values)
     def count_responses(ref_str):
@@ -813,6 +907,25 @@ def create_topic_summary_df_from_reference_table(
     out_topic_summary_df.drop(
         ["1", "2", "3", "Response ID"], axis=1, errors="ignore", inplace=True
     )
+
+    preferred_cols = [
+        "General topic",
+        "Subtopic",
+        "Sentiment",
+        "Group",
+        "Number of responses",
+        "Mean confidence",
+        "Min confidence",
+        "Summary",
+        "Topic number",
+    ]
+    existing_preferred = [
+        col for col in preferred_cols if col in out_topic_summary_df.columns
+    ]
+    remaining_cols = [
+        col for col in out_topic_summary_df.columns if col not in existing_preferred
+    ]
+    out_topic_summary_df = out_topic_summary_df[existing_preferred + remaining_cols]
 
     return out_topic_summary_df
 
@@ -1384,6 +1497,21 @@ def effective_force_zero_shot_radio(
         "Ignoring force zero-shot: no initial candidate topics file/list was submitted."
     )
     return "No"
+
+
+def order_topics_for_batch_prompt(
+    topics_df: pd.DataFrame,
+    shuffle: bool = False,
+    random_seed: Optional[int] = None,
+) -> pd.DataFrame:
+    """Return the topics table in the order it should appear in an LLM batch prompt.
+
+    Call this after deduplication. When shuffle is True, rows are randomly reordered
+    (reproducibly if random_seed is set). When False, the dataframe is unchanged.
+    """
+    if topics_df is None or topics_df.empty or not shuffle:
+        return topics_df
+    return topics_df.sample(frac=1, random_state=random_seed).reset_index(drop=True)
 
 
 def generate_zero_shot_topics_df(

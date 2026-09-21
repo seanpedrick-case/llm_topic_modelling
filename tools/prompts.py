@@ -20,7 +20,7 @@ default_response_reference_format = "In the next column named 'Response ID', lis
 initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table based on open text responses in the reponse table below.
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
 In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty.
-{sentiment_choices}{response_reference_format}
+{sentiment_choices}{response_reference_format}{confidence_choices}
 In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
  
@@ -44,7 +44,7 @@ force_single_topic_prompt = """ Assign each response to one single topic only.""
 
 add_existing_topics_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table, assigning responses from the Response table below to topics.
 {topic_assignment}{force_single_topic}
-{sentiment_choices}{response_reference_format}
+{sentiment_choices}{response_reference_format}{confidence_choices}
 In the final column named 'Summary', write a summary of the Subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
 
@@ -101,6 +101,20 @@ negative_or_positive_sentiment_prompt = (
 do_not_assess_sentiment_prompt = "write the text 'Not assessed'"  # Not used anymore. Instead, the column is filled in automatically with 'Not assessed'
 default_sentiment_prompt = (
     "write the sentiment of the Subtopic: Negative, Neutral, or Positive"
+)
+
+confidence_column_prompt = (
+    "In the next column named 'Confidence', write a number from 0 to 1 "
+    "(two decimal places) for how sure you are that this topic applies to "
+    "the listed Response ID(s). Only list multiple Response IDs on the same "
+    "row if they share the same confidence; otherwise split them into "
+    "separate rows. "
+)
+
+confidence_validation_issue = (
+    "- If a Confidence column is present, each value must be a number from "
+    "0 to 1. If listed Response IDs would need different confidence scores, "
+    "split them into separate rows.\n"
 )
 
 ###

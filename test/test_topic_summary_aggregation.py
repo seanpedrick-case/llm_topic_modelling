@@ -8,6 +8,7 @@ import pandas as pd
 from tools.helper_functions import (
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
+    parse_topic_confidence_value,
 )
 
 
@@ -130,6 +131,94 @@ class TestConvertReferenceTableToPivotTable(unittest.TestCase):
         self.assertIn("Parking - Negative", headers)
         self.assertIn("Buses", headers)
         self.assertFalse(any("not assessed" in col.casefold() for col in headers))
+
+    def test_confidence_replaces_presence_counts(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 1, 2],
+                "General topic": ["Housing", "Transport", "Housing"],
+                "Subtopic": ["Repairs", "Buses", "Repairs"],
+                "Sentiment": ["Negative", "Negative", "Negative"],
+                "Confidence": [0.9, 0.2, 0.55],
+            }
+        )
+        basic = pd.DataFrame(
+            {
+                "Response ID": [1, 2, 3],
+                "Original Response ID": [1, 2, 3],
+                "Response": ["a", "b", "c"],
+            }
+        )
+
+        pivot = convert_reference_table_to_pivot_table(
+            reference_df, basic, include_confidence=True
+        )
+
+        housing_col = [
+            col
+            for col in pivot.columns
+            if "Housing" in str(col) and "Repairs" in str(col)
+        ][0]
+        buses_col = [col for col in pivot.columns if "Buses" in str(col)][0]
+
+        self.assertAlmostEqual(float(pivot.loc[0, housing_col]), 0.9)
+        self.assertAlmostEqual(float(pivot.loc[0, buses_col]), 0.2)
+        self.assertAlmostEqual(float(pivot.loc[1, housing_col]), 0.55)
+        self.assertTrue(pd.isna(pivot.loc[2, housing_col]))
+        self.assertEqual(int(pivot.loc[0, "All"]), 2)
+        self.assertEqual(int(pivot.loc[1, "All"]), 1)
+
+    def test_without_confidence_still_uses_counts(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 2],
+                "General topic": ["Housing", "Housing"],
+                "Subtopic": ["Repairs", "Repairs"],
+                "Sentiment": ["Negative", "Negative"],
+            }
+        )
+
+        pivot = convert_reference_table_to_pivot_table(
+            reference_df, include_confidence=False
+        )
+        topic_col = [col for col in pivot.columns if col not in {"Response ID", "All"}][
+            0
+        ]
+        self.assertEqual(int(pivot.loc[0, topic_col]), 1)
+
+
+class TestParseTopicConfidenceValue(unittest.TestCase):
+    def test_zero_to_one_and_percentages(self):
+        self.assertEqual(parse_topic_confidence_value("0.82"), 0.82)
+        self.assertEqual(parse_topic_confidence_value("80%"), 0.8)
+        self.assertEqual(parse_topic_confidence_value(75), 0.75)
+        self.assertEqual(parse_topic_confidence_value("1"), 1.0)
+        self.assertIsNone(parse_topic_confidence_value(""))
+        self.assertIsNone(parse_topic_confidence_value("not sure"))
+        self.assertEqual(parse_topic_confidence_value("-0.2"), 0.0)
+        self.assertEqual(parse_topic_confidence_value("150"), 1.0)
+
+
+class TestTopicSummaryConfidenceAggregation(unittest.TestCase):
+    def test_mean_and_min_confidence_are_added(self):
+        reference_df = pd.DataFrame(
+            {
+                "General topic": ["Housing", "Housing"],
+                "Subtopic": ["Repairs", "Repairs"],
+                "Sentiment": ["Negative", "Negative"],
+                "Group": ["All", "All"],
+                "Response ID": [1, 2],
+                "Summary": ["Damp", "Damp"],
+                "Start row of group": [1, 6],
+                "Confidence": [0.9, 0.4],
+            }
+        )
+
+        out = create_topic_summary_df_from_reference_table(reference_df)
+
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(float(out.loc[0, "Mean confidence"]), 0.65)
+        self.assertAlmostEqual(float(out.loc[0, "Min confidence"]), 0.4)
 
 
 if __name__ == "__main__":

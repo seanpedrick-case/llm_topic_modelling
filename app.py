@@ -41,6 +41,7 @@ from tools.config import (
     DIRECT_MODE_FORCE_SINGLE_TOPIC,
     DIRECT_MODE_FORCE_ZERO_SHOT,
     DIRECT_MODE_GROUP_BY,
+    DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE,
     DIRECT_MODE_INFERENCE_SERVER_MODEL,
     DIRECT_MODE_INPUT_FILE,
     DIRECT_MODE_MAX_TIME_FOR_LOOP,
@@ -78,6 +79,7 @@ from tools.config import (
     GRADIO_TEMP_DIR,
     HF_TOKEN,
     HOST_NAME,
+    INCLUDE_TOPIC_CONFIDENCE,
     INPUT_FOLDER,
     INTRO_TEXT,
     LLM_SEED,
@@ -970,6 +972,11 @@ with app:
                     value="No",
                     choices=["Yes", "No"],
                 )
+                include_topic_confidence_radio = gr.Radio(
+                    label="Ask the model to score how confident it is in each topic assignment (0 to 1)",
+                    value="Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                    choices=["Yes", "No"],
+                )
                 produce_structured_summary_radio.render()
 
         with gr.Accordion(
@@ -1651,6 +1658,7 @@ with app:
             force_zero_shot_radio,
             in_excel_sheets,
             force_single_topic_radio,
+            include_topic_confidence_radio,
             produce_structured_summary_radio,
             aws_access_key_textbox,
             aws_secret_key_textbox,
@@ -1801,6 +1809,7 @@ with app:
             produce_structured_summary_radio,
             force_zero_shot_radio,
             force_single_topic_radio,
+            include_topic_confidence_radio,
             context_textbox,
             additional_summary_instructions_textbox,
             output_folder_state,
@@ -2384,6 +2393,7 @@ with app:
             force_zero_shot_radio,
             in_excel_sheets,
             force_single_topic_radio,
+            include_topic_confidence_radio,
             produce_structured_summary_radio,
             aws_access_key_textbox,
             aws_secret_key_textbox,
@@ -2507,6 +2517,7 @@ with app:
             force_zero_shot_radio,
             in_excel_sheets,
             force_single_topic_radio,
+            include_topic_confidence_radio,
             produce_structured_summary_radio,
             aws_access_key_textbox,
             aws_secret_key_textbox,
@@ -3145,6 +3156,7 @@ if __name__ == "__main__":
             ),
             "force_zero_shot": DIRECT_MODE_FORCE_ZERO_SHOT,
             "force_single_topic": DIRECT_MODE_FORCE_SINGLE_TOPIC,
+            "include_topic_confidence": DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE,
             "produce_structured_summary": DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY,
             "sentiment": DIRECT_MODE_SENTIMENT,
             "additional_summary_instructions": (

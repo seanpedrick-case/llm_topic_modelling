@@ -14,6 +14,7 @@ import spaces
 from gradio import Progress
 from tqdm import tqdm
 
+from tools import config as app_config
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
@@ -23,6 +24,7 @@ from tools.config import (
     DEDUPLICATION_THRESHOLD,
     ENABLE_BATCH_DEDUPLICATION,
     ENABLE_VALIDATION,
+    INCLUDE_TOPIC_CONFIDENCE,
     LLM_CONTEXT_HEADROOM_FRACTION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
@@ -62,6 +64,8 @@ from tools.helper_functions import (
     load_in_data_file,
     load_in_previous_data_files,
     normalize_topic_name_for_llm,
+    order_topics_for_batch_prompt,
+    parse_topic_confidence_value,
     put_columns_in_df,
     read_file,
     subsample_responses_for_topic_discovery,
@@ -85,6 +89,8 @@ from tools.prompts import (
     add_existing_topics_prompt,
     add_existing_topics_system_prompt,
     allow_new_topics_prompt,
+    confidence_column_prompt,
+    confidence_validation_issue,
     default_response_reference_format,
     default_sentiment_prompt,
     force_existing_topics_prompt,
@@ -187,6 +193,7 @@ def reconstruct_markdown_table_from_reference_df(
     start_row: int = None,
     end_row: int = None,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
+    include_topic_confidence_radio: str = "No",
 ) -> tuple[str, pd.DataFrame]:
     """
     Reconstructs a markdown table from reference_df data when all_responses_content is missing.
@@ -230,15 +237,28 @@ def reconstruct_markdown_table_from_reference_df(
         filtered_df = filtered_df.rename(columns={"Revised summary": "Summary"})
 
     include_sentiment = _assess_sentiment(sentiment_checkbox)
+    include_confidence = _include_topic_confidence(include_topic_confidence_radio)
     if include_sentiment:
         if "Sentiment" not in filtered_df.columns:
             filtered_df["Sentiment"] = "Not assessed"
         group_cols = ["General topic", "Subtopic", "Sentiment"]
     else:
         group_cols = ["General topic", "Subtopic"]
+    if include_confidence:
+        if "Confidence" not in filtered_df.columns:
+            filtered_df["Confidence"] = ""
+        else:
+            filtered_df["Confidence"] = filtered_df["Confidence"].map(
+                lambda value: (
+                    ""
+                    if parse_topic_confidence_value(value) is None
+                    else parse_topic_confidence_value(value)
+                )
+            )
+        group_cols = group_cols + ["Confidence"]
 
     grouped_df = (
-        filtered_df.groupby(group_cols)
+        filtered_df.groupby(group_cols, dropna=False)
         .agg(
             {
                 "Response ID": lambda x: ", ".join(map(str, sorted(x.unique()))),
@@ -272,7 +292,10 @@ def reconstruct_markdown_table_from_reference_df(
     markdown_cols = ["General topic", "Subtopic"]
     if include_sentiment:
         markdown_cols.append("Sentiment")
-    markdown_cols.extend(["Response ID", "Summary"])
+    markdown_cols.extend(["Response ID"])
+    if include_confidence:
+        markdown_cols.append("Confidence")
+    markdown_cols.append("Summary")
     for col in markdown_cols:
         if col in cleaned_df.columns:
             cleaned_df[col] = cleaned_df[col].fillna("").astype(str)
@@ -293,36 +316,65 @@ def reconstruct_markdown_table_from_reference_df(
     cleaned_df.drop_duplicates(dedupe_cols, inplace=True)
 
     if include_sentiment:
-        markdown_table = (
-            "| General topic | Subtopic | Sentiment | Response ID | Summary |\n"
-        )
-        markdown_table += "|---|---|---|---|---|\n"
+        header_parts = ["General topic", "Subtopic", "Sentiment", "Response ID"]
     else:
-        markdown_table = "| General topic | Subtopic | Response ID | Summary |\n"
-        markdown_table += "|---|---|---|---|\n"
+        header_parts = ["General topic", "Subtopic", "Response ID"]
+    if include_confidence:
+        header_parts.append("Confidence")
+    header_parts.append("Summary")
+    markdown_table = "| " + " | ".join(header_parts) + " |\n"
+    markdown_table += "|" + "|".join(["---"] * len(header_parts)) + "|\n"
 
     for _, row in cleaned_df.iterrows():
         general_topic = row["General topic"]
         subtopic = row["Subtopic"]
         response_refs = row["Response ID"]
         summary = row["Summary"]
-
+        row_parts = [general_topic, subtopic]
         if include_sentiment:
-            sentiment = row["Sentiment"]
-            markdown_table += (
-                f"| {general_topic} | {subtopic} | {sentiment} | "
-                f"{response_refs} | {summary} |\n"
-            )
-        else:
-            markdown_table += (
-                f"| {general_topic} | {subtopic} | {response_refs} | {summary} |\n"
-            )
+            row_parts.append(row["Sentiment"])
+        row_parts.append(response_refs)
+        if include_confidence:
+            confidence_value = row["Confidence"]
+            if confidence_value == "" or pd.isna(confidence_value):
+                row_parts.append("")
+            else:
+                try:
+                    row_parts.append(f"{float(confidence_value):.2f}")
+                except (TypeError, ValueError):
+                    row_parts.append(str(confidence_value))
+        row_parts.append(summary)
+        markdown_table += "| " + " | ".join(str(part) for part in row_parts) + " |\n"
 
     return markdown_table, cleaned_df
 
 
 def _assess_sentiment(sentiment_checkbox: str) -> bool:
     return sentiment_checkbox != "Do not assess sentiment"
+
+
+def _include_topic_confidence(include_topic_confidence_radio: str) -> bool:
+    if isinstance(include_topic_confidence_radio, bool):
+        return include_topic_confidence_radio
+    if include_topic_confidence_radio is None:
+        return INCLUDE_TOPIC_CONFIDENCE
+    return str(include_topic_confidence_radio).strip().lower() in {
+        "yes",
+        "true",
+        "1",
+    }
+
+
+def _confidence_choices_prompt(include_topic_confidence_radio: str) -> str:
+    if _include_topic_confidence(include_topic_confidence_radio):
+        return confidence_column_prompt
+    return ""
+
+
+def _confidence_validation_text(include_topic_confidence_radio: str) -> str:
+    if _include_topic_confidence(include_topic_confidence_radio):
+        return confidence_validation_issue
+    return ""
 
 
 def _topic_summary_dedup_columns(
@@ -384,6 +436,7 @@ def validate_topics(
     produce_structured_summary_radio: str = "No",
     force_zero_shot_radio: str = "No",
     force_single_topic_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
     context_textbox: str = "",
     additional_instructions_summary_format: str = "",
     output_folder: str = OUTPUT_FOLDER,
@@ -607,6 +660,7 @@ def validate_topics(
                     validation_start_row,
                     validation_end_row,
                     sentiment_checkbox=sentiment_checkbox,
+                    include_topic_confidence_radio=include_topic_confidence_radio,
                 )
             else:
                 # Try to reconstruct markdown table from reference_df data
@@ -616,6 +670,7 @@ def validate_topics(
                         validation_start_row,
                         validation_end_row,
                         sentiment_checkbox=sentiment_checkbox,
+                        include_topic_confidence_radio=include_topic_confidence_radio,
                     )
                 )
 
@@ -665,6 +720,18 @@ def validate_topics(
                         ["General topic", "Subtopic"]
                     )
                 )
+
+            if app_config.SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS:
+                validation_topics_df_for_markdown = order_topics_for_batch_prompt(
+                    validation_topics_df_for_markdown,
+                    shuffle=True,
+                    random_seed=random_seed + validation_reported_batch_no,
+                )
+                if not validation_topics_df_for_markdown.empty:
+                    print(
+                        f"Shuffling {len(validation_topics_df_for_markdown)} suggested topics "
+                        f"for validation batch {validation_reported_batch_no} prompt"
+                    )
 
             if "Description" in validation_existing_topic_summary_df:
                 if validation_existing_topic_summary_df["Description"].isnull().all():
@@ -751,6 +818,9 @@ def validate_topics(
                     topic_assignment=validation_topic_assignment_prompt,
                     force_single_topic=validation_force_single_topic_prompt,
                     sentiment_choices=sentiment_prompt,
+                    confidence_choices=_confidence_choices_prompt(
+                        include_topic_confidence_radio
+                    ),
                     response_reference_format=validation_response_reference_format,
                     add_existing_topics_summary_format=additional_instructions_summary_format,
                     previous_table_introduction=previous_table_introduction_default,
@@ -758,7 +828,10 @@ def validate_topics(
                         previous_table_content if show_previous_table == "Yes" else ""
                     ),
                     validate_prompt_suffix=validation_prompt_suffix_default.format(
-                        additional_validation_issues=additional_validation_issues_provided
+                        additional_validation_issues=(
+                            _confidence_validation_text(include_topic_confidence_radio)
+                            + additional_validation_issues_provided
+                        )
                     ),
                 )
             else:
@@ -829,6 +902,7 @@ def validate_topics(
                 api_url=api_url,
                 sentiment_checkbox=sentiment_checkbox,
                 force_zero_shot_radio=force_zero_shot_radio,
+                include_topic_confidence_radio=include_topic_confidence_radio,
             )
 
             if validation_new_topic_df.empty:
@@ -1268,6 +1342,7 @@ def validate_topics_wrapper(
     produce_structured_summary_radio: str,
     force_zero_shot_radio: str,
     force_single_topic_radio: str,
+    include_topic_confidence_radio: str,
     context_textbox: str,
     additional_instructions_summary_format: str,
     output_folder: str,
@@ -1471,6 +1546,7 @@ def validate_topics_wrapper(
                 produce_structured_summary_radio=produce_structured_summary_radio,
                 force_zero_shot_radio=force_zero_shot_radio,
                 force_single_topic_radio=force_single_topic_radio,
+                include_topic_confidence_radio=include_topic_confidence_radio,
                 context_textbox=context_textbox,
                 additional_instructions_summary_format=additional_instructions_summary_format,
                 output_folder=output_folder,
@@ -2124,6 +2200,14 @@ TOPIC_TABLE_EXPECTED_COLS = [
 ]
 
 
+def _topic_table_expected_cols(include_confidence: bool = False) -> List[str]:
+    cols = ["General topic", "Subtopic", "Sentiment", "Response ID"]
+    if include_confidence:
+        cols.append("Confidence")
+    cols.append("Summary")
+    return cols
+
+
 def _dedupe_dataframe_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """Make column labels unique so later selection/concat cannot hit reindex errors."""
     if df is None:
@@ -2168,35 +2252,41 @@ def _column_as_string_series(values: Any, length: int) -> pd.Series:
     return series
 
 
-def _column_fill_order(assess_sentiment: bool) -> List[str]:
+def _column_fill_order(
+    assess_sentiment: bool, include_confidence: bool = False
+) -> List[str]:
     """Order unused parsed columns should fill standard fields.
 
     When sentiment is not requested, Response ID and Summary must be filled
     before Sentiment so topic/summary text is not consumed as a missing
-    Sentiment column.
+    Sentiment column. Confidence sits after Response ID when requested.
     """
+    cols = ["General topic", "Subtopic"]
     if assess_sentiment:
-        return list(TOPIC_TABLE_EXPECTED_COLS)
-    return [
-        "General topic",
-        "Subtopic",
-        "Response ID",
-        "Summary",
-        "Sentiment",
-    ]
+        cols.append("Sentiment")
+    cols.append("Response ID")
+    if include_confidence:
+        cols.append("Confidence")
+    cols.append("Summary")
+    if not assess_sentiment:
+        cols.append("Sentiment")
+    return cols
 
 
 def _ensure_standard_topic_table_columns(
-    df: pd.DataFrame, batch_size_number: int, assess_sentiment: bool = True
+    df: pd.DataFrame,
+    batch_size_number: int,
+    assess_sentiment: bool = True,
+    include_confidence: bool = False,
 ) -> pd.DataFrame:
     """
-    Force a topic-analysis table into exactly the five expected columns.
+    Force a topic-analysis table into the expected columns.
 
     Avoids duplicate column names (which break pd.concat with
     'Reindexing only valid with uniquely valued Index objects') and ensures
     topic/sentiment fields are strings before .str processing.
     """
-    expected = TOPIC_TABLE_EXPECTED_COLS
+    expected = _topic_table_expected_cols(include_confidence)
     if df is None or df.empty:
         return pd.DataFrame(columns=expected)
 
@@ -2221,7 +2311,7 @@ def _ensure_standard_topic_table_columns(
         used_cols.add(found)
 
     unused_cols = [c for c in working.columns if c not in used_cols]
-    for standard_name in _column_fill_order(assess_sentiment):
+    for standard_name in _column_fill_order(assess_sentiment, include_confidence):
         if standard_name in mapped:
             continue
         if not unused_cols:
@@ -2244,6 +2334,12 @@ def _ensure_standard_topic_table_columns(
             )
             if looks_like_ids and not looks_like_sentiment:
                 continue
+        if standard_name == "Confidence":
+            candidate_vals = _column_as_string_series(working[unused_cols[0]], n_rows)
+            parsed = candidate_vals.map(parse_topic_confidence_value)
+            looks_like_confidence = parsed.notna().mean() >= 0.5
+            if not looks_like_confidence:
+                continue
         col = unused_cols.pop(0)
         mapped[standard_name] = _column_as_string_series(working[col], n_rows)
         used_cols.add(col)
@@ -2255,6 +2351,7 @@ def _ensure_standard_topic_table_columns(
         "Sentiment": "Not assessed",
         "Response ID": default_response_id,
         "Summary": "",
+        "Confidence": "",
     }
     for standard_name in expected:
         if standard_name not in mapped:
@@ -2444,6 +2541,7 @@ def write_llm_output_and_logs(
     output_folder: str = OUTPUT_FOLDER,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
     force_zero_shot_radio: str = "No",
+    include_topic_confidence_radio: str = "No",
 ) -> Tuple:
     """
     Writes the output of the large language model requests and logs to files.
@@ -2470,6 +2568,8 @@ def write_llm_output_and_logs(
       Response ID rather than Sentiment.
     - force_zero_shot_radio (str, optional): When "Yes", overwrite General topic
       to 'Not assessed' if the model ignored the Placeholder instruction.
+    - include_topic_confidence_radio (str, optional): When "Yes", expect and
+      retain a Confidence column (0-1) on each assignment row.
     """
     topic_summary_df_out_path = list()
     topic_table_out_path = "topic_table_error.csv"
@@ -2664,12 +2764,15 @@ def write_llm_output_and_logs(
     parsed_column_count = (
         topic_with_response_df.shape[1] if not topic_with_response_df.empty else 0
     )
-    if not is_error and not topic_with_response_df.empty:
-        # Valid topic tables are 4 or 5 columns; anything else should be retried
-        if parsed_column_count < 3 or parsed_column_count not in (4, 5):
-            has_incomplete_output = True
-
     assess_sentiment = _assess_sentiment(sentiment_checkbox)
+    include_confidence = _include_topic_confidence(include_topic_confidence_radio)
+    valid_column_counts = {4, 5}
+    if include_confidence:
+        valid_column_counts.add(6)
+    if not is_error and not topic_with_response_df.empty:
+        # Valid topic tables are 4 or 5 columns (6 when confidence is requested)
+        if parsed_column_count < 3 or parsed_column_count not in valid_column_counts:
+            has_incomplete_output = True
     has_sentiment_header = (
         _find_parsed_table_column(topic_with_response_df, "Sentiment") is not None
     )
@@ -2680,7 +2783,26 @@ def write_llm_output_and_logs(
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
     if topic_with_response_df.shape[1] == 5:
-        if not assess_sentiment and not has_sentiment_header:
+        if include_confidence and not assess_sentiment:
+            has_confidence_header = (
+                _find_parsed_table_column(topic_with_response_df, "Confidence")
+                is not None
+            )
+            if not has_confidence_header and not has_response_id_header:
+                new_column_names = {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Response ID",
+                    topic_with_response_df.columns[3]: "Confidence",
+                    topic_with_response_df.columns[4]: "Summary",
+                }
+                topic_with_response_df = topic_with_response_df.rename(
+                    columns=new_column_names
+                )
+            topic_with_response_df["Sentiment"] = pd.Series(
+                ["Not assessed"] * len(topic_with_response_df), dtype=str
+            )
+        elif not assess_sentiment and not has_sentiment_header:
             # Prompt asked for 4 columns; a 5th is usually a trailing empty cell.
             # Do not treat column 3 as Sentiment or Response ID values are lost.
             if not has_response_id_header:
@@ -2779,6 +2901,24 @@ def write_llm_output_and_logs(
             topic_with_response_df["Sentiment"] = pd.Series(
                 ["Not assessed"] * len(topic_with_response_df), dtype=str
             )
+    elif include_confidence and topic_with_response_df.shape[1] == 6:
+        rename_map = {}
+        for standard_name in _topic_table_expected_cols(True):
+            found_col = _find_parsed_table_column(topic_with_response_df, standard_name)
+            if found_col is not None:
+                rename_map[found_col] = standard_name
+        if len(rename_map) < 6:
+            rename_map.update(
+                {
+                    topic_with_response_df.columns[0]: "General topic",
+                    topic_with_response_df.columns[1]: "Subtopic",
+                    topic_with_response_df.columns[2]: "Sentiment",
+                    topic_with_response_df.columns[3]: "Response ID",
+                    topic_with_response_df.columns[4]: "Confidence",
+                    topic_with_response_df.columns[5]: "Summary",
+                }
+            )
+        topic_with_response_df = topic_with_response_df.rename(columns=rename_map)
     else:
         # Something went wrong with the table output; repair best-effort for
         # exhausted-retry fallback, and flag incomplete so the caller can retry.
@@ -2795,19 +2935,25 @@ def write_llm_output_and_logs(
         topic_with_response_df,
         batch_size_number,
         assess_sentiment=assess_sentiment,
+        include_confidence=include_confidence,
     )
     if produce_structured_summary_radio != "Yes":
         topic_with_response_df = apply_forced_unassessed_general_topics(
             topic_with_response_df, force_zero_shot_radio
         )
 
-    # Fill in NA rows with values from above (topics seem to be included only on one row):
-    topic_with_response_df = topic_with_response_df.ffill()
+    # Fill in NA rows with values from above (topics seem to be included only on one row).
+    # Do not forward-fill Confidence so missing scores stay blank.
+    fill_cols = [col for col in topic_with_response_df.columns if col != "Confidence"]
+    if fill_cols:
+        topic_with_response_df[fill_cols] = topic_with_response_df[fill_cols].ffill()
 
     # Ensure we have a valid DataFrame with the expected columns before processing
     if topic_with_response_df.empty:
         # If DataFrame is empty, create a minimal valid structure
-        topic_with_response_df = pd.DataFrame(columns=TOPIC_TABLE_EXPECTED_COLS)
+        topic_with_response_df = pd.DataFrame(
+            columns=_topic_table_expected_cols(include_confidence)
+        )
 
     # For instances where you end up with float values in Response ID
     # Ensure we're working with a Series by using iloc if needed
@@ -2932,20 +3078,27 @@ def write_llm_output_and_logs(
 
     # Iterate through each row in the original DataFrame
     for index, row in topic_with_response_df.iterrows():
-        references_raw = str(row.iloc[3]) if pd.notna(row.iloc[3]) else ""
+        references_raw = (
+            str(row["Response ID"])
+            if "Response ID" in row.index and pd.notna(row["Response ID"])
+            else ""
+        )
         references = re.findall(r"\d+", references_raw)
 
         if batch_size_number == 1:
             references = ["1"]
 
-        topic = row.iloc[0] if pd.notna(row.iloc[0]) else ""
-        subtopic = row.iloc[1] if pd.notna(row.iloc[1]) else ""
-        sentiment = row.iloc[2] if pd.notna(row.iloc[2]) else ""
-        summary = row.iloc[4] if pd.notna(row.iloc[4]) else ""
+        topic = row["General topic"] if pd.notna(row.get("General topic", "")) else ""
+        subtopic = row["Subtopic"] if pd.notna(row.get("Subtopic", "")) else ""
+        sentiment = row["Sentiment"] if pd.notna(row.get("Sentiment", "")) else ""
+        summary = row["Summary"] if pd.notna(row.get("Summary", "")) else ""
+        confidence_value = None
+        if include_confidence:
+            confidence_value = parse_topic_confidence_value(row.get("Confidence", None))
 
         # If the reference response column is very long, and there's nothing in the summary column, assume that the summary was put in the reference column
-        if not summary and (len(str(row.iloc[3])) > 30):
-            summary = row.iloc[3]
+        if not summary and (len(references_raw) > 30):
+            summary = references_raw
 
         if produce_structured_summary_radio != "Yes":
             summary = row_number_string_start + summary
@@ -2984,31 +3137,33 @@ def write_llm_output_and_logs(
 
         existing_reference_numbers = True
         for response_ref_no in resolved_ids:
-            reference_data.append(
-                {
-                    "Response ID": str(response_ref_no),
-                    "General topic": topic,
-                    "Subtopic": subtopic,
-                    "Sentiment": sentiment,
-                    "Summary": summary,
-                    "Start row of group": start_row_reported,
-                }
-            )
+            assignment_row = {
+                "Response ID": str(response_ref_no),
+                "General topic": topic,
+                "Subtopic": subtopic,
+                "Sentiment": sentiment,
+                "Summary": summary,
+                "Start row of group": start_row_reported,
+            }
+            if include_confidence:
+                assignment_row["Confidence"] = confidence_value
+            reference_data.append(assignment_row)
 
     # Create a new DataFrame from the reference data
     if reference_data:
         new_reference_df = pd.DataFrame(reference_data)
     else:
-        new_reference_df = pd.DataFrame(
-            columns=[
-                "Response ID",
-                "General topic",
-                "Subtopic",
-                "Sentiment",
-                "Summary",
-                "Start row of group",
-            ]
-        )
+        empty_reference_cols = [
+            "Response ID",
+            "General topic",
+            "Subtopic",
+            "Sentiment",
+            "Summary",
+            "Start row of group",
+        ]
+        if include_confidence:
+            empty_reference_cols.insert(4, "Confidence")
+        new_reference_df = pd.DataFrame(columns=empty_reference_cols)
 
     # Ensure new_reference_df has all required columns
     required_cols = [
@@ -3019,6 +3174,8 @@ def write_llm_output_and_logs(
         "Summary",
         "Start row of group",
     ]
+    if include_confidence:
+        required_cols.insert(4, "Confidence")
     for col in required_cols:
         if col not in new_reference_df.columns:
             new_reference_df[col] = ""
@@ -3052,13 +3209,22 @@ def write_llm_output_and_logs(
         numeric_ids = pd.to_numeric(out_reference_df["Response ID"], errors="coerce")
         out_reference_df = out_reference_df.loc[numeric_ids.fillna(0) > 0].copy()
 
-    # Remove duplicate Response ID for the same topic
-    # Only if out_reference_df is not empty and has the required columns
+    assignment_keys = ["Response ID", "General topic", "Subtopic", "Sentiment"]
+    # Remove duplicate Response ID for the same topic. When confidence is on,
+    # keep the highest score.
     if not out_reference_df.empty and "Response ID" in out_reference_df.columns:
-        out_reference_df.drop_duplicates(
-            ["Response ID", "General topic", "Subtopic", "Sentiment"],
-            inplace=True,
-        )
+        if include_confidence and "Confidence" in out_reference_df.columns:
+            out_reference_df["_confidence_sort"] = out_reference_df["Confidence"].map(
+                parse_topic_confidence_value
+            )
+            out_reference_df.sort_values(
+                "_confidence_sort",
+                ascending=False,
+                na_position="last",
+                inplace=True,
+            )
+            out_reference_df.drop(columns=["_confidence_sort"], inplace=True)
+        out_reference_df.drop_duplicates(assignment_keys, inplace=True)
 
     # Try converting response references column to int, keep as string if fails
     if (
@@ -3087,9 +3253,7 @@ def write_llm_output_and_logs(
         )
 
     # Each topic should only be associated with each individual response once
-    out_reference_df.drop_duplicates(
-        ["Response ID", "General topic", "Subtopic", "Sentiment"], inplace=True
-    )
+    out_reference_df.drop_duplicates(assignment_keys, inplace=True)
     out_reference_df["Group"] = group_name
 
     # Save the new DataFrame to CSV
@@ -3290,6 +3454,7 @@ def process_batch_with_llm(
     api_url: str = None,
     sentiment_checkbox: str = "Negative, Neutral, or Positive",
     force_zero_shot_radio: str = "No",
+    include_topic_confidence_radio: str = "No",
 ):
     """Helper function to process a batch with LLM, handling the common logic between first and subsequent batches.
 
@@ -3532,6 +3697,7 @@ def process_batch_with_llm(
             output_folder=output_folder,
             sentiment_checkbox=sentiment_checkbox,
             force_zero_shot_radio=force_zero_shot_radio,
+            include_topic_confidence_radio=include_topic_confidence_radio,
         )
 
         # Check if output has unexpected column count (incomplete / malformed format)
@@ -3635,6 +3801,7 @@ def extract_topics(
     force_zero_shot_radio: str = "No",
     in_excel_sheets: List[str] = list(),
     force_single_topic_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
     output_folder: str = OUTPUT_FOLDER,
     force_single_topic_prompt: str = force_single_topic_prompt,
     group_name: str = "All",
@@ -4193,6 +4360,18 @@ def extract_topics(
                             ["Main heading", "Subheading"], ascending=[True, True]
                         )
 
+                    if app_config.SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS:
+                        topics_df_for_markdown = order_topics_for_batch_prompt(
+                            topics_df_for_markdown,
+                            shuffle=True,
+                            random_seed=random_seed + reported_batch_no,
+                        )
+                        if not topics_df_for_markdown.empty:
+                            print(
+                                f"Shuffling {len(topics_df_for_markdown)} suggested topics "
+                                f"for batch {reported_batch_no} prompt"
+                            )
+
                     # print("Number of topics:", topics_df_for_markdown.shape[0])
 
                     # Clean topic names before converting to markdown to ensure consistent formatting
@@ -4248,6 +4427,9 @@ def extract_topics(
                             topic_assignment=topic_assignment_prompt,
                             force_single_topic=force_single_topic_prompt,
                             sentiment_choices=sentiment_prompt,
+                            confidence_choices=_confidence_choices_prompt(
+                                include_topic_confidence_radio
+                            ),
                             response_reference_format=response_reference_format,
                             add_existing_topics_summary_format=additional_instructions_summary_format,
                             previous_table_introduction="",
@@ -4313,6 +4495,7 @@ def extract_topics(
                         api_url=api_url,
                         sentiment_checkbox=sentiment_checkbox,
                         force_zero_shot_radio=force_zero_shot_radio,
+                        include_topic_confidence_radio=include_topic_confidence_radio,
                     )
 
                     # print("Completed batch processing")
@@ -4405,6 +4588,9 @@ def extract_topics(
                             validate_prompt_prefix="",
                             response_table=response_table_prompt,
                             sentiment_choices=sentiment_prompt,
+                            confidence_choices=_confidence_choices_prompt(
+                                include_topic_confidence_radio
+                            ),
                             response_reference_format=response_reference_format,
                             add_existing_topics_summary_format=additional_instructions_summary_format,
                             previous_table_introduction="",
@@ -4474,6 +4660,7 @@ def extract_topics(
                         api_url=api_url,
                         sentiment_checkbox=sentiment_checkbox,
                         force_zero_shot_radio=force_zero_shot_radio,
+                        include_topic_confidence_radio=include_topic_confidence_radio,
                     )
 
                     all_prompts_content.append(current_prompt_content_logged)
@@ -4862,6 +5049,7 @@ def extract_topics(
                 produce_structured_summary_radio=produce_structured_summary_radio,
                 force_zero_shot_radio=force_zero_shot_radio,
                 force_single_topic_radio=force_single_topic_radio,
+                include_topic_confidence_radio=include_topic_confidence_radio,
                 context_textbox=context_textbox,
                 additional_instructions_summary_format=additional_instructions_summary_format,
                 additional_validation_issues_provided=additional_validation_issues_provided,
@@ -5125,6 +5313,7 @@ def wrapper_extract_topics_per_column_value(
     force_zero_shot_radio: str = "No",
     in_excel_sheets: List[str] = list(),
     force_single_topic_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
@@ -5391,6 +5580,7 @@ def wrapper_extract_topics_per_column_value(
                 force_zero_shot_radio=force_zero_shot_radio,
                 in_excel_sheets=in_excel_sheets,
                 force_single_topic_radio=force_single_topic_radio,
+                include_topic_confidence_radio=include_topic_confidence_radio,
                 output_folder=output_folder,
                 force_single_topic_prompt=force_single_topic_prompt,
                 group_name=group_value,
@@ -5817,6 +6007,7 @@ def discover_topics_from_sample(
     force_zero_shot_radio: str = "No",
     in_excel_sheets: List[str] = list(),
     force_single_topic_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
@@ -5946,6 +6137,7 @@ def discover_topics_from_sample(
         force_zero_shot_radio=force_zero_shot_radio,
         in_excel_sheets=in_excel_sheets,
         force_single_topic_radio=force_single_topic_radio,
+        include_topic_confidence_radio=include_topic_confidence_radio,
         produce_structured_summary_radio="No",
         aws_access_key_textbox=aws_access_key_textbox,
         aws_secret_key_textbox=aws_secret_key_textbox,
@@ -6077,6 +6269,7 @@ def discover_topics_from_sample_wrapper(
     force_zero_shot_radio: str = "No",
     in_excel_sheets: List[str] = list(),
     force_single_topic_radio: str = "No",
+    include_topic_confidence_radio: str = "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
     produce_structured_summary_radio: str = "No",
     aws_access_key_textbox: str = "",
     aws_secret_key_textbox: str = "",
@@ -6117,6 +6310,7 @@ def discover_topics_from_sample_wrapper(
         force_zero_shot_radio=force_zero_shot_radio,
         in_excel_sheets=in_excel_sheets,
         force_single_topic_radio=force_single_topic_radio,
+        include_topic_confidence_radio=include_topic_confidence_radio,
         produce_structured_summary_radio=produce_structured_summary_radio,
         aws_access_key_textbox=aws_access_key_textbox,
         aws_secret_key_textbox=aws_secret_key_textbox,
@@ -6373,6 +6567,7 @@ def all_in_one_pipeline(
     force_zero_shot_choice: str,
     in_excel_sheets: List[str],
     force_single_topic_choice: str,
+    include_topic_confidence_choice: str,
     produce_structures_summary_choice: str,
     aws_access_key_text: str,
     aws_secret_key_text: str,
@@ -6556,6 +6751,7 @@ def all_in_one_pipeline(
         force_zero_shot_radio=force_zero_shot_choice,
         in_excel_sheets=in_excel_sheets,
         force_single_topic_radio=force_single_topic_choice,
+        include_topic_confidence_radio=include_topic_confidence_choice,
         produce_structured_summary_radio=produce_structures_summary_choice,
         aws_access_key_textbox=aws_access_key_text,
         aws_secret_key_textbox=aws_secret_key_text,

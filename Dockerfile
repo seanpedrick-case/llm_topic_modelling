@@ -78,6 +78,9 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
 COPY --from=builder /install /usr/local/lib/python3.13/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
+# Small English model for optional Presidio/spaCy PII redaction (emails/phones/numbers)
+RUN python -m spacy download en_core_web_sm
+
 # Copy your application code and entrypoint
 COPY . ${APP_HOME}/app
 COPY entrypoint.sh ${APP_HOME}/app/entrypoint.sh
