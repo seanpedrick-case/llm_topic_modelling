@@ -272,5 +272,170 @@ class TestNoSentimentTableLayouts(unittest.TestCase):
         self.assertIn("2", out_df.loc[0, "Response ID"])
 
 
+class TestTopicConfidenceColumn(unittest.TestCase):
+    def test_named_six_column_table_maps_confidence(self):
+        df = pd.DataFrame(
+            {
+                "General topic": ["Housing"],
+                "Subtopic": ["Repairs"],
+                "Sentiment": ["Negative"],
+                "Response ID": ["1, 2"],
+                "Confidence": ["0.82"],
+                "Summary": ["Delayed repairs"],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df,
+            batch_size_number=5,
+            assess_sentiment=True,
+            include_confidence=True,
+        )
+
+        self.assertIn("Confidence", out.columns)
+        self.assertEqual(out.loc[0, "Confidence"], "0.82")
+        self.assertEqual(out.loc[0, "Response ID"], "1, 2")
+        self.assertEqual(out.loc[0, "Summary"], "Delayed repairs")
+
+    def test_unnamed_six_column_maps_confidence_before_summary(self):
+        df = pd.DataFrame(
+            [["Housing", "Repairs", "Negative", "3", "0.4", "Delayed repairs"]]
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df,
+            batch_size_number=5,
+            assess_sentiment=True,
+            include_confidence=True,
+        )
+
+        self.assertEqual(out.loc[0, "Response ID"], "3")
+        self.assertEqual(out.loc[0, "Confidence"], "0.4")
+        self.assertEqual(out.loc[0, "Summary"], "Delayed repairs")
+
+    def test_five_column_without_sentiment_maps_confidence(self):
+        df = pd.DataFrame(
+            {
+                "General topic": ["Housing"],
+                "Subtopic": ["Repairs"],
+                "Response ID": ["3, 4"],
+                "Confidence": ["80%"],
+                "Summary": ["Delayed repairs"],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df,
+            batch_size_number=5,
+            assess_sentiment=False,
+            include_confidence=True,
+        )
+
+        self.assertEqual(out.loc[0, "Response ID"], "3, 4")
+        self.assertEqual(out.loc[0, "Confidence"], "80%")
+        self.assertEqual(out.loc[0, "Summary"], "Delayed repairs")
+        self.assertEqual(out.loc[0, "Sentiment"], "Not assessed")
+
+    def test_missing_confidence_does_not_steal_summary(self):
+        df = pd.DataFrame(
+            {
+                "General topic": ["Transport"],
+                "Subtopic": ["Buses"],
+                "Sentiment": ["Negative"],
+                "Response ID": ["1"],
+                "Summary": ["Need more buses"],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df,
+            batch_size_number=5,
+            assess_sentiment=True,
+            include_confidence=True,
+        )
+
+        self.assertEqual(out.loc[0, "Summary"], "Need more buses")
+        self.assertEqual(out.loc[0, "Response ID"], "1")
+        self.assertEqual(out.loc[0, "Confidence"], "")
+
+    def test_response_ids_are_not_consumed_as_confidence(self):
+        df = pd.DataFrame([["Housing", "Repairs", "1, 2", "Delayed repairs"]])
+
+        out = _ensure_standard_topic_table_columns(
+            df,
+            batch_size_number=5,
+            assess_sentiment=False,
+            include_confidence=True,
+        )
+
+        self.assertEqual(out.loc[0, "Response ID"], "1, 2")
+        self.assertEqual(out.loc[0, "Summary"], "Delayed repairs")
+        self.assertEqual(out.loc[0, "Confidence"], "")
+
+    def test_without_flag_confidence_is_omitted(self):
+        df = pd.DataFrame(
+            {
+                "General topic": ["Housing"],
+                "Subtopic": ["Repairs"],
+                "Sentiment": ["Negative"],
+                "Response ID": ["1"],
+                "Confidence": ["0.9"],
+                "Summary": ["Delayed repairs"],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df, batch_size_number=5, include_confidence=False
+        )
+
+        self.assertEqual(list(out.columns), TOPIC_TABLE_EXPECTED_COLS)
+        self.assertNotIn("Confidence", out.columns)
+        self.assertEqual(out.loc[0, "Summary"], "Delayed repairs")
+
+    def test_reconstruct_includes_confidence_column(self):
+        reference_df = pd.DataFrame(
+            {
+                "General topic": ["Housing", "Housing"],
+                "Subtopic": ["Repairs", "Repairs"],
+                "Sentiment": ["Negative", "Negative"],
+                "Response ID": [1, 2],
+                "Confidence": [0.9, 0.4],
+                "Summary": ["Delayed repairs", "Delayed repairs"],
+            }
+        )
+
+        markdown, out_df = reconstruct_markdown_table_from_reference_df(
+            reference_df,
+            sentiment_checkbox="Negative or Positive",
+            include_topic_confidence_radio="Yes",
+        )
+
+        self.assertIn(
+            "| General topic | Subtopic | Sentiment | Response ID | Confidence | Summary |",
+            markdown,
+        )
+        self.assertEqual(len(out_df), 2)
+        self.assertIn("0.90", markdown)
+        self.assertIn("0.40", markdown)
+
+    def test_main_heading_alias_maps_to_general_topic(self):
+        df = pd.DataFrame(
+            {
+                "Main heading": ["Behaviour at school"],
+                "Subheading": ["Absences"],
+                "Summary": ["Alex had increasing absences."],
+            }
+        )
+
+        out = _ensure_standard_topic_table_columns(
+            df, batch_size_number=5, assess_sentiment=False
+        )
+
+        self.assertEqual(out.loc[0, "General topic"], "Behaviour at school")
+        self.assertEqual(out.loc[0, "Subtopic"], "Absences")
+        self.assertEqual(out.loc[0, "Summary"], "Alex had increasing absences.")
+        self.assertNotEqual(out.loc[0, "Sentiment"], "Alex had increasing absences.")
+
+
 if __name__ == "__main__":
     unittest.main()

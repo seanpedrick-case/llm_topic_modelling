@@ -2,7 +2,7 @@ import codecs
 import math
 import os
 import re
-from typing import Any, List
+from typing import Any, List, Optional
 
 import boto3
 import gradio as gr
@@ -14,6 +14,7 @@ from tools.config import (
     AWS_USER_POOL_ID,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
+    ENABLE_INPUT_REDACTION,
     INPUT_FOLDER,
     MAXIMUM_ALLOWED_TOPICS,
     OUTPUT_FOLDER,
@@ -267,6 +268,14 @@ def load_in_data_file(
         file_data = pd.DataFrame()
         file_name = ""
         num_batches = 1
+        return file_data, file_name, num_batches
+
+    if ENABLE_INPUT_REDACTION and file_data is not None and not file_data.empty:
+        from tools.data_redaction import redact_dataframe
+
+        text_cols = [col for col in in_colnames if col and col != "NA"]
+        file_data = redact_dataframe(file_data, columns=text_cols)
+        print(f"Applied PII redaction to input column(s): {', '.join(text_cols)}")
 
     return file_data, file_name, num_batches
 
@@ -568,6 +577,40 @@ def apply_forced_unassessed_general_topics(
     return out
 
 
+def parse_topic_confidence_value(value) -> Optional[float]:
+    """Parse an LLM confidence cell into a 0-1 float, or None if invalid."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if pd.isna(value):
+            return None
+        number = float(value)
+    else:
+        text = str(value).strip()
+        if not text or text.lower() in {"nan", "none", "na", "<na>", "nat"}:
+            return None
+        had_percent = "%" in text
+        text = text.replace("%", "").strip()
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            match = re.search(r"-?\d+(?:\.\d+)?", text)
+            if not match:
+                return None
+            number = float(match.group(0))
+        if had_percent and number > 1:
+            number = number / 100.0
+    if 1 < number <= 100:
+        number = number / 100.0
+    if number < 0:
+        return 0.0
+    if number > 1:
+        return 1.0
+    return number
+
+
 def _flatten_pivot_column_label(col) -> str:
     """Join MultiIndex pivot parts, omitting 'Not assessed' general topics/sentiment."""
     if isinstance(col, str):
@@ -579,7 +622,9 @@ def _flatten_pivot_column_label(col) -> str:
 
 
 def convert_reference_table_to_pivot_table(
-    df: pd.DataFrame, basic_response_data: pd.DataFrame = pd.DataFrame()
+    df: pd.DataFrame,
+    basic_response_data: pd.DataFrame = pd.DataFrame(),
+    include_confidence: bool | None = None,
 ):
     df = df.copy()
     if df.columns.duplicated().any():
@@ -587,30 +632,53 @@ def convert_reference_table_to_pivot_table(
     if "Sentiment" not in df.columns:
         df["Sentiment"] = "Not assessed"
 
-    df_in = df[["Response ID", "General topic", "Subtopic", "Sentiment"]].copy()
+    if include_confidence is None:
+        include_confidence = "Confidence" in df.columns
+
+    id_topic_cols = ["Response ID", "General topic", "Subtopic", "Sentiment"]
+    df_in = df[id_topic_cols].copy()
 
     # Convert to numeric first (handles float strings like '1.0'), then to int
     df_in["Response ID"] = pd.to_numeric(df_in["Response ID"], errors="coerce").astype(
         "Int64"
     )
 
-    # Create a combined category column
-    df_in["Category"] = (
-        df_in["General topic"] + " - " + df_in["Subtopic"] + " - " + df_in["Sentiment"]
-    )
+    if include_confidence:
+        if "Confidence" in df.columns:
+            parsed_confidence = df["Confidence"].map(parse_topic_confidence_value)
+        else:
+            parsed_confidence = pd.Series([None] * len(df), index=df.index)
+        df_in["Confidence"] = parsed_confidence
+        # Assigned rows with unparseable scores still need a pivot cell, so
+        # fill 1.0 only for the wide matrix. The long table keeps NaN.
+        df_in["Confidence"] = df_in["Confidence"].fillna(1.0)
 
-    # Create pivot table counting occurrences of each unique combination
-    pivot_table = pd.crosstab(
-        index=df_in["Response ID"],
-        columns=[df_in["General topic"], df_in["Subtopic"], df_in["Sentiment"]],
-        margins=True,
-    )
-
-    # Flatten column names, dropping placeholder 'Not assessed' general topics
-    # (and sentiment) so subtopic-only zero-shot headers are not all prefixed.
-    pivot_table.columns = [
-        _flatten_pivot_column_label(col) for col in pivot_table.columns
-    ]
+        pivot_table = pd.pivot_table(
+            df_in,
+            index="Response ID",
+            columns=["General topic", "Subtopic", "Sentiment"],
+            values="Confidence",
+            aggfunc="max",
+        )
+        pivot_table.columns = [
+            _flatten_pivot_column_label(col) for col in pivot_table.columns
+        ]
+        assignment_counts = (
+            df_in.dropna(subset=["Response ID"])
+            .groupby("Response ID")
+            .size()
+            .rename("All")
+        )
+        pivot_table = pivot_table.join(assignment_counts, how="left")
+    else:
+        pivot_table = pd.crosstab(
+            index=df_in["Response ID"],
+            columns=[df_in["General topic"], df_in["Subtopic"], df_in["Sentiment"]],
+            margins=True,
+        )
+        pivot_table.columns = [
+            _flatten_pivot_column_label(col) for col in pivot_table.columns
+        ]
 
     pivot_table.reset_index(inplace=True)
 
@@ -771,6 +839,35 @@ def create_topic_summary_df_from_reference_table(
         .reset_index()
     )
 
+    if "Confidence" in reference_df.columns:
+        confidence_numeric = reference_df.copy()
+        # Force float dtype so all-missing scores aggregate to NaN (not object)
+        # and .round() does not raise TypeError.
+        confidence_numeric["Confidence"] = pd.to_numeric(
+            confidence_numeric["Confidence"].map(parse_topic_confidence_value),
+            errors="coerce",
+        )
+        confidence_stats = (
+            confidence_numeric.groupby(groupby_cols)["Confidence"]
+            .agg(["mean", "min"])
+            .reset_index()
+            .rename(
+                columns={
+                    "mean": "Mean confidence",
+                    "min": "Min confidence",
+                }
+            )
+        )
+        out_topic_summary_df = out_topic_summary_df.merge(
+            confidence_stats, on=groupby_cols, how="left"
+        )
+        out_topic_summary_df["Mean confidence"] = pd.to_numeric(
+            out_topic_summary_df["Mean confidence"], errors="coerce"
+        ).round(2)
+        out_topic_summary_df["Min confidence"] = pd.to_numeric(
+            out_topic_summary_df["Min confidence"], errors="coerce"
+        ).round(2)
+
     # Calculate number of responses from the Response ID string
     # (count comma-separated values)
     def count_responses(ref_str):
@@ -813,6 +910,25 @@ def create_topic_summary_df_from_reference_table(
     out_topic_summary_df.drop(
         ["1", "2", "3", "Response ID"], axis=1, errors="ignore", inplace=True
     )
+
+    preferred_cols = [
+        "General topic",
+        "Subtopic",
+        "Sentiment",
+        "Group",
+        "Number of responses",
+        "Mean confidence",
+        "Min confidence",
+        "Summary",
+        "Topic number",
+    ]
+    existing_preferred = [
+        col for col in preferred_cols if col in out_topic_summary_df.columns
+    ]
+    remaining_cols = [
+        col for col in out_topic_summary_df.columns if col not in existing_preferred
+    ]
+    out_topic_summary_df = out_topic_summary_df[existing_preferred + remaining_cols]
 
     return out_topic_summary_df
 
@@ -1312,29 +1428,42 @@ def create_batch_file_path_details(
         str: Formatted batch file path detail string
     """
 
-    # Extract components from filename using regex
+    # Extract components with linear string ops (avoid ReDoS-prone regex backtracking)
+    cut_at = None
+    for marker in ("_all_", "_final_", "_batch_", "_col_"):
+        idx = reference_data_file_name.find(marker)
+        if idx != -1 and (cut_at is None or idx < cut_at):
+            cut_at = idx
     file_name = (
-        re.search(
-            r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name
-        ).group(1)
-        if re.search(r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name)
+        reference_data_file_name[:cut_at]
+        if cut_at is not None
         else reference_data_file_name
     )
-    latest_batch_completed = (
-        int(re.search(r"batch_(\d+)_", reference_data_file_name).group(1))
-        if "batch_" in reference_data_file_name
-        else latest_batch_completed
-    )
-    batch_size_number = (
-        int(re.search(r"size_(\d+)_", reference_data_file_name).group(1))
-        if "size_" in reference_data_file_name
-        else batch_size_number
-    )
-    in_column = (
-        re.search(r"col_(.*?)_reference", reference_data_file_name).group(1)
-        if "col_" in reference_data_file_name
-        else in_column
-    )
+
+    batch_idx = reference_data_file_name.find("batch_")
+    if batch_idx != -1:
+        after_batch = reference_data_file_name[batch_idx + len("batch_") :]
+        digit_end = 0
+        while digit_end < len(after_batch) and after_batch[digit_end].isdigit():
+            digit_end += 1
+        if digit_end and after_batch[digit_end : digit_end + 1] == "_":
+            latest_batch_completed = int(after_batch[:digit_end])
+
+    size_idx = reference_data_file_name.find("size_")
+    if size_idx != -1:
+        after_size = reference_data_file_name[size_idx + len("size_") :]
+        digit_end = 0
+        while digit_end < len(after_size) and after_size[digit_end].isdigit():
+            digit_end += 1
+        if digit_end and after_size[digit_end : digit_end + 1] == "_":
+            batch_size_number = int(after_size[:digit_end])
+
+    col_idx = reference_data_file_name.find("col_")
+    if col_idx != -1:
+        after_col = reference_data_file_name[col_idx + len("col_") :]
+        ref_idx = after_col.find("_reference")
+        if ref_idx != -1:
+            in_column = after_col[:ref_idx]
 
     # Clean the extracted names
     file_name_cleaned = clean_column_name(file_name, max_length=20)
@@ -1384,6 +1513,21 @@ def effective_force_zero_shot_radio(
         "Ignoring force zero-shot: no initial candidate topics file/list was submitted."
     )
     return "No"
+
+
+def order_topics_for_batch_prompt(
+    topics_df: pd.DataFrame,
+    shuffle: bool = False,
+    random_seed: Optional[int] = None,
+) -> pd.DataFrame:
+    """Return the topics table in the order it should appear in an LLM batch prompt.
+
+    Call this after deduplication. When shuffle is True, rows are randomly reordered
+    (reproducibly if random_seed is set). When False, the dataframe is unchanged.
+    """
+    if topics_df is None or topics_df.empty or not shuffle:
+        return topics_df
+    return topics_df.sample(frac=1, random_state=random_seed).reset_index(drop=True)
 
 
 def generate_zero_shot_topics_df(
@@ -1733,6 +1877,368 @@ def write_topic_discovery_manifest_csv(
     )
     manifest_df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"Topic discovery manifest saved as '{output_path}'")
+    return output_path
+
+
+PIVOT_SHEET_NAME = "Topic response pivot table"
+_PIVOT_RESPONSE_COL_ALIASES = (
+    "response",
+    "response text",
+    "response_text",
+    "comment",
+    "comments",
+    "open text",
+    "open_text",
+)
+_PIVOT_ID_COL_ALIASES = (
+    "original response id",
+    "response id",
+    "original_response_id",
+    "response_id",
+)
+_PIVOT_RESERVED_COLS = {"all"}
+
+
+def resolve_uploaded_file_path(file_obj: Any) -> str:
+    """Resolve a Gradio File / FileData / path string to a filesystem path."""
+    if file_obj is None:
+        raise ValueError("No file uploaded.")
+    if isinstance(file_obj, (list, tuple)):
+        if not file_obj:
+            raise ValueError("No file uploaded.")
+        return resolve_uploaded_file_path(file_obj[0])
+    if isinstance(file_obj, str):
+        path = file_obj.strip().strip("'\"")
+        if not path:
+            raise ValueError("No file uploaded.")
+        return path
+    path = getattr(file_obj, "name", None)
+    if path:
+        return str(path)
+    raise ValueError("Could not resolve uploaded file path.")
+
+
+def resolve_under_allowed_root(
+    candidate_path: str,
+    allowed_root: str = OUTPUT_FOLDER,
+) -> str:
+    """
+    Resolve candidate_path and ensure it stays under allowed_root.
+
+    Returns a path rebuilt from allowed_root plus basename-sanitized relative
+    segments (never the raw user string), so callers can use the result in
+    path expressions without CodeQL path-injection taint.
+
+    Raises ValueError if the path escapes the allowlisted root (path traversal).
+    """
+    if candidate_path is None or not str(candidate_path).strip():
+        raise ValueError("Path is empty.")
+    if allowed_root is None or not str(allowed_root).strip():
+        raise ValueError("Allowed root is empty.")
+
+    safe_root = os.path.realpath(os.path.abspath(str(allowed_root)))
+    resolved_path = os.path.realpath(os.path.abspath(str(candidate_path).strip()))
+    try:
+        common = os.path.commonpath([safe_root, resolved_path])
+    except ValueError as exc:
+        # Different drives on Windows, or otherwise incomparable paths.
+        raise ValueError(
+            f"Path '{candidate_path}' is outside allowed output folder"
+        ) from exc
+    if common != safe_root:
+        raise ValueError(f"Path '{candidate_path}' is outside allowed output folder")
+
+    rel = os.path.relpath(resolved_path, safe_root)
+    if rel in (os.curdir, ""):
+        return safe_root
+
+    safe_parts: List[str] = []
+    for part in rel.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ValueError(
+                f"Path '{candidate_path}' is outside allowed output folder"
+            )
+        # basename is the CodeQL-recognized sanitizer for path segments
+        safe_part = os.path.basename(part)
+        if not safe_part or safe_part in {".", ".."}:
+            raise ValueError(
+                f"Path '{candidate_path}' is outside allowed output folder"
+            )
+        safe_parts.append(safe_part)
+
+    rebuilt = os.path.join(safe_root, *safe_parts) if safe_parts else safe_root
+    rebuilt_real = os.path.realpath(rebuilt)
+    try:
+        if os.path.commonpath([safe_root, rebuilt_real]) != safe_root:
+            raise ValueError(
+                f"Path '{candidate_path}' is outside allowed output folder"
+            )
+    except ValueError as exc:
+        raise ValueError(
+            f"Path '{candidate_path}' is outside allowed output folder"
+        ) from exc
+    return rebuilt
+
+
+def ensure_safe_output_folder(
+    output_folder: Optional[str] = None,
+    allowed_root: str = OUTPUT_FOLDER,
+) -> str:
+    """
+    Validate output_folder is under allowed_root, create it, and return the real path.
+
+    Empty/None output_folder falls back to allowed_root. Used to harden Gradio
+    handlers where a client-supplied folder path must not escape the output tree.
+    """
+    candidate = (
+        str(allowed_root)
+        if output_folder is None or not str(output_folder).strip()
+        else str(output_folder).strip()
+    )
+    safe_folder = resolve_under_allowed_root(candidate, allowed_root=allowed_root)
+    os.makedirs(safe_folder, exist_ok=True)
+    return safe_folder
+
+
+def safe_output_file_path(
+    output_folder: Optional[str],
+    file_name: str,
+    allowed_root: str = OUTPUT_FOLDER,
+) -> str:
+    """
+    Build an output file path under allowed_root using only the basename of file_name.
+    """
+    safe_folder = ensure_safe_output_folder(output_folder, allowed_root=allowed_root)
+    safe_name = os.path.basename(str(file_name or "").strip())
+    safe_name = re.sub(r"[\\/]+", "_", safe_name).strip("._") or "output"
+    return os.path.join(safe_folder, safe_name)
+
+
+def _normalise_header_key(name: object) -> str:
+    return str(name).strip().lower().replace("_", " ")
+
+
+def identify_pivot_response_column(columns: List[str]) -> str:
+    """Return the response text column name from a pivot table."""
+    normalised = {_normalise_header_key(col): col for col in columns}
+    for alias in _PIVOT_RESPONSE_COL_ALIASES:
+        if alias in normalised:
+            return normalised[alias]
+    raise ValueError(
+        "Could not find a response text column in the pivot table. "
+        "Expected a column named 'Response' (or similar)."
+    )
+
+
+def identify_pivot_id_column(columns: List[str]) -> Optional[str]:
+    """Return an ID column name from a pivot table if present."""
+    normalised = {_normalise_header_key(col): col for col in columns}
+    for alias in _PIVOT_ID_COL_ALIASES:
+        if alias in normalised:
+            return normalised[alias]
+    return None
+
+
+def identify_pivot_topic_columns(
+    columns: List[str],
+    response_col: str,
+    id_col: Optional[str] = None,
+) -> List[str]:
+    """Return topic assignment columns from a pivot table."""
+    reserved = set(_PIVOT_RESERVED_COLS)
+    reserved.add(_normalise_header_key(response_col))
+    if id_col:
+        reserved.add(_normalise_header_key(id_col))
+    topic_cols = [col for col in columns if _normalise_header_key(col) not in reserved]
+    if not topic_cols:
+        raise ValueError("No topic columns found in the pivot table.")
+    return topic_cols
+
+
+def load_topic_response_pivot(
+    file_path: str,
+) -> tuple[pd.DataFrame, List[str], str, Optional[str]]:
+    """
+    Load a Topic response pivot table from CSV or XLSX.
+
+    Prefers the sheet named 'Topic response pivot table' when present in an Excel file.
+
+    Returns:
+        pivot_df, topic_columns, response_column, id_column (or None)
+    """
+    path = resolve_uploaded_file_path(file_path)
+    file_type = detect_file_type(path)
+
+    if file_type == "xlsx":
+        excel = pd.ExcelFile(path)
+        try:
+            if PIVOT_SHEET_NAME in excel.sheet_names:
+                pivot_df = pd.read_excel(excel, sheet_name=PIVOT_SHEET_NAME)
+            else:
+                pivot_df = pd.read_excel(excel, sheet_name=excel.sheet_names[0])
+        finally:
+            excel.close()
+    elif file_type == "csv":
+        pivot_df = read_file(path)
+    else:
+        raise ValueError(
+            f"Unsupported file type for pivot upload: {file_type}. Use CSV or XLSX."
+        )
+
+    if pivot_df is None or pivot_df.empty:
+        raise ValueError("Pivot table is empty.")
+
+    columns = [str(col) for col in pivot_df.columns]
+    pivot_df = pivot_df.copy()
+    pivot_df.columns = columns
+
+    response_col = identify_pivot_response_column(columns)
+    id_col = identify_pivot_id_column(columns)
+    topic_cols = identify_pivot_topic_columns(columns, response_col, id_col)
+    return pivot_df, topic_cols, response_col, id_col
+
+
+def responses_assigned_to_topic_mask(series: pd.Series) -> pd.Series:
+    """True where a pivot cell indicates the topic was assigned (score > 0)."""
+    numeric = pd.to_numeric(series, errors="coerce").fillna(0)
+    return numeric > 0
+
+
+def sample_responses_for_topic(
+    pivot_df: pd.DataFrame,
+    topic_column: str,
+    response_column: str,
+    sample_size: int = 12,
+    random_seed: int = 42,
+    id_column: Optional[str] = None,
+    max_response_chars: int = 1500,
+) -> tuple[pd.DataFrame, int]:
+    """
+    Sample responses assigned to a topic column in a pivot table.
+
+    Returns:
+        sample_df with columns Response ID and Response, and total assigned count.
+    """
+    if topic_column not in pivot_df.columns:
+        raise ValueError(f"Topic column not found in pivot table: {topic_column}")
+    if response_column not in pivot_df.columns:
+        raise ValueError(f"Response column not found in pivot table: {response_column}")
+
+    try:
+        sample_size = int(sample_size)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"sample_size must be a positive integer, got {sample_size!r}"
+        ) from exc
+    if sample_size < 1:
+        raise ValueError(f"sample_size must be >= 1, got {sample_size}")
+
+    assigned_mask = responses_assigned_to_topic_mask(pivot_df[topic_column])
+    assigned_df = pivot_df.loc[assigned_mask].copy()
+    assigned_count = len(assigned_df)
+    if assigned_count == 0:
+        return pd.DataFrame(columns=["Response ID", "Response"]), 0
+
+    n_sample = min(sample_size, assigned_count)
+    sampled = assigned_df.sample(n=n_sample, random_state=int(random_seed))
+
+    out = pd.DataFrame()
+    if id_column and id_column in sampled.columns:
+        out["Response ID"] = sampled[id_column].astype(str)
+    else:
+        out["Response ID"] = (sampled.index.astype(int) + 1).astype(str)
+
+    responses = sampled[response_column].astype(str).fillna("")
+    responses = responses.str.replace(r"[\x00-\x1F\x7F]", " ", regex=True)
+    responses = responses.str.replace(r"\s+", " ", regex=True).str.strip()
+    if max_response_chars and max_response_chars > 0:
+        responses = responses.str.slice(0, int(max_response_chars))
+    out["Response"] = responses.values
+
+    out = out.loc[
+        ~out["Response"].isin(["", "None", "nan", "NaN"]) & out["Response"].notna()
+    ].reset_index(drop=True)
+    return out, assigned_count
+
+
+def create_candidate_topics_df_from_improved_names(
+    review_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Build a General topic / Subtopic candidate CSV frame from an improve-names review table.
+
+    Accepted rows use suggested names. Rejected rows keep the current topic name as Subtopic.
+    """
+    if review_df is None or review_df.empty:
+        return pd.DataFrame(columns=["General topic", "Subtopic"])
+
+    df = review_df.copy()
+    col_map = {_normalise_header_key(c): c for c in df.columns}
+
+    def _col(*aliases: str) -> Optional[str]:
+        for alias in aliases:
+            if alias in col_map:
+                return col_map[alias]
+        return None
+
+    current_col = _col("current topic", "current topic name")
+    general_col = _col("suggested general topic", "general topic")
+    subtopic_col = _col("suggested subtopic", "subtopic")
+    accept_col = _col("accept")
+
+    if current_col is None or subtopic_col is None:
+        raise ValueError(
+            "Review table must include 'Current topic' and 'Suggested Subtopic' columns."
+        )
+
+    rows = []
+    for _, row in df.iterrows():
+        current_name = str(row.get(current_col, "") or "").strip()
+        suggested_general = (
+            str(row.get(general_col, "") or "").strip() if general_col else ""
+        )
+        suggested_subtopic = str(row.get(subtopic_col, "") or "").strip()
+
+        accept_raw = row.get(accept_col, "Yes") if accept_col else "Yes"
+        if isinstance(accept_raw, bool):
+            accepted = accept_raw
+        else:
+            accepted = str(accept_raw).strip().lower() in {
+                "yes",
+                "y",
+                "true",
+                "1",
+                "accept",
+            }
+
+        if accepted:
+            general = suggested_general
+            subtopic = suggested_subtopic or current_name
+        else:
+            general = ""
+            subtopic = current_name
+
+        if not subtopic:
+            continue
+        rows.append({"General topic": general, "Subtopic": subtopic})
+
+    out_df = pd.DataFrame(rows, columns=["General topic", "Subtopic"])
+    if out_df.empty:
+        return out_df
+    out_df = out_df.drop_duplicates(subset=["General topic", "Subtopic"], keep="first")
+    out_df = out_df.sort_values(["General topic", "Subtopic"], ascending=[True, True])
+    return out_df.reset_index(drop=True)
+
+
+def write_improved_topics_csv(review_df: pd.DataFrame, output_path: str) -> str:
+    """Write accepted/rejected improve-names review rows to a suggested-topics CSV."""
+    topics_df = create_candidate_topics_df_from_improved_names(review_df)
+    if topics_df.empty:
+        return ""
+    topics_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"Improved suggested topics CSV saved as '{output_path}'")
     return output_path
 
 

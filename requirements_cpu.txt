@@ -15,5 +15,8 @@ html5lib<=1.1
 beautifulsoup4<=4.14.3
 rapidfuzz<=3.14.5
 python-dotenv<=1.2.3
+presidio_analyzer<=2.2.364
+presidio_anonymizer<=2.2.364
+spacy<=3.8.16
 torch<=2.14.0 --extra-index-url https://download.pytorch.org/whl/cpu
 llama-cpp-python>=0.3.35 -C cmake.args="-DGGML_BLAS=ON;-DGGML_BLAS_VENDOR=OpenBLAS"

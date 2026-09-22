@@ -12,6 +12,7 @@ from tools.helper_functions import (
     effective_force_zero_shot_radio,
     generate_zero_shot_topics_df,
     has_submitted_candidate_topics,
+    order_topics_for_batch_prompt,
 )
 
 
@@ -95,6 +96,45 @@ class TestForcedUnassessedGeneralTopics(unittest.TestCase):
         )
         out = apply_forced_unassessed_general_topics(df, "No")
         self.assertEqual(out["General topic"].tolist(), ["Accessibility", "Cost"])
+
+
+class TestOrderTopicsForBatchPrompt(unittest.TestCase):
+    def setUp(self):
+        self.topics = pd.DataFrame(
+            {
+                "General topic": [f"Topic {i}" for i in range(12)],
+                "Subtopic": [f"Subtopic {i}" for i in range(12)],
+            }
+        )
+
+    def test_shuffle_false_leaves_order_unchanged(self):
+        out = order_topics_for_batch_prompt(self.topics, shuffle=False)
+        pd.testing.assert_frame_equal(out, self.topics)
+
+    def test_shuffle_is_reproducible_with_seed(self):
+        first = order_topics_for_batch_prompt(self.topics, shuffle=True, random_seed=42)
+        second = order_topics_for_batch_prompt(
+            self.topics, shuffle=True, random_seed=42
+        )
+        pd.testing.assert_frame_equal(first, second)
+        self.assertEqual(
+            sorted(first["Subtopic"].tolist()),
+            sorted(self.topics["Subtopic"].tolist()),
+        )
+
+    def test_different_seeds_can_change_order(self):
+        first = order_topics_for_batch_prompt(self.topics, shuffle=True, random_seed=1)
+        second = order_topics_for_batch_prompt(self.topics, shuffle=True, random_seed=2)
+        self.assertEqual(
+            sorted(first["Subtopic"].tolist()),
+            sorted(second["Subtopic"].tolist()),
+        )
+        self.assertFalse(first["Subtopic"].tolist() == second["Subtopic"].tolist())
+
+    def test_empty_dataframe_is_returned_unchanged(self):
+        empty = pd.DataFrame(columns=["General topic", "Subtopic"])
+        out = order_topics_for_batch_prompt(empty, shuffle=True, random_seed=42)
+        self.assertTrue(out.empty)
 
 
 class TestWriteLlmOutputForcesUnassessedGeneralTopic(unittest.TestCase):

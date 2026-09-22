@@ -3,9 +3,62 @@ Functions for viewing and filtering JSON log files containing LLM prompts and re
 """
 
 import json
+import os
 from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
+
+from tools.config import GRADIO_TEMP_DIR, INPUT_FOLDER, OUTPUT_FOLDER
+from tools.helper_functions import resolve_uploaded_file_path
+
+# Uploads land under GRADIO_TEMP_DIR; saved logs under OUTPUT_FOLDER / INPUT_FOLDER.
+_LOG_VIEWER_ALLOWED_ROOTS = (OUTPUT_FOLDER, INPUT_FOLDER, GRADIO_TEMP_DIR)
+
+
+def _find_allowlisted_log_file(file_path: str) -> str:
+    """
+    Locate a JSON log under an allowlisted root.
+
+    Rebuilds the open() path from trusted roots + os.path.basename only (via
+    os.walk), so the raw caller/Gradio path string is never used in path
+    expressions (CodeQL path-injection).
+    """
+    if not file_path or not str(file_path).strip():
+        raise ValueError("Path is empty.")
+
+    safe_name = os.path.basename(str(file_path).strip())
+    if not safe_name or safe_name in {".", ".."}:
+        raise ValueError("Path is empty.")
+    if not safe_name.lower().endswith(".json"):
+        raise ValueError("Only JSON log files are supported.")
+
+    for root in _LOG_VIEWER_ALLOWED_ROOTS:
+        if not root:
+            continue
+        try:
+            root_real = os.path.realpath(os.path.abspath(str(root)))
+        except OSError:
+            continue
+
+        try:
+            for dirpath, _dirnames, filenames in os.walk(root_real):
+                if safe_name not in filenames:
+                    continue
+                candidate = os.path.join(dirpath, safe_name)
+                try:
+                    candidate_real = os.path.realpath(candidate)
+                    if os.path.commonpath([root_real, candidate_real]) != root_real:
+                        continue
+                except (OSError, ValueError):
+                    continue
+                if os.path.isfile(candidate):
+                    return candidate
+        except OSError:
+            continue
+
+    raise ValueError(
+        f"Log file '{safe_name}' was not found under allowed directories for log viewing"
+    )
 
 
 def load_log_file_handler(log_file):
@@ -22,8 +75,20 @@ def load_log_file_handler(log_file):
             "### Response\n\nNo file uploaded.",  # log_response_markdown
         )
 
-    file_path = log_file.name if hasattr(log_file, "name") else log_file
-    log_data = load_log_file(file_path)
+    try:
+        file_path = resolve_uploaded_file_path(log_file)
+        log_data = load_log_file(file_path)
+    except ValueError as e:
+        return (
+            [],
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            f"### Prompt\n\nError: {e}",
+            f"### Response\n\nError: {e}",
+        )
 
     if not log_data:
         return (
@@ -130,10 +195,11 @@ def load_log_file(file_path: str) -> List[Dict]:
         List of dictionaries containing log entries
     """
     try:
-        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+        safe_path = _find_allowlisted_log_file(file_path)
+        with open(safe_path, "r", encoding="utf-8-sig", errors="replace") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, Exception) as e:
         print(f"Error loading log file: {e}")
         return []
 
