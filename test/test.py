@@ -514,7 +514,6 @@ def run_app_direct_mode(
     if input_file:
         # Use pipe separator to handle file paths with spaces
         env["DIRECT_MODE_INPUT_FILE"] = input_abs_path
-    env["DIRECT_MODE_OUTPUT_DIR"] = output_root
     if text_column:
         env["DIRECT_MODE_TEXT_COLUMN"] = text_column
     if previous_output_files:
