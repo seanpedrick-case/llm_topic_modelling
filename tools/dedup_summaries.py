@@ -62,6 +62,7 @@ from tools.helper_functions import (
     normalize_topic_name_for_llm,
     parse_topic_confidence_value,
     read_file,
+    safe_output_file_path,
     wrap_text,
 )
 from tools.llm_funcs import (
@@ -2862,41 +2863,53 @@ def process_debug_output_iteration(
 
     if output_debug_files == "True":
         try:
-            formatted_prompt_output_path = (
-                output_folder
-                + batch_file_path_details
-                + "_full_prompt_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            formatted_prompt_output_path = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_full_prompt_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
-            final_table_output_path = (
-                output_folder
-                + batch_file_path_details
-                + "_full_response_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            final_table_output_path = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_full_response_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
-            whole_conversation_path = (
-                output_folder
-                + batch_file_path_details
-                + "_full_conversation_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            whole_conversation_path = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_full_conversation_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
-            whole_conversation_path_meta = (
-                output_folder
-                + batch_file_path_details
-                + "_metadata_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            whole_conversation_path_meta = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_metadata_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
 
             with open(

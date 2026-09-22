@@ -8,17 +8,24 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from tools.config import OUTPUT_FOLDER
 from tools.helper_functions import (
     create_candidate_topics_df_from_improved_names,
+    ensure_safe_output_folder,
     identify_pivot_id_column,
     identify_pivot_response_column,
     identify_pivot_topic_columns,
     load_topic_response_pivot,
+    resolve_under_allowed_root,
     responses_assigned_to_topic_mask,
+    safe_output_file_path,
     sample_responses_for_topic,
     write_improved_topics_csv,
 )
-from tools.llm_api_call import _parse_improve_topic_name_response
+from tools.llm_api_call import (
+    _parse_improve_topic_name_response,
+    save_improved_topics_csv,
+)
 
 
 class TestPivotColumnDetection(unittest.TestCase):
@@ -192,6 +199,72 @@ class TestParseImproveTopicNameResponse(unittest.TestCase):
             self.assertEqual(general, "Transport")
             self.assertEqual(subtopic, "Parking Congestion")
             self.assertIn("cars", rationale.lower())
+
+
+class TestSafeOutputPaths(unittest.TestCase):
+    def test_resolve_rejects_path_traversal(self):
+        with self.assertRaises(ValueError):
+            resolve_under_allowed_root(
+                os.path.join(OUTPUT_FOLDER, "..", "secrets.txt"),
+                allowed_root=OUTPUT_FOLDER,
+            )
+
+    def test_ensure_safe_output_folder_allows_session_subdir(self):
+        session_dir = os.path.join(OUTPUT_FOLDER, "test_session_safe_path")
+        try:
+            resolved = ensure_safe_output_folder(
+                session_dir, allowed_root=OUTPUT_FOLDER
+            )
+            self.assertTrue(os.path.isdir(resolved))
+            self.assertEqual(
+                os.path.commonpath(
+                    [
+                        os.path.realpath(OUTPUT_FOLDER),
+                        resolved,
+                    ]
+                ),
+                os.path.realpath(OUTPUT_FOLDER),
+            )
+        finally:
+            if os.path.isdir(session_dir):
+                try:
+                    os.rmdir(session_dir)
+                except OSError:
+                    pass
+
+    def test_safe_output_file_path_strips_directory_from_name(self):
+        path = safe_output_file_path(
+            OUTPUT_FOLDER,
+            os.path.join("..", "evil", "topics.csv"),
+            allowed_root=OUTPUT_FOLDER,
+        )
+        self.assertEqual(os.path.basename(path), "topics.csv")
+        self.assertEqual(
+            os.path.commonpath([os.path.realpath(OUTPUT_FOLDER), path]),
+            os.path.realpath(OUTPUT_FOLDER),
+        )
+
+    def test_save_improved_topics_csv_rejects_escape(self):
+        review_df = pd.DataFrame(
+            [
+                {
+                    "Current topic": "Park",
+                    "Suggested General topic": "Transport",
+                    "Suggested Subtopic": "Parking",
+                    "Rationale": "x",
+                    "Sample size": 1,
+                    "Accept": "Yes",
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as outside:
+            written, message = save_improved_topics_csv(
+                review_df,
+                pivot_file=None,
+                output_folder=outside,
+            )
+            self.assertIsNone(written)
+            self.assertIn("outside allowed output folder", message.lower())
 
 
 if __name__ == "__main__":

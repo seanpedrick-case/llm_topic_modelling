@@ -1428,29 +1428,42 @@ def create_batch_file_path_details(
         str: Formatted batch file path detail string
     """
 
-    # Extract components from filename using regex
+    # Extract components with linear string ops (avoid ReDoS-prone regex backtracking)
+    cut_at = None
+    for marker in ("_all_", "_final_", "_batch_", "_col_"):
+        idx = reference_data_file_name.find(marker)
+        if idx != -1 and (cut_at is None or idx < cut_at):
+            cut_at = idx
     file_name = (
-        re.search(
-            r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name
-        ).group(1)
-        if re.search(r"(.*?)(?:_all_|_final_|_batch_|_col_)", reference_data_file_name)
+        reference_data_file_name[:cut_at]
+        if cut_at is not None
         else reference_data_file_name
     )
-    latest_batch_completed = (
-        int(re.search(r"batch_(\d+)_", reference_data_file_name).group(1))
-        if "batch_" in reference_data_file_name
-        else latest_batch_completed
-    )
-    batch_size_number = (
-        int(re.search(r"size_(\d+)_", reference_data_file_name).group(1))
-        if "size_" in reference_data_file_name
-        else batch_size_number
-    )
-    in_column = (
-        re.search(r"col_(.*?)_reference", reference_data_file_name).group(1)
-        if "col_" in reference_data_file_name
-        else in_column
-    )
+
+    batch_idx = reference_data_file_name.find("batch_")
+    if batch_idx != -1:
+        after_batch = reference_data_file_name[batch_idx + len("batch_") :]
+        digit_end = 0
+        while digit_end < len(after_batch) and after_batch[digit_end].isdigit():
+            digit_end += 1
+        if digit_end and after_batch[digit_end : digit_end + 1] == "_":
+            latest_batch_completed = int(after_batch[:digit_end])
+
+    size_idx = reference_data_file_name.find("size_")
+    if size_idx != -1:
+        after_size = reference_data_file_name[size_idx + len("size_") :]
+        digit_end = 0
+        while digit_end < len(after_size) and after_size[digit_end].isdigit():
+            digit_end += 1
+        if digit_end and after_size[digit_end : digit_end + 1] == "_":
+            batch_size_number = int(after_size[:digit_end])
+
+    col_idx = reference_data_file_name.find("col_")
+    if col_idx != -1:
+        after_col = reference_data_file_name[col_idx + len("col_") :]
+        ref_idx = after_col.find("_reference")
+        if ref_idx != -1:
+            in_column = after_col[:ref_idx]
 
     # Clean the extracted names
     file_name_cleaned = clean_column_name(file_name, max_length=20)
@@ -1903,6 +1916,71 @@ def resolve_uploaded_file_path(file_obj: Any) -> str:
     if path:
         return str(path)
     raise ValueError("Could not resolve uploaded file path.")
+
+
+def resolve_under_allowed_root(
+    candidate_path: str,
+    allowed_root: str = OUTPUT_FOLDER,
+) -> str:
+    """
+    Resolve candidate_path and ensure it stays under allowed_root.
+
+    Raises ValueError if the path escapes the allowlisted root (path traversal).
+    """
+    if candidate_path is None or not str(candidate_path).strip():
+        raise ValueError("Path is empty.")
+    if allowed_root is None or not str(allowed_root).strip():
+        raise ValueError("Allowed root is empty.")
+
+    safe_root = os.path.realpath(os.path.abspath(str(allowed_root)))
+    resolved_path = os.path.realpath(os.path.abspath(str(candidate_path).strip()))
+    try:
+        common = os.path.commonpath([safe_root, resolved_path])
+    except ValueError as exc:
+        # Different drives on Windows, or otherwise incomparable paths.
+        raise ValueError(
+            f"Path '{candidate_path}' is outside allowed output folder"
+        ) from exc
+    if common != safe_root:
+        raise ValueError(f"Path '{candidate_path}' is outside allowed output folder")
+    return resolved_path
+
+
+def ensure_safe_output_folder(
+    output_folder: Optional[str] = None,
+    allowed_root: str = OUTPUT_FOLDER,
+) -> str:
+    """
+    Validate output_folder is under allowed_root, create it, and return the real path.
+
+    Empty/None output_folder falls back to allowed_root. Used to harden Gradio
+    handlers where a client-supplied folder path must not escape the output tree.
+    """
+    candidate = (
+        str(allowed_root)
+        if output_folder is None or not str(output_folder).strip()
+        else str(output_folder).strip()
+    )
+    safe_folder = resolve_under_allowed_root(candidate, allowed_root=allowed_root)
+    os.makedirs(safe_folder, exist_ok=True)
+    return resolve_under_allowed_root(safe_folder, allowed_root=allowed_root)
+
+
+def safe_output_file_path(
+    output_folder: Optional[str],
+    file_name: str,
+    allowed_root: str = OUTPUT_FOLDER,
+) -> str:
+    """
+    Build an output file path under allowed_root using only the basename of file_name.
+    """
+    safe_folder = ensure_safe_output_folder(output_folder, allowed_root=allowed_root)
+    safe_name = os.path.basename(str(file_name or "").strip())
+    safe_name = re.sub(r"[\\/]+", "_", safe_name).strip("._") or "output"
+    return resolve_under_allowed_root(
+        os.path.join(safe_folder, safe_name),
+        allowed_root=allowed_root,
+    )
 
 
 def _normalise_header_key(name: object) -> str:

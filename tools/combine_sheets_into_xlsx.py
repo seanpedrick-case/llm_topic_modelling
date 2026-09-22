@@ -24,6 +24,7 @@ from tools.helper_functions import (
     clean_column_name,
     convert_reference_table_to_pivot_table,
     ensure_model_in_map,
+    ensure_safe_output_folder,
     get_basic_response_data,
     load_in_data_file,
     read_file,
@@ -797,6 +798,12 @@ def collect_output_csvs_and_create_excel_output(
     if not chosen_cols:
         raise Exception("Could not find chosen column")
 
+    # Harden client-supplied Gradio output_folder_state against path traversal.
+    # Keep a trailing separator so existing `output_folder + "file.csv"` joins work.
+    output_folder = ensure_safe_output_folder(output_folder, allowed_root=OUTPUT_FOLDER)
+    if not output_folder.endswith(("/", "\\", os.sep)):
+        output_folder = output_folder + os.sep
+
     today_date = datetime.today().strftime("%Y-%m-%d")
     original_data_file_path = os.path.abspath(in_data_files[0])
     excel_sheet_display_name = _resolve_excel_sheet_display_name(
@@ -1184,7 +1191,7 @@ def collect_output_csvs_and_create_excel_output(
     xlsx_output_filename = csvs_to_excel(
         csv_files=csv_files,
         output_filename=output_xlsx_filename,
-        allowed_root=output_folder,
+        allowed_root=OUTPUT_FOLDER,
         sheet_names=sheet_names,
         column_widths=column_widths,
         wrap_text_columns=wrap_text_columns,
@@ -1226,11 +1233,15 @@ def collect_output_csvs_and_create_excel_output(
 
     all_output_filenames = xlsx_output_filenames + topics_csv_filenames
 
-    # Delete all intermediate '_for_xlsx.csv' files
+    # Delete intermediate '_for_xlsx.csv' files (only under OUTPUT_FOLDER)
     for csv_file in temp_csv_files_for_cleanup:
         try:
-            if os.path.exists(csv_file):
-                os.remove(csv_file)
+            safe_csv = _resolve_output_path(csv_file, allowed_root=OUTPUT_FOLDER)
+            if not os.path.basename(safe_csv).endswith("_for_xlsx.csv"):
+                print(f"Skipping unexpected cleanup path: {csv_file}")
+                continue
+            if os.path.exists(safe_csv):
+                os.remove(safe_csv)
         except Exception as e:
             print(f"Could not delete temporary CSV file '{csv_file}' due to: {e}")
 

@@ -3,6 +3,7 @@ import os
 import re
 import time
 from typing import List, Tuple
+from urllib.parse import urlparse
 
 import boto3
 import pandas as pd
@@ -277,6 +278,32 @@ def get_model_path(
         raise Warning("Error loading model:", e)
 
 
+def _normalize_hf_repo_id(repo_id: str) -> str:
+    """
+    Normalize a Hugging Face repo id or hub URL to 'org/model' form.
+
+    Bare ids (e.g. 'unsloth/gemma-3-4b-it') are returned unchanged. Full hub
+    URLs are parsed so only huggingface.co / hf.co hosts are stripped — avoids
+    incomplete substring checks on untrusted URL-shaped strings.
+    """
+    if not repo_id:
+        return repo_id
+
+    # Bare Hub ids and local paths are not URLs
+    if "://" not in repo_id and not repo_id.startswith("//"):
+        return repo_id.strip().rstrip("/")
+
+    parsed = urlparse(repo_id.strip())
+    host = (parsed.hostname or "").lower()
+    if host in {"huggingface.co", "www.huggingface.co", "hf.co", "www.hf.co"}:
+        parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(parts) >= 2:
+            return f"{parts[0]}/{parts[1]}"
+        return "/".join(parts) if parts else repo_id
+
+    return repo_id
+
+
 def load_model(
     local_model_type: str = CHOSEN_LOCAL_MODEL_TYPE,
     gpu_layers: int = gpu_layers,
@@ -405,12 +432,7 @@ def load_model(
             from unsloth import FastLanguageModel
 
             print("Loading model from transformers")
-            # Use the official model ID for Gemma 3 4B
-            model_id = (
-                repo_id.split("https://huggingface.co/")[-1]
-                if "https://huggingface.co/" in repo_id
-                else repo_id
-            )
+            model_id = _normalize_hf_repo_id(repo_id)
             # 1. Set Data Type (dtype)
             # For H200/Hopper: 'bfloat16'
             # For RTX 3060/Ampere: 'float16'

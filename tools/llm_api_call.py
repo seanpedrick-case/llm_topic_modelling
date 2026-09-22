@@ -58,6 +58,7 @@ from tools.helper_functions import (
     create_topic_summary_df_from_reference_table,
     effective_force_zero_shot_radio,
     ensure_model_in_map,
+    ensure_safe_output_folder,
     generate_zero_shot_topics_df,
     get_basic_response_data,
     get_file_name_no_ext,
@@ -71,6 +72,7 @@ from tools.helper_functions import (
     put_columns_in_df,
     read_file,
     resolve_uploaded_file_path,
+    safe_output_file_path,
     sample_responses_for_topic,
     subsample_responses_for_topic_discovery,
     wrap_text,
@@ -2659,19 +2661,25 @@ def write_llm_output_and_logs(
     row_number_string_start = f"Rows {start_row_reported} to {end_row + 1}: "
 
     if output_debug_files == "True" and return_logs is True:
-        whole_conversation_path = (
-            output_folder
-            + batch_file_path_details
-            + "_full_conversation_"
-            + model_choice_clean_short
-            + ".txt"
+        whole_conversation_path = safe_output_file_path(
+            output_folder,
+            (
+                batch_file_path_details
+                + "_full_conversation_"
+                + model_choice_clean_short
+                + ".txt"
+            ),
+            allowed_root=OUTPUT_FOLDER,
         )
-        whole_conversation_path_meta = (
-            output_folder
-            + batch_file_path_details
-            + "_metadata_"
-            + model_choice_clean_short
-            + ".txt"
+        whole_conversation_path_meta = safe_output_file_path(
+            output_folder,
+            (
+                batch_file_path_details
+                + "_metadata_"
+                + model_choice_clean_short
+                + ".txt"
+            ),
+            allowed_root=OUTPUT_FOLDER,
         )
         with open(
             whole_conversation_path, "w", encoding="utf-8-sig", errors="replace"
@@ -6011,14 +6019,17 @@ def wrapper_extract_topics_per_column_value(
     )
     print(out_message)
 
-    out_logged_content_df_path = (
-        output_folder
-        + overall_file_name
-        + "_col_"
-        + column_clean
-        + "_logs_"
-        + model_choice_clean_short
-        + ".json"
+    out_logged_content_df_path = safe_output_file_path(
+        output_folder,
+        (
+            overall_file_name
+            + "_col_"
+            + column_clean
+            + "_logs_"
+            + model_choice_clean_short
+            + ".json"
+        ),
+        allowed_root=OUTPUT_FOLDER,
     )
 
     with open(
@@ -6862,14 +6873,17 @@ def all_in_one_pipeline(
             model_choice_clean, max_length=20, front_characters=False
         )
 
-        out_logged_content_df_path = (
-            output_folder
-            + original_file_name
-            + "_col_"
-            + column_clean
-            + "_logs_"
-            + model_choice_clean_short
-            + ".json"
+        out_logged_content_df_path = safe_output_file_path(
+            output_folder,
+            (
+                original_file_name
+                + "_col_"
+                + column_clean
+                + "_logs_"
+                + model_choice_clean_short
+                + ".json"
+            ),
+            allowed_root=OUTPUT_FOLDER,
         )
 
         with open(
@@ -7191,14 +7205,17 @@ def all_in_one_pipeline(
         model_choice_clean, max_length=20, front_characters=False
     )
 
-    out_logged_content_df_path = (
-        output_folder
-        + original_file_name
-        + "_col_"
-        + column_clean
-        + "_logs_"
-        + model_choice_clean_short
-        + ".json"
+    out_logged_content_df_path = safe_output_file_path(
+        output_folder,
+        (
+            original_file_name
+            + "_col_"
+            + column_clean
+            + "_logs_"
+            + model_choice_clean_short
+            + ".json"
+        ),
+        allowed_root=OUTPUT_FOLDER,
     )
 
     with open(
@@ -7623,8 +7640,8 @@ def suggest_improved_topic_names(
         " Review the table, set Accept to Yes/No, then save the suggested topics CSV."
     )
 
-    # Touch output_folder so callers can keep using it; CSV is written on save.
-    os.makedirs(output_folder, exist_ok=True)
+    # Ensure output root exists; reject client-supplied paths outside OUTPUT_FOLDER.
+    ensure_safe_output_folder(output_folder, allowed_root=OUTPUT_FOLDER)
 
     return (
         review_df,
@@ -7744,7 +7761,6 @@ def save_improved_topics_csv(
     if review_df is None or (isinstance(review_df, pd.DataFrame) and review_df.empty):
         return None, "No review table to save. Suggest topic names first."
 
-    os.makedirs(output_folder, exist_ok=True)
     base_name = "improved_topics"
     if pivot_file is not None:
         try:
@@ -7755,9 +7771,16 @@ def save_improved_topics_csv(
         except Exception:
             pass
 
-    output_path = os.path.join(
-        output_folder, f"{base_name}_improved_suggested_topics.csv"
-    )
+    try:
+        # Harden against client-controlled Gradio output_folder_state path traversal.
+        output_path = safe_output_file_path(
+            output_folder,
+            f"{base_name}_improved_suggested_topics.csv",
+            allowed_root=OUTPUT_FOLDER,
+        )
+    except ValueError as exc:
+        return None, f"Refused to save outside allowed output folder: {exc}"
+
     written = write_improved_topics_csv(review_df, output_path)
     if not written:
         return None, "No topics to write. Check Accept / Suggested Subtopic values."

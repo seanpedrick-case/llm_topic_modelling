@@ -7,6 +7,44 @@ from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
 
+from tools.config import GRADIO_TEMP_DIR, INPUT_FOLDER, OUTPUT_FOLDER
+from tools.helper_functions import (
+    resolve_under_allowed_root,
+    resolve_uploaded_file_path,
+)
+
+# Uploads land under GRADIO_TEMP_DIR; saved logs under OUTPUT_FOLDER / INPUT_FOLDER.
+_LOG_VIEWER_ALLOWED_ROOTS = (OUTPUT_FOLDER, INPUT_FOLDER, GRADIO_TEMP_DIR)
+
+
+def _resolve_safe_log_viewer_path(file_path: str) -> str:
+    """
+    Resolve file_path and ensure it stays under an allowlisted directory.
+
+    Prevents path traversal when a Gradio client supplies an arbitrary path
+    instead of a real upload under the temp/output trees.
+    """
+    if not file_path or not str(file_path).strip():
+        raise ValueError("Path is empty.")
+
+    last_error: Optional[Exception] = None
+    for root in _LOG_VIEWER_ALLOWED_ROOTS:
+        if not root:
+            continue
+        try:
+            safe_path = resolve_under_allowed_root(file_path, allowed_root=root)
+            break
+        except ValueError as exc:
+            last_error = exc
+    else:
+        raise ValueError(
+            f"Path '{file_path}' is outside allowed directories for log viewing"
+        ) from last_error
+
+    if not safe_path.lower().endswith(".json"):
+        raise ValueError("Only JSON log files are supported.")
+    return safe_path
+
 
 def load_log_file_handler(log_file):
     """Handle log file upload and initialize dropdowns."""
@@ -22,8 +60,20 @@ def load_log_file_handler(log_file):
             "### Response\n\nNo file uploaded.",  # log_response_markdown
         )
 
-    file_path = log_file.name if hasattr(log_file, "name") else log_file
-    log_data = load_log_file(file_path)
+    try:
+        file_path = resolve_uploaded_file_path(log_file)
+        log_data = load_log_file(file_path)
+    except ValueError as e:
+        return (
+            [],
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            gr.Dropdown(choices=[]),
+            f"### Prompt\n\nError: {e}",
+            f"### Response\n\nError: {e}",
+        )
 
     if not log_data:
         return (
@@ -130,10 +180,11 @@ def load_log_file(file_path: str) -> List[Dict]:
         List of dictionaries containing log entries
     """
     try:
-        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+        safe_path = _resolve_safe_log_viewer_path(file_path)
+        with open(safe_path, "r", encoding="utf-8-sig", errors="replace") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, Exception) as e:
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, Exception) as e:
         print(f"Error loading log file: {e}")
         return []
 

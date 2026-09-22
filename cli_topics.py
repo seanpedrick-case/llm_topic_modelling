@@ -31,6 +31,7 @@ from tools.config import (
     DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
     DIRECT_MODE_DEFAULT_COST_CODE,
+    DIRECT_MODE_OUTPUT_DIR,
     DIRECT_MODE_S3_UPLOAD_ONLY_XLSX,
     DYNAMODB_USAGE_LOG_HEADERS,
     ENABLE_BATCH_DEDUPLICATION,
@@ -74,6 +75,8 @@ from tools.helper_functions import (
     ColumnNotFoundError,
     load_in_data_file,
     load_in_previous_data_files,
+    resolve_under_allowed_root,
+    safe_output_file_path,
 )
 from tools.llm_api_call import (
     all_in_one_pipeline,
@@ -229,6 +232,20 @@ def _sanitize_folder_name(folder_name: str, max_length: int = 50) -> str:
     return sanitized
 
 
+def _resolve_safe_cli_output_path(path: str) -> str | None:
+    """Return path if it resolves under an allowlisted local output root, else None."""
+    if not path or not str(path).strip():
+        return None
+    for allowed_root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
+        if not allowed_root:
+            continue
+        try:
+            return resolve_under_allowed_root(path, allowed_root=allowed_root)
+        except ValueError:
+            continue
+    return None
+
+
 def upload_outputs_to_s3_if_enabled(
     output_files: list,
     base_file_name: str = None,
@@ -277,14 +294,20 @@ def upload_outputs_to_s3_if_enabled(
 
     # Check if task-specific usage log should be uploaded to S3 output folder
     if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and task_usage_log_path:
-        if os.path.exists(task_usage_log_path):
-            valid_files.append(task_usage_log_path)
+        safe_usage_log_path = _resolve_safe_cli_output_path(task_usage_log_path)
+        if not safe_usage_log_path:
             print(
-                f"Including task-specific usage log in S3 upload: {task_usage_log_path}"
+                "Skipping task-specific usage log upload; "
+                f"path outside allowed directories: {task_usage_log_path}"
+            )
+        elif os.path.exists(safe_usage_log_path):
+            valid_files.append(safe_usage_log_path)
+            print(
+                f"Including task-specific usage log in S3 upload: {safe_usage_log_path}"
             )
         else:
             print(
-                f"Task-specific usage log not found at {task_usage_log_path}, skipping usage log upload."
+                f"Task-specific usage log not found at {safe_usage_log_path}, skipping usage log upload."
             )
 
     if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS and prompt_response_log_paths:
@@ -454,9 +477,6 @@ def write_usage_log(
 
         # Create task-specific usage log file if enabled and output folder provided
         if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and output_folder:
-            # Ensure output folder exists
-            os.makedirs(output_folder, exist_ok=True)
-
             # Create task-specific usage log file name
             # Use session hash and timestamp to make it unique
             base_name = (
@@ -465,17 +485,37 @@ def write_usage_log(
                 else "usage"
             )
             task_log_filename = f"{base_name}_usage_log_{session_hash[:8]}_{timestamp.replace(':', '-').replace(' ', '_')}.csv"
-            task_specific_log_path = os.path.join(output_folder, task_log_filename)
+            # Restrict writes to allowlisted output roots (blocks path traversal via
+            # client/CLI-supplied output_folder).
+            task_specific_log_path = None
+            last_path_error = None
+            for allowed_root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
+                if not allowed_root:
+                    continue
+                try:
+                    task_specific_log_path = safe_output_file_path(
+                        output_folder,
+                        task_log_filename,
+                        allowed_root=allowed_root,
+                    )
+                    break
+                except ValueError as exc:
+                    last_path_error = exc
+            if not task_specific_log_path:
+                print(
+                    "Skipping task-specific usage log; "
+                    f"output folder outside allowed directories: {last_path_error}"
+                )
+            else:
+                # Write task-specific CSV file with headers and single entry
+                with open(
+                    task_specific_log_path, "w", newline="", encoding="utf-8-sig"
+                ) as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(headers)
+                    writer.writerow(data)
 
-            # Write task-specific CSV file with headers and single entry
-            with open(
-                task_specific_log_path, "w", newline="", encoding="utf-8-sig"
-            ) as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(headers)
-                writer.writerow(data)
-
-            print(f"Created task-specific usage log: {task_specific_log_path}")
+                print(f"Created task-specific usage log: {task_specific_log_path}")
 
     # Write to DynamoDB if enabled
     if save_to_dynamodb:
