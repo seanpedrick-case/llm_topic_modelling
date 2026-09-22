@@ -108,6 +108,30 @@ if APP_CONFIG_PATH:
     else:
         print("App config file not found at location:", APP_CONFIG_PATH)
 
+
+# App options
+
+INTRO_TEXT = get_or_create_env_var(
+    "INTRO_TEXT",
+    """# Extract topics and create thematic summaries from open text data
+
+Extract topics and summarise open text using Large Language Models (LLMs). The model will loop through all text rows to find the most relevant general topics and subtopics, and provide a short summary of each. If you have specific topics in mind, you can enter them in 'Provide a list of specific topics' below.
+
+NOTE: LLMs are not 100% accurate and may produce biased or incorrect responses. All files downloaded from this app **need to be checked by a human** before they are used in further outputs. Best results come from providing a clear, unambiguous list of suggested topics to the LLM so that it will follow your standard analysis procedure as closely as possible.""",
+)
+
+# Read in intro text from a text file if it is a path to a text file
+if INTRO_TEXT.endswith(".txt"):
+    INTRO_TEXT = open(INTRO_TEXT, "r").read()
+
+INTRO_TEXT = INTRO_TEXT.strip('"').strip("'")
+
+# Should the app fill the screen width?
+FILL_SCREEN_WIDTH = convert_string_to_boolean(
+    get_or_create_env_var("FILL_SCREEN_WIDTH", "False")
+)
+
+
 ###
 # AWS OPTIONS
 ###
@@ -200,6 +224,12 @@ EXPORT_FORMAT = get_or_create_env_var(
 ).lower()  # 'xlsx' or 'ods'
 if EXPORT_FORMAT not in ["xlsx", "ods"]:
     EXPORT_FORMAT = "xlsx"  # Default to xlsx if invalid value provided
+
+# Include per-row Summary / Revised summary text on the Response level data sheet.
+# Off by default: summaries are duplicated for every topic row and inflate xlsx size.
+INCLUDE_RESPONSE_LEVEL_SUMMARY = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_RESPONSE_LEVEL_SUMMARY", "False")
+)
 
 ###
 # LOGGING OPTIONS
@@ -346,10 +376,45 @@ ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_BATCH_DEDUPLICATION", "True")
 )  # Whether to deduplicate topics after each batch during extraction. Will use basic deduplication to check for typos in effectively duplicate topic names, and if candidate topics are not provided, will use LLM deduplication to merge similar topics if the current number of topics exceeds the maximum allowed number of topics (MAXIMUM_ALLOWED_TOPICS, or defined in GUI by user)
 
+# Optional Presidio/spaCy PII redaction (off by default so existing runs are unchanged)
+ENABLE_INPUT_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_INPUT_REDACTION", "False")
+)  # Redact chosen text column(s) after load, before LLM topic extraction
+
+ENABLE_ORIGINAL_DATA_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_ORIGINAL_DATA_REDACTION", "False")
+)  # Redact every cell on the Excel 'Original data' tab
+
+REDACTION_ENTITIES = get_or_create_env_var(
+    "REDACTION_ENTITIES",
+    "['EMAIL_ADDRESS', 'PHONE_NUMBER', 'CREDIT_CARD', 'IBAN_CODE', 'UK_NHS', 'UKPOSTCODE', 'IP_ADDRESS', 'STREETNAME']",
+)  # Presidio entity types to redact when either redaction flag is on
+
+REDACTION_STRATEGY = get_or_create_env_var(
+    "REDACTION_STRATEGY", "entity_type"
+)  # entity_type (replace with <ENTITY_NAME>), redact_replace (REDACTED), or redact
+
+SPACY_MODEL = get_or_create_env_var("SPACY_MODEL", "en_core_web_sm")
+
+SPACY_MODEL_PATH = get_or_create_env_var("SPACY_MODEL_PATH", "")
+
 # Run batch deduplication only when the number of completed batches is a multiple of this value (1 = every batch; e.g. 5 = after batches 5, 10, 15, ...). Values below 1 are treated as 1.
 BATCH_DEDUPLICATION_EVERY_N_BATCHES = max(
     1,
     int(get_or_create_env_var("BATCH_DEDUPLICATION_EVERY_N_BATCHES", "5")),
+)
+
+# Shuffle the suggested/candidate topics table shown in each extraction (and validation)
+# batch prompt. Reduces primacy bias from a fixed alphabetical topic order. Each batch
+# gets a different order; the same LLM_SEED + batch number combination is reproducible.
+SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS = convert_string_to_boolean(
+    get_or_create_env_var("SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS", "False")
+)
+
+# Ask the LLM to return a 0-1 confidence score with each topic assignment.
+# When False, Excel pivot cells stay as 1/0 presence indicators.
+INCLUDE_TOPIC_CONFIDENCE = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_TOPIC_CONFIDENCE", "False")
 )
 
 ###
@@ -362,21 +427,6 @@ RUN_AWS_BEDROCK_MODELS = get_or_create_env_var("RUN_AWS_BEDROCK_MODELS", "1")
 
 RUN_GEMINI_MODELS = get_or_create_env_var("RUN_GEMINI_MODELS", "1")
 GEMINI_API_KEY = get_or_create_env_var("GEMINI_API_KEY", "")
-
-INTRO_TEXT = get_or_create_env_var(
-    "INTRO_TEXT",
-    """# Large language model topic modelling
-
-Extract topics and summarise outputs using Large Language Models (LLMs), either local or cloud based (AWS, Azure, Gemini). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets below. API keys for cloud services can be entered on the settings page.
-
-NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.""",
-)
-
-# Read in intro text from a text file if it is a path to a text file
-if INTRO_TEXT.endswith(".txt"):
-    INTRO_TEXT = open(INTRO_TEXT, "r").read()
-
-INTRO_TEXT = INTRO_TEXT.strip('"').strip("'")
 
 # Azure/OpenAI AI Inference settings
 RUN_AZURE_MODELS = get_or_create_env_var("RUN_AZURE_MODELS", "1")
@@ -394,6 +444,15 @@ API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
 # so this should often be higher than the general retry sleep.
 INFERENCE_SERVER_READ_TIMEOUT_SECONDS = int(
     get_or_create_env_var("INFERENCE_SERVER_READ_TIMEOUT_SECONDS", "120")
+)
+
+# AWS Bedrock Converse can take several minutes for large prompts / long outputs
+# (e.g. overall summaries). boto3's default read timeout is 60s.
+BEDROCK_READ_TIMEOUT_SECONDS = int(
+    get_or_create_env_var("BEDROCK_READ_TIMEOUT_SECONDS", "600")
+)
+BEDROCK_CONNECT_TIMEOUT_SECONDS = int(
+    get_or_create_env_var("BEDROCK_CONNECT_TIMEOUT_SECONDS", "180")
 )
 
 # When we cannot do server-side token counting for inference-server, our local estimates can be low.
@@ -484,11 +543,38 @@ if RUN_GEMINI_MODELS == "1":
     model_source.extend(["Gemini"] * len(gemini_models))
 
 # Register Azure/OpenAI AI models (model names must match your Azure/OpenAI deployments)
+# GPT reasoning models from: https://ai.azure.com/catalog/models?capabilities=reasoning&publisher=openai
 if RUN_AZURE_MODELS == "1":
     # Example deployments; adjust to the deployments you actually create in Azure/OpenAI
-    azure_models = ["gpt-5-mini", "gpt-4o-mini"]
+    azure_models = [
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.5",
+        "gpt-5.4-pro",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+        "gpt-5.3-codex",
+        "gpt-5.2-codex",
+        "gpt-5.2",
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex",
+        "gpt-5.1-codex-mini",
+        "gpt-5.1",
+        "gpt-5-pro",
+        "gpt-5",
+        "gpt-5-codex",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-oss-120b",
+        "gpt-oss-20b",
+        "gpt-oss-safeguard-120b",
+        "gpt-oss-safeguard-20b",
+    ]
     model_full_names.extend(azure_models)
-    model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
+    model_short_names.extend(azure_models)
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
 # Register inference-server models
@@ -496,15 +582,17 @@ CHOSEN_INFERENCE_SERVER_MODEL = ""
 if RUN_INFERENCE_SERVER == "1":
     # Example inference-server models; adjust to the models you have available on your server
     inference_server_models = [
-        "unnamed-inference-server-model",
-        "gpt_oss_20b",
-        "gemma_3_12b",
-        "ministral_3_14b_it",
-        "Qwen 3.5 27b",
-        "Qwen 3.5 35b a3b",
+        "Unnamed inference server model",
+        "GPT OSS 20B",
+        "Ministral 3 14B",
+        "Qwen 3.5 27B",
+        "Qwen 3.5 35B",
+        "Qwen 3.6 27B",
+        "Qwen 3.8 27B",
+        "Gemma 3 12B",
         "Gemma 4 12B",
-        "Gemma 4 26b a4b",
-        "Gemma 4 31b",
+        "Gemma 4 26B",
+        "Gemma 4 31B",
     ]
     model_full_names.extend(inference_server_models)
     model_short_names.extend(inference_server_models)
@@ -960,9 +1048,16 @@ DIRECT_MODE_TEMPERATURE = get_or_create_env_var(
 DIRECT_MODE_BATCH_SIZE = get_or_create_env_var(
     "DIRECT_MODE_BATCH_SIZE", str(BATCH_SIZE_DEFAULT)
 )
+# Capture whether DIRECT_MODE_MAX_TOKENS was explicitly set before applying default.
+_direct_mode_max_tokens_explicit = os.environ.get("DIRECT_MODE_MAX_TOKENS") is not None
 DIRECT_MODE_MAX_TOKENS = get_or_create_env_var(
     "DIRECT_MODE_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS)
 )
+# In direct mode, an explicit DIRECT_MODE_MAX_TOKENS overrides LLM_MAX_NEW_TOKENS so
+# Bedrock/local paths that use the module-level max (e.g. overall summary) honour it.
+if RUN_DIRECT_MODE == "1" and _direct_mode_max_tokens_explicit:
+    LLM_MAX_NEW_TOKENS = int(DIRECT_MODE_MAX_TOKENS)
+    os.environ["LLM_MAX_NEW_TOKENS"] = str(LLM_MAX_NEW_TOKENS)
 DIRECT_MODE_CONTEXT = get_or_create_env_var("DIRECT_MODE_CONTEXT", "")
 DIRECT_MODE_CANDIDATE_TOPICS = get_or_create_env_var("DIRECT_MODE_CANDIDATE_TOPICS", "")
 DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var(
@@ -970,6 +1065,10 @@ DIRECT_MODE_FORCE_ZERO_SHOT = get_or_create_env_var(
 )  # Only has an effect when DIRECT_MODE_CANDIDATE_TOPICS is set
 DIRECT_MODE_FORCE_SINGLE_TOPIC = get_or_create_env_var(
     "DIRECT_MODE_FORCE_SINGLE_TOPIC", "No"
+)
+DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE = get_or_create_env_var(
+    "DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE",
+    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
 )
 DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY = get_or_create_env_var(
     "DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY", "No"
@@ -1076,6 +1175,24 @@ if ENFORCE_COST_CODES == "True":
 ###
 # VALIDATE FOLDERS AND CONFIG OPTIONS
 ###
+
+
+def _parse_entity_list(value: str) -> List[str]:
+    """Parse a list env var that may be Python-list style or comma-separated."""
+    value = (value or "").strip()
+    if not value:
+        return []
+    if (value.startswith("[") and value.endswith("]")) or (
+        value.startswith("(") and value.endswith(")")
+    ):
+        return _get_env_list(value)
+    return [s.strip().strip("'\"") for s in value.split(",") if s.strip().strip("'\"")]
+
+
+if REDACTION_ENTITIES:
+    REDACTION_ENTITIES = _parse_entity_list(REDACTION_ENTITIES)
+else:
+    REDACTION_ENTITIES = []
 
 
 # Convert string environment variables to string or list

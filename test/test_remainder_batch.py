@@ -243,5 +243,172 @@ class TestResponseIdZeroNotEmitted(unittest.TestCase):
             self.assertFalse((ids.fillna(0) == 0).any())
 
 
+class TestTopicConfidenceExplode(unittest.TestCase):
+    def test_grouped_ids_inherit_one_confidence_score(self):
+        batch_df = pd.DataFrame(
+            {
+                "Response ID": ["1", "2", "3"],
+                "Response": ["a", "b", "c"],
+                "Original Response ID": [1, 2, 3],
+            }
+        )
+        response_text = """| General topic | Subtopic | Sentiment | Response ID | Confidence | Summary |
+|---|---|---|---|---|---|
+| Housing | Repairs | Negative | 1, 3 | 0.73 | Damp and delays. |
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            (
+                _topic_path,
+                _ref_path,
+                _summary_path,
+                _topic_df,
+                reference_df,
+                _summary_df,
+                _details,
+                is_error,
+                _incomplete,
+            ) = write_llm_output_and_logs(
+                response_text=response_text,
+                whole_conversation=[],
+                all_metadata_content=[],
+                batch_file_path_details="confidence_batch",
+                start_row=0,
+                end_row=2,
+                model_choice_clean="test-model",
+                log_files_output_paths=[],
+                existing_reference_df=pd.DataFrame(),
+                existing_topics_df=pd.DataFrame(),
+                batch_size_number=3,
+                batch_basic_response_df=batch_df,
+                group_name="All",
+                produce_structured_summary_radio="No",
+                output_folder=tmp + os.sep,
+                include_topic_confidence_radio="Yes",
+            )
+
+        self.assertFalse(is_error)
+        self.assertIn("Confidence", reference_df.columns)
+        self.assertEqual(
+            sorted(reference_df["Response ID"].astype(int).tolist()), [1, 3]
+        )
+        self.assertTrue((reference_df["Confidence"] == 0.73).all())
+
+    def test_highest_confidence_kept_on_duplicate_assignment(self):
+        batch_df = pd.DataFrame(
+            {
+                "Response ID": ["1"],
+                "Response": ["a"],
+                "Original Response ID": [1],
+            }
+        )
+        response_text = """| General topic | Subtopic | Sentiment | Response ID | Confidence | Summary |
+|---|---|---|---|---|---|
+| Housing | Repairs | Negative | 1 | 0.2 | First. |
+| Housing | Repairs | Negative | 1 | 0.9 | Second. |
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            (
+                _topic_path,
+                _ref_path,
+                _summary_path,
+                _topic_df,
+                reference_df,
+                _summary_df,
+                _details,
+                is_error,
+                _incomplete,
+            ) = write_llm_output_and_logs(
+                response_text=response_text,
+                whole_conversation=[],
+                all_metadata_content=[],
+                batch_file_path_details="confidence_dup",
+                start_row=0,
+                end_row=0,
+                model_choice_clean="test-model",
+                log_files_output_paths=[],
+                existing_reference_df=pd.DataFrame(),
+                existing_topics_df=pd.DataFrame(),
+                batch_size_number=1,
+                batch_basic_response_df=batch_df,
+                group_name="All",
+                produce_structured_summary_radio="No",
+                output_folder=tmp + os.sep,
+                include_topic_confidence_radio="Yes",
+            )
+
+        self.assertFalse(is_error)
+        self.assertEqual(len(reference_df), 1)
+        self.assertEqual(reference_df.iloc[0]["Confidence"], 0.9)
+
+
+class TestStructuredSummaryThreeColumnTable(unittest.TestCase):
+    """Structured summaries return Main heading / Subheading / Summary only."""
+
+    def _batch_df(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "Response ID": ["1", "2", "3"],
+                "Response": ["Note one.", "Note two.", "Note three."],
+                "Original Response ID": [11, 12, 13],
+            }
+        )
+
+    def test_three_column_structured_summary_is_complete_and_keeps_summary(self):
+        response_text = """| Main heading | Subheading | Summary |
+|---|---|---|
+| Behaviour at school | Absences | Alex had increasing absences and declining grades. |
+| Family | Engagement | Parent engagement improved after home visit. |
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            (
+                _topic_path,
+                _ref_path,
+                _summary_path,
+                topic_df,
+                reference_df,
+                summary_df,
+                _details,
+                is_error,
+                has_incomplete,
+            ) = write_llm_output_and_logs(
+                response_text=response_text,
+                whole_conversation=[],
+                all_metadata_content=[],
+                batch_file_path_details="structured_summary_batch",
+                start_row=10,
+                end_row=12,
+                model_choice_clean="test-model",
+                log_files_output_paths=[],
+                existing_reference_df=pd.DataFrame(),
+                existing_topics_df=pd.DataFrame(),
+                batch_size_number=50,
+                batch_basic_response_df=self._batch_df(),
+                group_name="Alex D.",
+                produce_structured_summary_radio="Yes",
+                output_folder=tmp + os.sep,
+                sentiment_checkbox="Do not assess sentiment",
+            )
+
+        self.assertFalse(is_error)
+        self.assertFalse(has_incomplete)
+        self.assertFalse(reference_df.empty)
+        # Each heading is attached to every response in the batch
+        self.assertEqual(len(reference_df), 6)
+        self.assertEqual(
+            set(pd.to_numeric(reference_df["Response ID"]).astype(int)),
+            {11, 12, 13},
+        )
+        absences = reference_df[reference_df["Subtopic"] == "Absences"]
+        self.assertFalse(absences.empty)
+        self.assertIn(
+            "increasing absences",
+            str(absences.iloc[0]["Summary"]).lower(),
+        )
+        # Summary must not have been mis-mapped into Sentiment
+        self.assertTrue((reference_df["Sentiment"].str.lower() == "not assessed").all())
+        self.assertFalse(summary_df.empty)
+        self.assertIn("Behaviour at school", set(summary_df["General topic"]))
+
+
 if __name__ == "__main__":
     unittest.main()

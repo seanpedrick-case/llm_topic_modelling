@@ -2,12 +2,15 @@ import os
 from typing import List
 
 import boto3
+from botocore.config import Config
 
 from tools.config import (
     ACCESS_LOGS_FOLDER,
     AWS_ACCESS_KEY,
     AWS_REGION,
     AWS_SECRET_KEY,
+    BEDROCK_CONNECT_TIMEOUT_SECONDS,
+    BEDROCK_READ_TIMEOUT_SECONDS,
     DIRECT_MODE_OUTPUT_DIR,
     FEEDBACK_LOGS_FOLDER,
     GRADIO_TEMP_DIR,
@@ -25,6 +28,14 @@ from tools.config import (
 bucket_name = S3_LOG_BUCKET
 
 
+def _bedrock_client_config() -> Config:
+    """HTTP timeouts for Bedrock Converse (large prompts can exceed boto3 defaults)."""
+    return Config(
+        read_timeout=BEDROCK_READ_TIMEOUT_SECONDS,
+        connect_timeout=BEDROCK_CONNECT_TIMEOUT_SECONDS,
+    )
+
+
 def connect_to_bedrock_runtime(
     model_name_map: dict,
     model_choice: str,
@@ -37,11 +48,14 @@ def connect_to_bedrock_runtime(
 
     # Use aws_region_textbox if provided, otherwise fall back to AWS_REGION from config
     region = aws_region_textbox if aws_region_textbox else AWS_REGION
+    client_config = _bedrock_client_config()
 
     if "AWS" in model_source:
         if RUN_AWS_FUNCTIONS == "1" and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
             print("Connecting to Bedrock via existing SSO connection")
-            bedrock_runtime = boto3.client("bedrock-runtime", region_name=region)
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime", region_name=region, config=client_config
+            )
         elif aws_access_key_textbox and aws_secret_key_textbox:
             print(
                 "Connecting to Bedrock using AWS access key and secret keys from user input."
@@ -51,6 +65,7 @@ def connect_to_bedrock_runtime(
                 aws_access_key_id=aws_access_key_textbox,
                 aws_secret_access_key=aws_secret_key_textbox,
                 region_name=region,
+                config=client_config,
             )
         elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
             print("Getting Bedrock credentials from environment variables")
@@ -59,10 +74,13 @@ def connect_to_bedrock_runtime(
                 aws_access_key_id=AWS_ACCESS_KEY,
                 aws_secret_access_key=AWS_SECRET_KEY,
                 region_name=region,
+                config=client_config,
             )
         elif RUN_AWS_FUNCTIONS == "1":
             print("Connecting to Bedrock via existing SSO connection")
-            bedrock_runtime = boto3.client("bedrock-runtime", region_name=region)
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime", region_name=region, config=client_config
+            )
         else:
             bedrock_runtime = ""
             out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under LLM settings, or choose another model type."

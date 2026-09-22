@@ -322,6 +322,10 @@ def lambda_handler(event, context):
         "force_single_topic": arguments.get(
             "force_single_topic", os.getenv("DIRECT_MODE_FORCE_SINGLE_TOPIC", "No")
         ),
+        "include_topic_confidence": arguments.get(
+            "include_topic_confidence",
+            os.getenv("DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE", "No"),
+        ),
         "produce_structured_summary": arguments.get(
             "produce_structured_summary",
             os.getenv("DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY", "No"),

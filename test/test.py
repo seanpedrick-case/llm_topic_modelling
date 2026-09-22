@@ -36,6 +36,7 @@ def run_cli_topics(
     candidate_topics: Optional[str] = None,
     force_zero_shot: Optional[str] = None,
     force_single_topic: Optional[str] = None,
+    include_topic_confidence: Optional[str] = None,
     produce_structured_summary: Optional[str] = None,
     sentiment: Optional[str] = None,
     additional_summary_instructions: Optional[str] = None,
@@ -81,6 +82,8 @@ def run_cli_topics(
     # 1. Get absolute paths and perform pre-checks
     script_abs_path = os.path.abspath(script_path)
     output_abs_dir = os.path.abspath(output_dir)
+    if not output_abs_dir.endswith(("/", "\\", os.sep)):
+        output_abs_dir = output_abs_dir + os.sep
 
     # Handle input file based on task
     if task in ["extract", "validate", "all_in_one"] and input_file is None:
@@ -153,6 +156,8 @@ def run_cli_topics(
         command.extend(["--force_zero_shot", force_zero_shot])
     if force_single_topic:
         command.extend(["--force_single_topic", force_single_topic])
+    if include_topic_confidence:
+        command.extend(["--include_topic_confidence", include_topic_confidence])
     if produce_structured_summary:
         command.extend(["--produce_structured_summary", produce_structured_summary])
     if sentiment:
@@ -218,6 +223,13 @@ def run_cli_topics(
         # Enable mock mode
         env["USE_MOCK_LLM"] = "1"
         env["TEST_MODE"] = "1"
+        # Keep CLI tests independent of local app_config.env redaction settings
+        env["ENABLE_INPUT_REDACTION"] = "0"
+        env["ENABLE_ORIGINAL_DATA_REDACTION"] = "0"
+        # Align allowlisted output roots with this test's --output_dir (temp dirs
+        # sit outside the default OUTPUT_FOLDER and would fail path hardening).
+        env["GRADIO_OUTPUT_FOLDER"] = output_abs_dir
+        env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
 
         result = subprocess.Popen(
             command,
@@ -410,6 +422,7 @@ def run_app_direct_mode(
     candidate_topics: Optional[str] = None,
     force_zero_shot: Optional[str] = None,
     force_single_topic: Optional[str] = None,
+    include_topic_confidence: Optional[str] = None,
     produce_structured_summary: Optional[str] = None,
     sentiment: Optional[str] = None,
     additional_summary_instructions: Optional[str] = None,
@@ -455,6 +468,8 @@ def run_app_direct_mode(
     # 1. Get absolute paths and perform pre-checks
     app_abs_path = os.path.abspath(app_path)
     output_abs_dir = os.path.abspath(output_dir)
+    if not output_abs_dir.endswith(("/", "\\", os.sep)):
+        output_abs_dir = output_abs_dir + os.sep
 
     # Handle input file based on task
     if task in ["extract", "validate", "all_in_one"] and input_file is None:
@@ -481,6 +496,13 @@ def run_app_direct_mode(
     env["RUN_INFERENCE_SERVER"] = "1"
     env["USE_MOCK_LLM"] = "1"
     env["TEST_MODE"] = "1"
+    # Keep direct-mode tests independent of local app_config.env redaction settings
+    env["ENABLE_INPUT_REDACTION"] = "0"
+    env["ENABLE_ORIGINAL_DATA_REDACTION"] = "0"
+    # Align allowlisted output roots with this test's output_dir (temp dirs sit
+    # outside the default OUTPUT_FOLDER and would fail path hardening).
+    env["GRADIO_OUTPUT_FOLDER"] = output_abs_dir
+    env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
 
     # Enable direct mode
     env["RUN_DIRECT_MODE"] = "1"
@@ -492,7 +514,6 @@ def run_app_direct_mode(
     if input_file:
         # Use pipe separator to handle file paths with spaces
         env["DIRECT_MODE_INPUT_FILE"] = input_abs_path
-    env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
     if text_column:
         env["DIRECT_MODE_TEXT_COLUMN"] = text_column
     if previous_output_files:
@@ -530,6 +551,8 @@ def run_app_direct_mode(
         env["DIRECT_MODE_FORCE_ZERO_SHOT"] = force_zero_shot
     if force_single_topic:
         env["DIRECT_MODE_FORCE_SINGLE_TOPIC"] = force_single_topic
+    if include_topic_confidence:
+        env["DIRECT_MODE_INCLUDE_TOPIC_CONFIDENCE"] = include_topic_confidence
     if produce_structured_summary:
         env["DIRECT_MODE_PRODUCE_STRUCTURED_SUMMARY"] = produce_structured_summary
     if sentiment:

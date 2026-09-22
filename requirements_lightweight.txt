@@ -16,4 +16,7 @@ html5lib<=1.1
 beautifulsoup4<=4.14.3
 rapidfuzz<=3.14.5
 python-dotenv<=1.2.3
+presidio_analyzer<=2.2.364
+presidio_anonymizer<=2.2.364
+spacy<=3.8.16
 awslambdaric<=3.1.1

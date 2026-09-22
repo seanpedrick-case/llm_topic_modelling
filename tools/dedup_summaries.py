@@ -60,7 +60,9 @@ from tools.helper_functions import (
     initial_clean,
     load_in_data_file,
     normalize_topic_name_for_llm,
+    parse_topic_confidence_value,
     read_file,
+    safe_output_file_path,
     wrap_text,
 )
 from tools.llm_funcs import (
@@ -274,6 +276,22 @@ def _topic_map_has_changes(map_df: pd.DataFrame) -> bool:
     )
     mapped = map_df["deduplicated_category"].astype(str)
     return bool((original.str.strip() != mapped.str.strip()).any())
+
+
+def _reference_table_keep_columns(reference_df: pd.DataFrame) -> list:
+    """Core assignment columns, plus Confidence when the LLM produced scores."""
+    cols = [
+        "Response ID",
+        "General topic",
+        "Subtopic",
+        "Sentiment",
+        "Summary",
+        "Start row of group",
+        "Group",
+    ]
+    if "Confidence" in reference_df.columns:
+        cols.append("Confidence")
+    return cols
 
 
 def _join_unique_summaries(series: pd.Series) -> str:
@@ -628,17 +646,7 @@ def deduplicate_topics(
             reference_df = reference_df.rename(
                 columns={"General Topic": "General topic"}, errors="ignore"
             )
-            reference_df = reference_df[
-                [
-                    "Response ID",
-                    "General topic",
-                    "Subtopic",
-                    "Sentiment",
-                    "Summary",
-                    "Start row of group",
-                    "Group",
-                ]
-            ]
+            reference_df = reference_df[_reference_table_keep_columns(reference_df)]
 
             if merge_general_topics == "Yes":
                 # Replace General topic names for each Subtopic with that for the Subtopic with the most responses
@@ -694,17 +702,7 @@ def deduplicate_topics(
                 reference_df.drop(columns=["UniqueCount"], inplace=True)
 
             # print("reference_df:", reference_df)
-            reference_df = reference_df[
-                [
-                    "Response ID",
-                    "General topic",
-                    "Subtopic",
-                    "Sentiment",
-                    "Summary",
-                    "Start row of group",
-                    "Group",
-                ]
-            ]
+            reference_df = reference_df[_reference_table_keep_columns(reference_df)]
             if not has_remaps:
                 break
 
@@ -717,6 +715,11 @@ def deduplicate_topics(
             agg_dict["Start row of group"] = "min"
         if "Group" in reference_df.columns:
             agg_dict["Group"] = "first"
+        if "Confidence" in reference_df.columns:
+            reference_df["Confidence"] = reference_df["Confidence"].map(
+                parse_topic_confidence_value
+            )
+            agg_dict["Confidence"] = "max"
         reference_df = reference_df.groupby(group_cols, as_index=False, sort=False).agg(
             agg_dict
         )
@@ -2860,41 +2863,53 @@ def process_debug_output_iteration(
 
     if output_debug_files == "True":
         try:
-            formatted_prompt_output_path = (
-                output_folder
-                + batch_file_path_details
-                + "_full_prompt_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            formatted_prompt_output_path = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_full_prompt_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
-            final_table_output_path = (
-                output_folder
-                + batch_file_path_details
-                + "_full_response_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            final_table_output_path = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_full_response_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
-            whole_conversation_path = (
-                output_folder
-                + batch_file_path_details
-                + "_full_conversation_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            whole_conversation_path = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_full_conversation_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
-            whole_conversation_path_meta = (
-                output_folder
-                + batch_file_path_details
-                + "_metadata_"
-                + model_choice_clean_short
-                + "_"
-                + current_task_type
-                + ".txt"
+            whole_conversation_path_meta = safe_output_file_path(
+                output_folder,
+                (
+                    batch_file_path_details
+                    + "_metadata_"
+                    + model_choice_clean_short
+                    + "_"
+                    + current_task_type
+                    + ".txt"
+                ),
+                allowed_root=OUTPUT_FOLDER,
             )
 
             with open(

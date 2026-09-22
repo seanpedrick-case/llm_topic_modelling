@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.16.0"
+version = "0.17.0"
 description = "Generate thematic summaries from open text in tabular data files with a large language model."
 requires-python = ">=3.10"
 readme = "README.md"
@@ -68,7 +68,10 @@ dependencies = [
     "beautifulsoup4<=4.14.3",
     "rapidfuzz<=3.14.5",
     "python-dotenv<=1.2.3",
-    "pyexcel<=0.7.4"
+    "pyexcel<=0.7.4",
+    "presidio_analyzer<=2.2.364",
+    "presidio_anonymizer<=2.2.364",
+    "spacy<=3.8.16",
 ]
 
 [project.optional-dependencies]

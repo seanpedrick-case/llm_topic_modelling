@@ -31,12 +31,14 @@ from tools.config import (
     DEFAULT_COST_CODE,
     DEFAULT_SAMPLED_SUMMARIES,
     DIRECT_MODE_DEFAULT_COST_CODE,
+    DIRECT_MODE_OUTPUT_DIR,
     DIRECT_MODE_S3_UPLOAD_ONLY_XLSX,
     DYNAMODB_USAGE_LOG_HEADERS,
     ENABLE_BATCH_DEDUPLICATION,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
     HF_TOKEN,
+    INCLUDE_TOPIC_CONFIDENCE,
     INPUT_FOLDER,
     LLM_MAX_NEW_TOKENS,
     LLM_SEED,
@@ -52,6 +54,7 @@ from tools.config import (
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
     SESSION_OUTPUT_FOLDER,
+    SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS,
     UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS,
     UPLOAD_USAGE_LOG_TO_S3_OUTPUTS,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
@@ -227,6 +230,51 @@ def _sanitize_folder_name(folder_name: str, max_length: int = 50) -> str:
     return sanitized
 
 
+def _find_allowlisted_output_file(path: str) -> str | None:
+    """
+    Find path's basename under an allowlisted output root.
+
+    Rebuilds the filesystem path from trusted roots + os.path.basename only, so
+    the raw user-supplied path string is never used in path expressions (CodeQL
+    path-injection). Checks the root and one level of session subdirectories.
+    """
+    if not path or not str(path).strip():
+        return None
+
+    safe_name = os.path.basename(str(path).strip())
+    if not safe_name or safe_name in {".", ".."}:
+        return None
+
+    for root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
+        if not root:
+            continue
+        try:
+            root_real = os.path.realpath(os.path.abspath(str(root)))
+        except OSError:
+            continue
+
+        search_dirs = [root_real]
+        try:
+            for entry in os.listdir(root_real):
+                sub = os.path.join(root_real, entry)
+                if os.path.isdir(sub):
+                    search_dirs.append(sub)
+        except OSError:
+            pass
+
+        for directory in search_dirs:
+            candidate = os.path.join(directory, safe_name)
+            try:
+                candidate_real = os.path.realpath(candidate)
+                if os.path.commonpath([root_real, candidate_real]) != root_real:
+                    continue
+                if os.path.isfile(candidate_real):
+                    return candidate_real
+            except (OSError, ValueError):
+                continue
+    return None
+
+
 def upload_outputs_to_s3_if_enabled(
     output_files: list,
     base_file_name: str = None,
@@ -275,14 +323,18 @@ def upload_outputs_to_s3_if_enabled(
 
     # Check if task-specific usage log should be uploaded to S3 output folder
     if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and task_usage_log_path:
-        if os.path.exists(task_usage_log_path):
-            valid_files.append(task_usage_log_path)
+        # Rebuild under allowlisted roots from basename only — do not use the
+        # raw caller path in exists/open/upload (keeps CodeQL path-injection clean).
+        safe_usage_log_path = _find_allowlisted_output_file(task_usage_log_path)
+        if not safe_usage_log_path:
             print(
-                f"Including task-specific usage log in S3 upload: {task_usage_log_path}"
+                "Skipping task-specific usage log upload; "
+                f"file not found under allowed directories: {os.path.basename(str(task_usage_log_path))}"
             )
         else:
+            valid_files.append(safe_usage_log_path)
             print(
-                f"Task-specific usage log not found at {task_usage_log_path}, skipping usage log upload."
+                f"Including task-specific usage log in S3 upload: {safe_usage_log_path}"
             )
 
     if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS and prompt_response_log_paths:
@@ -452,28 +504,62 @@ def write_usage_log(
 
         # Create task-specific usage log file if enabled and output folder provided
         if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and output_folder:
-            # Ensure output folder exists
-            os.makedirs(output_folder, exist_ok=True)
-
-            # Create task-specific usage log file name
-            # Use session hash and timestamp to make it unique
+            # Build a safe filename from basenames / allowlisted characters only.
             base_name = (
-                os.path.splitext(os.path.basename(file_name))[0]
+                os.path.splitext(os.path.basename(str(file_name)))[0]
                 if file_name
                 else "usage"
             )
-            task_log_filename = f"{base_name}_usage_log_{session_hash[:8]}_{timestamp.replace(':', '-').replace(' ', '_')}.csv"
-            task_specific_log_path = os.path.join(output_folder, task_log_filename)
+            base_name = (
+                re.sub(r"[^A-Za-z0-9._-]", "_", base_name).strip("._") or "usage"
+            )
+            session_part = (
+                re.sub(r"[^A-Za-z0-9._-]", "_", str(session_hash)[:8]).strip("._")
+                or "session"
+            )
+            timestamp_part = re.sub(
+                r"[^A-Za-z0-9._-]",
+                "_",
+                timestamp.replace(":", "-").replace(" ", "_"),
+            )
+            task_log_filename = (
+                f"{base_name}_usage_log_{session_part}_{timestamp_part}.csv"
+            )
+            safe_name = os.path.basename(task_log_filename)
 
-            # Write task-specific CSV file with headers and single entry
-            with open(
-                task_specific_log_path, "w", newline="", encoding="utf-8-sig"
-            ) as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(headers)
-                writer.writerow(data)
+            # Write under a config allowlisted root + safe_name only. Do not join
+            # the caller-supplied output_folder into the path expression (CodeQL).
+            task_specific_log_path = None
+            for root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
+                if not root:
+                    continue
+                try:
+                    root_real = os.path.realpath(os.path.abspath(str(root)))
+                    out_real = os.path.realpath(os.path.abspath(str(output_folder)))
+                    if os.path.commonpath([root_real, out_real]) != root_real:
+                        continue
+                except (OSError, ValueError):
+                    continue
 
-            print(f"Created task-specific usage log: {task_specific_log_path}")
+                os.makedirs(root_real, exist_ok=True)
+                task_specific_log_path = os.path.join(root_real, safe_name)
+                break
+
+            if not task_specific_log_path:
+                print(
+                    "Skipping task-specific usage log; "
+                    "output folder outside allowed directories"
+                )
+            else:
+                # Write task-specific CSV file with headers and single entry
+                with open(
+                    task_specific_log_path, "w", newline="", encoding="utf-8-sig"
+                ) as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(headers)
+                    writer.writerow(data)
+
+                print(f"Created task-specific usage log: {task_specific_log_path}")
 
     # Write to DynamoDB if enabled
     if save_to_dynamodb:
@@ -827,6 +913,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         help="Ask the model to assign responses to only a single topic. Default: No",
     )
     extract_group.add_argument(
+        "--include_topic_confidence",
+        choices=["Yes", "No"],
+        default="Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+        help="Ask the model to score how confident it is in each topic assignment (0 to 1). Default: No unless INCLUDE_TOPIC_CONFIDENCE is enabled.",
+    )
+    extract_group.add_argument(
         "--produce_structured_summary",
         choices=["Yes", "No"],
         default="No",
@@ -851,6 +943,14 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
         "--enable_batch_deduplication",
         default=ENABLE_BATCH_DEDUPLICATION,
         help=f"Enable deduplication after each batch during topic extraction (True/False). Default: {ENABLE_BATCH_DEDUPLICATION}",
+    )
+    extract_group.add_argument(
+        "--shuffle_candidate_topics_in_batch_prompts",
+        default=SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS,
+        help=(
+            "Shuffle suggested/candidate topics in each batch prompt (True/False). "
+            f"Default: {SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS}"
+        ),
     )
     extract_group.add_argument(
         "--maximum_allowed_topics",
@@ -1095,7 +1195,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
     import tools.config as config_module
 
     if hasattr(args, "enable_batch_deduplication"):
-        config_module.ENABLE_BATCH_DEDUPLICATION = args.enable_batch_deduplication
+        config_module.ENABLE_BATCH_DEDUPLICATION = convert_string_to_boolean(
+            str(args.enable_batch_deduplication)
+        )
+    if hasattr(args, "shuffle_candidate_topics_in_batch_prompts"):
+        config_module.SHUFFLE_CANDIDATE_TOPICS_IN_BATCH_PROMPTS = (
+            convert_string_to_boolean(
+                str(args.shuffle_candidate_topics_in_batch_prompts)
+            )
+        )
     if hasattr(args, "maximum_allowed_topics"):
         config_module.MAXIMUM_ALLOWED_TOPICS = args.maximum_allowed_topics
 
@@ -1219,6 +1327,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 force_zero_shot_radio=args.force_zero_shot,
                 in_excel_sheets=args.excel_sheets,
                 force_single_topic_radio=args.force_single_topic,
+                include_topic_confidence_radio=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 produce_structured_summary_radio=args.produce_structured_summary,
                 aws_access_key_textbox=args.aws_access_key,
                 aws_secret_key_textbox=args.aws_secret_key,
@@ -1296,6 +1409,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1374,6 +1496,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 force_zero_shot_radio=args.force_zero_shot,
                 in_excel_sheets=args.excel_sheets,
                 force_single_topic_radio=args.force_single_topic,
+                include_topic_confidence_radio=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 produce_structured_summary_radio=args.produce_structured_summary,
                 aws_access_key_textbox=args.aws_access_key,
                 aws_secret_key_textbox=args.aws_secret_key,
@@ -1514,6 +1641,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 produce_structured_summary_radio=args.produce_structured_summary,
                 force_zero_shot_radio=args.force_zero_shot,
                 force_single_topic_radio=args.force_single_topic,
+                include_topic_confidence_radio=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 context_textbox=args.context,
                 additional_instructions_summary_format=args.additional_summary_instructions,
                 output_folder=args.output_dir,
@@ -1583,6 +1715,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1692,8 +1833,12 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
             if summarisation_input_files:
                 print("Generated Files:", sorted(summarisation_input_files))
 
-            # Initialize task_usage_log_path
+            # Initialize task_usage_log_path and usage stats
             task_usage_log_path = None
+            llm_input_tokens = 0
+            llm_output_tokens = 0
+            llm_calls = 0
+            llm_time = processing_time
 
             # Write usage log (only for LLM deduplication which has token counts)
             if args.method == "llm":
@@ -1756,6 +1901,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=llm_calls,
+                        input_tokens=llm_input_tokens,
+                        output_tokens=llm_output_tokens,
+                        time_taken=llm_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1904,6 +2058,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2028,6 +2191,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2141,6 +2313,11 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 force_zero_shot_choice=args.force_zero_shot,
                 in_excel_sheets=args.excel_sheets,
                 force_single_topic_choice=args.force_single_topic,
+                include_topic_confidence_choice=getattr(
+                    args,
+                    "include_topic_confidence",
+                    "Yes" if INCLUDE_TOPIC_CONFIDENCE else "No",
+                ),
                 produce_structures_summary_choice=args.produce_structured_summary,
                 aws_access_key_text=args.aws_access_key,
                 aws_secret_key_text=args.aws_secret_key,
@@ -2226,6 +2403,15 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         structured_summaries=args.produce_structured_summary,
                         candidate_topics=args.candidate_topics,
                         create_topics_csv="Yes" if args.create_topics_csv else "No",
+                        llm_call_number=number_of_calls_num or 0,
+                        input_tokens=input_tokens_num or 0,
+                        output_tokens=output_tokens_num or 0,
+                        time_taken=estimated_time_taken_number or processing_time,
+                        temperature=args.temperature,
+                        batch_size=args.batch_size,
+                        force_zero_shot=args.force_zero_shot,
+                        force_single_topic=args.force_single_topic,
+                        sentiment_analysis=args.sentiment,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
