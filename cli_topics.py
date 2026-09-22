@@ -75,8 +75,6 @@ from tools.helper_functions import (
     ColumnNotFoundError,
     load_in_data_file,
     load_in_previous_data_files,
-    resolve_under_allowed_root,
-    safe_output_file_path,
 )
 from tools.llm_api_call import (
     all_in_one_pipeline,
@@ -232,17 +230,48 @@ def _sanitize_folder_name(folder_name: str, max_length: int = 50) -> str:
     return sanitized
 
 
-def _resolve_safe_cli_output_path(path: str) -> str | None:
-    """Return path if it resolves under an allowlisted local output root, else None."""
+def _find_allowlisted_output_file(path: str) -> str | None:
+    """
+    Find path's basename under an allowlisted output root.
+
+    Rebuilds the filesystem path from trusted roots + os.path.basename only, so
+    the raw user-supplied path string is never used in path expressions (CodeQL
+    path-injection). Checks the root and one level of session subdirectories.
+    """
     if not path or not str(path).strip():
         return None
-    for allowed_root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
-        if not allowed_root:
+
+    safe_name = os.path.basename(str(path).strip())
+    if not safe_name or safe_name in {".", ".."}:
+        return None
+
+    for root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
+        if not root:
             continue
         try:
-            return resolve_under_allowed_root(path, allowed_root=allowed_root)
-        except ValueError:
+            root_real = os.path.realpath(os.path.abspath(str(root)))
+        except OSError:
             continue
+
+        search_dirs = [root_real]
+        try:
+            for entry in os.listdir(root_real):
+                sub = os.path.join(root_real, entry)
+                if os.path.isdir(sub):
+                    search_dirs.append(sub)
+        except OSError:
+            pass
+
+        for directory in search_dirs:
+            candidate = os.path.join(directory, safe_name)
+            try:
+                candidate_real = os.path.realpath(candidate)
+                if os.path.commonpath([root_real, candidate_real]) != root_real:
+                    continue
+                if os.path.isfile(candidate_real):
+                    return candidate_real
+            except (OSError, ValueError):
+                continue
     return None
 
 
@@ -294,20 +323,18 @@ def upload_outputs_to_s3_if_enabled(
 
     # Check if task-specific usage log should be uploaded to S3 output folder
     if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and task_usage_log_path:
-        safe_usage_log_path = _resolve_safe_cli_output_path(task_usage_log_path)
+        # Rebuild under allowlisted roots from basename only — do not use the
+        # raw caller path in exists/open/upload (keeps CodeQL path-injection clean).
+        safe_usage_log_path = _find_allowlisted_output_file(task_usage_log_path)
         if not safe_usage_log_path:
             print(
                 "Skipping task-specific usage log upload; "
-                f"path outside allowed directories: {task_usage_log_path}"
+                f"file not found under allowed directories: {os.path.basename(str(task_usage_log_path))}"
             )
-        elif os.path.exists(safe_usage_log_path):
+        else:
             valid_files.append(safe_usage_log_path)
             print(
                 f"Including task-specific usage log in S3 upload: {safe_usage_log_path}"
-            )
-        else:
-            print(
-                f"Task-specific usage log not found at {safe_usage_log_path}, skipping usage log upload."
             )
 
     if UPLOAD_PROMPT_RESPONSE_LOG_TO_S3_OUTPUTS and prompt_response_log_paths:
@@ -477,34 +504,51 @@ def write_usage_log(
 
         # Create task-specific usage log file if enabled and output folder provided
         if UPLOAD_USAGE_LOG_TO_S3_OUTPUTS and output_folder:
-            # Create task-specific usage log file name
-            # Use session hash and timestamp to make it unique
+            # Build a safe filename from basenames / allowlisted characters only.
             base_name = (
-                os.path.splitext(os.path.basename(file_name))[0]
+                os.path.splitext(os.path.basename(str(file_name)))[0]
                 if file_name
                 else "usage"
             )
-            task_log_filename = f"{base_name}_usage_log_{session_hash[:8]}_{timestamp.replace(':', '-').replace(' ', '_')}.csv"
-            # Restrict writes to allowlisted output roots (blocks path traversal via
-            # client/CLI-supplied output_folder).
+            base_name = (
+                re.sub(r"[^A-Za-z0-9._-]", "_", base_name).strip("._") or "usage"
+            )
+            session_part = (
+                re.sub(r"[^A-Za-z0-9._-]", "_", str(session_hash)[:8]).strip("._")
+                or "session"
+            )
+            timestamp_part = re.sub(
+                r"[^A-Za-z0-9._-]",
+                "_",
+                timestamp.replace(":", "-").replace(" ", "_"),
+            )
+            task_log_filename = (
+                f"{base_name}_usage_log_{session_part}_{timestamp_part}.csv"
+            )
+            safe_name = os.path.basename(task_log_filename)
+
+            # Write under a config allowlisted root + safe_name only. Do not join
+            # the caller-supplied output_folder into the path expression (CodeQL).
             task_specific_log_path = None
-            last_path_error = None
-            for allowed_root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
-                if not allowed_root:
+            for root in (OUTPUT_FOLDER, DIRECT_MODE_OUTPUT_DIR):
+                if not root:
                     continue
                 try:
-                    task_specific_log_path = safe_output_file_path(
-                        output_folder,
-                        task_log_filename,
-                        allowed_root=allowed_root,
-                    )
-                    break
-                except ValueError as exc:
-                    last_path_error = exc
+                    root_real = os.path.realpath(os.path.abspath(str(root)))
+                    out_real = os.path.realpath(os.path.abspath(str(output_folder)))
+                    if os.path.commonpath([root_real, out_real]) != root_real:
+                        continue
+                except (OSError, ValueError):
+                    continue
+
+                os.makedirs(root_real, exist_ok=True)
+                task_specific_log_path = os.path.join(root_real, safe_name)
+                break
+
             if not task_specific_log_path:
                 print(
                     "Skipping task-specific usage log; "
-                    f"output folder outside allowed directories: {last_path_error}"
+                    "output folder outside allowed directories"
                 )
             else:
                 # Write task-specific CSV file with headers and single entry

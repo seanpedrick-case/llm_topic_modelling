@@ -82,6 +82,8 @@ def run_cli_topics(
     # 1. Get absolute paths and perform pre-checks
     script_abs_path = os.path.abspath(script_path)
     output_abs_dir = os.path.abspath(output_dir)
+    if not output_abs_dir.endswith(("/", "\\", os.sep)):
+        output_abs_dir = output_abs_dir + os.sep
 
     # Handle input file based on task
     if task in ["extract", "validate", "all_in_one"] and input_file is None:
@@ -224,6 +226,10 @@ def run_cli_topics(
         # Keep CLI tests independent of local app_config.env redaction settings
         env["ENABLE_INPUT_REDACTION"] = "0"
         env["ENABLE_ORIGINAL_DATA_REDACTION"] = "0"
+        # Align allowlisted output roots with this test's --output_dir (temp dirs
+        # sit outside the default OUTPUT_FOLDER and would fail path hardening).
+        env["GRADIO_OUTPUT_FOLDER"] = output_abs_dir
+        env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
 
         result = subprocess.Popen(
             command,
@@ -462,6 +468,8 @@ def run_app_direct_mode(
     # 1. Get absolute paths and perform pre-checks
     app_abs_path = os.path.abspath(app_path)
     output_abs_dir = os.path.abspath(output_dir)
+    if not output_abs_dir.endswith(("/", "\\", os.sep)):
+        output_abs_dir = output_abs_dir + os.sep
 
     # Handle input file based on task
     if task in ["extract", "validate", "all_in_one"] and input_file is None:
@@ -491,6 +499,10 @@ def run_app_direct_mode(
     # Keep direct-mode tests independent of local app_config.env redaction settings
     env["ENABLE_INPUT_REDACTION"] = "0"
     env["ENABLE_ORIGINAL_DATA_REDACTION"] = "0"
+    # Align allowlisted output roots with this test's output_dir (temp dirs sit
+    # outside the default OUTPUT_FOLDER and would fail path hardening).
+    env["GRADIO_OUTPUT_FOLDER"] = output_abs_dir
+    env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
 
     # Enable direct mode
     env["RUN_DIRECT_MODE"] = "1"
@@ -502,7 +514,7 @@ def run_app_direct_mode(
     if input_file:
         # Use pipe separator to handle file paths with spaces
         env["DIRECT_MODE_INPUT_FILE"] = input_abs_path
-    env["DIRECT_MODE_OUTPUT_DIR"] = output_abs_dir
+    env["DIRECT_MODE_OUTPUT_DIR"] = output_root
     if text_column:
         env["DIRECT_MODE_TEXT_COLUMN"] = text_column
     if previous_output_files:

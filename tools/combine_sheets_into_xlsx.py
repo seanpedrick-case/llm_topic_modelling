@@ -145,6 +145,49 @@ def _resolve_output_path(candidate_path: str, allowed_root: str = OUTPUT_FOLDER)
     return resolved_path
 
 
+def _remove_temp_for_xlsx_csv(csv_file: str, allowed_root: str = OUTPUT_FOLDER) -> None:
+    """
+    Delete an intermediate '*_for_xlsx.csv' under allowed_root.
+
+    Rebuilds the path from the allowlisted root + basename only so the raw
+    caller/output_folder-derived string is never used in exists/remove (CodeQL).
+    """
+    safe_name = os.path.basename(str(csv_file or "").strip())
+    if (
+        not safe_name
+        or safe_name in {".", ".."}
+        or not safe_name.endswith("_for_xlsx.csv")
+    ):
+        print(f"Skipping unexpected cleanup path: {csv_file}")
+        return
+
+    try:
+        root_real = os.path.realpath(os.path.abspath(str(allowed_root)))
+    except OSError as exc:
+        raise ValueError(f"Invalid allowed root '{allowed_root}'") from exc
+
+    search_dirs = [root_real]
+    try:
+        for entry in os.listdir(root_real):
+            sub = os.path.join(root_real, entry)
+            if os.path.isdir(sub):
+                search_dirs.append(sub)
+    except OSError:
+        pass
+
+    for directory in search_dirs:
+        candidate = os.path.join(directory, safe_name)
+        try:
+            candidate_real = os.path.realpath(candidate)
+            if os.path.commonpath([root_real, candidate_real]) != root_real:
+                continue
+            if os.path.isfile(candidate_real):
+                os.remove(candidate_real)
+                return
+        except (OSError, ValueError):
+            continue
+
+
 def convert_xlsx_to_ods(
     xlsx_path: str, ods_path: str, allowed_root: str = OUTPUT_FOLDER
 ):
@@ -1236,12 +1279,7 @@ def collect_output_csvs_and_create_excel_output(
     # Delete intermediate '_for_xlsx.csv' files (only under OUTPUT_FOLDER)
     for csv_file in temp_csv_files_for_cleanup:
         try:
-            safe_csv = _resolve_output_path(csv_file, allowed_root=OUTPUT_FOLDER)
-            if not os.path.basename(safe_csv).endswith("_for_xlsx.csv"):
-                print(f"Skipping unexpected cleanup path: {csv_file}")
-                continue
-            if os.path.exists(safe_csv):
-                os.remove(safe_csv)
+            _remove_temp_for_xlsx_csv(csv_file, allowed_root=OUTPUT_FOLDER)
         except Exception as e:
             print(f"Could not delete temporary CSV file '{csv_file}' due to: {e}")
 

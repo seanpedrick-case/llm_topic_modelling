@@ -1925,6 +1925,10 @@ def resolve_under_allowed_root(
     """
     Resolve candidate_path and ensure it stays under allowed_root.
 
+    Returns a path rebuilt from allowed_root plus basename-sanitized relative
+    segments (never the raw user string), so callers can use the result in
+    path expressions without CodeQL path-injection taint.
+
     Raises ValueError if the path escapes the allowlisted root (path traversal).
     """
     if candidate_path is None or not str(candidate_path).strip():
@@ -1943,7 +1947,39 @@ def resolve_under_allowed_root(
         ) from exc
     if common != safe_root:
         raise ValueError(f"Path '{candidate_path}' is outside allowed output folder")
-    return resolved_path
+
+    rel = os.path.relpath(resolved_path, safe_root)
+    if rel in (os.curdir, ""):
+        return safe_root
+
+    safe_parts: List[str] = []
+    for part in rel.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ValueError(
+                f"Path '{candidate_path}' is outside allowed output folder"
+            )
+        # basename is the CodeQL-recognized sanitizer for path segments
+        safe_part = os.path.basename(part)
+        if not safe_part or safe_part in {".", ".."}:
+            raise ValueError(
+                f"Path '{candidate_path}' is outside allowed output folder"
+            )
+        safe_parts.append(safe_part)
+
+    rebuilt = os.path.join(safe_root, *safe_parts) if safe_parts else safe_root
+    rebuilt_real = os.path.realpath(rebuilt)
+    try:
+        if os.path.commonpath([safe_root, rebuilt_real]) != safe_root:
+            raise ValueError(
+                f"Path '{candidate_path}' is outside allowed output folder"
+            )
+    except ValueError as exc:
+        raise ValueError(
+            f"Path '{candidate_path}' is outside allowed output folder"
+        ) from exc
+    return rebuilt
 
 
 def ensure_safe_output_folder(
@@ -1963,7 +1999,7 @@ def ensure_safe_output_folder(
     )
     safe_folder = resolve_under_allowed_root(candidate, allowed_root=allowed_root)
     os.makedirs(safe_folder, exist_ok=True)
-    return resolve_under_allowed_root(safe_folder, allowed_root=allowed_root)
+    return safe_folder
 
 
 def safe_output_file_path(
@@ -1977,10 +2013,7 @@ def safe_output_file_path(
     safe_folder = ensure_safe_output_folder(output_folder, allowed_root=allowed_root)
     safe_name = os.path.basename(str(file_name or "").strip())
     safe_name = re.sub(r"[\\/]+", "_", safe_name).strip("._") or "output"
-    return resolve_under_allowed_root(
-        os.path.join(safe_folder, safe_name),
-        allowed_root=allowed_root,
-    )
+    return os.path.join(safe_folder, safe_name)
 
 
 def _normalise_header_key(name: object) -> str:
