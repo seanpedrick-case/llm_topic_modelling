@@ -23,7 +23,7 @@ ENV INSTALL_TORCH=${INSTALL_TORCH}
 
 # Local torch install requires CUDA 13.0
 RUN if [ "$INSTALL_TORCH" = "True" ]; then \
-    pip install --no-cache-dir --target=/install torch==2.14.0 --extra-index-url https://download.pytorch.org/whl/cu130; \
+    pip install --no-cache-dir --target=/install torch==2.14.1 --extra-index-url https://download.pytorch.org/whl/cu130; \
     fi
 
 ARG INSTALL_LLAMA_CPP_PYTHON=False
@@ -31,7 +31,7 @@ ENV INSTALL_LLAMA_CPP_PYTHON=${INSTALL_LLAMA_CPP_PYTHON}
 
 # Llama CPP Python install requires CUDA 13.0
 RUN if [ "$INSTALL_LLAMA_CPP_PYTHON" = "True" ]; then \
-    pip install --no-cache-dir --target=/install https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35-cu130/llama_cpp_python-0.3.35-py3-none-manylinux_2_35_x86_64.whl; \
+    pip install --no-cache-dir --target=/install https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.35-cu130/llama_cpp_python-0.3.36-py3-none-manylinux_2_35_x86_64.whl; \
     fi
 
 RUN pip install --no-cache-dir --target=/install -r requirements_lightweight.txt
