@@ -1134,6 +1134,74 @@ def construct_azure_client(in_api_key: str, endpoint: str) -> Tuple[object, dict
         raise
 
 
+def bedrock_model_rejects_sampling_params(model_choice: str) -> bool:
+    """
+    Return True for Anthropic Claude models that reject temperature/top_p/top_k.
+
+    Per Anthropic/Bedrock docs, sampling params are rejected on Claude Opus 4.7+,
+    Claude Sonnet 5+, Claude Haiku 5.5+, and Claude Fable/Mythos 5+.
+    """
+    model_lower = (model_choice or "").lower()
+    if "anthropic" not in model_lower and "claude" not in model_lower:
+        return False
+
+    opus_match = re.search(r"claude-opus-(\d+)(?:[-.](\d+))?", model_lower)
+    if opus_match:
+        major = int(opus_match.group(1))
+        minor = int(opus_match.group(2) or 0)
+        if major > 4 or (major == 4 and minor >= 7):
+            return True
+
+    sonnet_match = re.search(r"claude-sonnet-(\d+)", model_lower)
+    if sonnet_match and int(sonnet_match.group(1)) >= 5:
+        return True
+
+    haiku_match = re.search(r"claude-haiku-(\d+)(?:[-.](\d+))?", model_lower)
+    if haiku_match:
+        major = int(haiku_match.group(1))
+        minor = int(haiku_match.group(2) or 0)
+        if major > 5 or (major == 5 and minor >= 5):
+            return True
+
+    other_match = re.search(r"claude-(?:fable|mythos)-(\d+)", model_lower)
+    if other_match and int(other_match.group(1)) >= 5:
+        return True
+
+    return False
+
+
+def _is_bedrock_sampling_param_deprecated_error(error: Exception) -> bool:
+    """True when Bedrock rejects temperature/top_p/top_k as deprecated."""
+    message = str(error).lower()
+    return "deprecated for this model" in message and any(
+        param in message for param in ("temperature", "top_p", "topp", "top_k", "topk")
+    )
+
+
+def _extract_bedrock_converse_text(
+    output_message: dict,
+    assistant_prefill: str = "",
+    assistant_prefill_added: bool = False,
+) -> str:
+    """
+    Extract assistant text from a Bedrock Converse message.
+
+    Claude Sonnet 5+ may put adaptive-thinking ``reasoningContent`` before the
+    ``text`` block, so callers must not assume content[0] is text.
+    """
+    content_blocks = output_message.get("content") or []
+    text_parts = []
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        if "text" in block and block["text"] is not None:
+            text_parts.append(block["text"])
+    text = "".join(text_parts)
+    if assistant_prefill_added and assistant_prefill:
+        return assistant_prefill + text
+    return text
+
+
 def call_aws_bedrock(
     prompt: str,
     system_prompt: str,
@@ -1156,22 +1224,30 @@ def call_aws_bedrock(
     The function constructs the request configuration, invokes the model, extracts the response text, and returns a ResponseObject containing the text and metadata.
     """
 
+    model_choice_lower = model_choice.lower()
+    is_anthropic = "anthropic" in model_choice_lower or "claude" in model_choice_lower
+    omit_sampling_params = bedrock_model_rejects_sampling_params(model_choice)
+
     inference_config = {
         "maxTokens": max_tokens,
-        "temperature": temperature,
     }
-
-    # Anthropic Bedrock models reject temperature together with top_p/top_k.
-    # Prefer temperature when set; keep topP for other Bedrock model families.
-    model_choice_lower = model_choice.lower()
-    is_anthropic = "anthropic" in model_choice_lower
-    if not is_anthropic:
-        inference_config["topP"] = 0.999
+    # Newer Claude models (Opus 4.7+ / Sonnet 5+ / Haiku 5.5+) reject sampling
+    # params entirely. Older Anthropic models accept temperature but not with
+    # topP; other Bedrock families keep topP.
+    if not omit_sampling_params:
+        inference_config["temperature"] = temperature
+        if not is_anthropic:
+            inference_config["topP"] = 0.999
+    else:
+        print(
+            f"Omitting temperature/topP for '{model_choice}' "
+            "(sampling parameters are not supported on this model)"
+        )
 
     # Assistant prefill is only supported on older Anthropic Claude 3.x models.
-    # Claude 4+ on Bedrock rejects ending the conversation with an assistant turn.
+    # Claude 4+ / 5+ on Bedrock reject ending the conversation with an assistant turn.
     supports_prefill = is_anthropic and not re.search(
-        r"claude-(?:sonnet-|opus-|haiku-)?4", model_choice_lower
+        r"claude-(?:sonnet-|opus-|haiku-|fable-|mythos-)?[4-9]", model_choice_lower
     )
     if assistant_prefill and supports_prefill:
         assistant_prefill_added = True
@@ -1201,30 +1277,42 @@ def call_aws_bedrock(
 
     system_prompt_list = [{"text": system_prompt}]
 
-    # The converse API call.
-    api_response = bedrock_runtime.converse(
-        modelId=model_choice,
-        messages=messages,
-        system=system_prompt_list,
-        inferenceConfig=inference_config,
-    )
+    # The converse API call. If an unlisted newer model still rejects sampling
+    # params, retry once with temperature/topP removed.
+    try:
+        api_response = bedrock_runtime.converse(
+            modelId=model_choice,
+            messages=messages,
+            system=system_prompt_list,
+            inferenceConfig=inference_config,
+        )
+    except Exception as e:
+        if (
+            not omit_sampling_params
+            and _is_bedrock_sampling_param_deprecated_error(e)
+            and ("temperature" in inference_config or "topP" in inference_config)
+        ):
+            print(
+                f"Bedrock rejected sampling params for '{model_choice}': {e}. "
+                "Retrying without temperature/topP."
+            )
+            inference_config.pop("temperature", None)
+            inference_config.pop("topP", None)
+            api_response = bedrock_runtime.converse(
+                modelId=model_choice,
+                messages=messages,
+                system=system_prompt_list,
+                inferenceConfig=inference_config,
+            )
+        else:
+            raise
 
     output_message = api_response["output"]["message"]
-
-    if "reasoningContent" in output_message["content"][0]:
-        # Extract the reasoning text
-        output_message["content"][0]["reasoningContent"]["reasoningText"]["text"]
-
-        # Extract the output text
-        if assistant_prefill_added:
-            text = assistant_prefill + output_message["content"][1]["text"]
-        else:
-            text = output_message["content"][1]["text"]
-    else:
-        if assistant_prefill_added:
-            text = assistant_prefill + output_message["content"][0]["text"]
-        else:
-            text = output_message["content"][0]["text"]
+    text = _extract_bedrock_converse_text(
+        output_message,
+        assistant_prefill=assistant_prefill,
+        assistant_prefill_added=assistant_prefill_added,
+    )
 
     # The usage statistics are neatly provided in the 'usage' key.
     usage = api_response["usage"]
