@@ -84,6 +84,7 @@ from tools.config import (
     MULTIMODAL_PROMPT_FORMAT,
     NUM_PRED_TOKENS,
     NUMBER_OF_RETRY_ATTEMPTS,
+    RUN_INFERENCE_SERVER,
     RUN_LOCAL_MODEL,
     SPECULATIVE_DECODING,
     TIMEOUT_WAIT,
@@ -92,7 +93,11 @@ from tools.config import (
     USE_LLAMA_SWAP,
     V_QUANT_LEVEL,
 )
-from tools.helper_functions import _get_env_list
+from tools.helper_functions import (
+    _get_env_list,
+    is_bedrock_model_missing_error,
+    reregister_model_as_inference_server,
+)
 
 if SPECULATIVE_DECODING == "True":
     SPECULATIVE_DECODING = True
@@ -1550,6 +1555,7 @@ def send_request(
                 )
 
     elif "AWS" in model_source:
+        fallback_to_inference_server = False
         for i in progress_bar:
             try:
                 # print("Calling AWS Bedrock model, attempt", i + 1)
@@ -1566,6 +1572,41 @@ def send_request(
                 # print("Successful call to Claude model.")
                 break
             except Exception as e:
+                from tools.config import API_URL, model_name_map
+
+                model_info = model_name_map.get(model_choice, {})
+                is_custom_model = bool(model_info.get("dynamically_registered"))
+                model_missing = is_bedrock_model_missing_error(e)
+
+                # Custom/unlisted models: do not keep retrying a missing Bedrock model ID.
+                # Fall back to inference-server only when that mode is enabled.
+                if is_custom_model and model_missing:
+                    if RUN_INFERENCE_SERVER == "1":
+                        fallback_url = api_url or API_URL
+                        print(
+                            f"Call to Bedrock model failed because the model was not "
+                            f"found: {e}. Falling back to inference-server at "
+                            f"{fallback_url}."
+                        )
+                        reregister_model_as_inference_server(model_choice)
+                        model_source = "inference-server"
+                        api_url = fallback_url
+                        fallback_to_inference_server = True
+                        break
+
+                    print(
+                        f"Call to Bedrock model failed because the model was not "
+                        f"found: {e}. Inference-server fallback is disabled "
+                        f"(RUN_INFERENCE_SERVER!=1)."
+                    )
+                    return (
+                        ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                        conversation_history,
+                        response_text,
+                        num_transformer_input_tokens,
+                        num_transformer_generated_tokens,
+                    )
+
                 # If fails, try again after X seconds in case there is a throttle limit
                 print(
                     "Call to Bedrock model failed:",
@@ -1584,6 +1625,47 @@ def send_request(
                     num_transformer_input_tokens,
                     num_transformer_generated_tokens,
                 )
+
+        if fallback_to_inference_server:
+            for i in progress_bar:
+                try:
+                    print("Calling inference-server API, attempt", i + 1)
+
+                    if api_url is None:
+                        raise ValueError(
+                            "api_url is required when falling back to "
+                            "'inference-server'"
+                        )
+
+                    gen_config = LlamaCPPGenerationConfig()
+                    gen_config.update_temp(temperature)
+
+                    response = call_inference_server_api(
+                        prompt,
+                        system_prompt,
+                        gen_config,
+                        api_url=api_url,
+                        model_name=model_choice,
+                    )
+                    break
+                except Exception as e:
+                    print(
+                        "Call to inference-server API failed:",
+                        e,
+                        " Waiting for ",
+                        str(timeout_wait),
+                        "seconds and trying again.",
+                    )
+                    time.sleep(timeout_wait)
+
+                if i == number_of_api_retry_attempts - 1:
+                    return (
+                        ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
+                        conversation_history,
+                        response_text,
+                        num_transformer_input_tokens,
+                        num_transformer_generated_tokens,
+                    )
     elif "Azure/OpenAI" in model_source:
         for i in progress_bar:
             try:

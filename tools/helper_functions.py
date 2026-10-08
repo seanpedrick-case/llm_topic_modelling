@@ -2260,11 +2260,77 @@ def update_model_choice(model_source):
     )
 
 
+def is_bedrock_model_missing_error(error: Exception) -> bool:
+    """
+    Return True if an exception indicates the Bedrock model ID does not exist
+    / cannot be resolved (as opposed to throttle, access, or config errors).
+    """
+    error_code = ""
+    error_message = str(error).lower()
+
+    response = getattr(error, "response", None)
+    if isinstance(response, dict):
+        error_code = response.get("Error", {}).get("Code", "") or ""
+
+    # Valid model that must be invoked via an inference profile — not "missing".
+    if "on-demand throughput" in error_message:
+        return False
+
+    if error_code == "ResourceNotFoundException":
+        return True
+
+    if error_code == "ValidationException" and (
+        "model identifier is invalid" in error_message
+        or "could not resolve the foundation model" in error_message
+        or "provided model identifier" in error_message
+    ):
+        return True
+
+    # Stringified ClientError fallbacks
+    if "resourcenotfoundexception" in error_message:
+        return True
+    if "validationexception" in error_message and (
+        "model identifier is invalid" in error_message
+        or "could not resolve the foundation model" in error_message
+    ):
+        return True
+
+    return False
+
+
+def reregister_model_as_inference_server(
+    model_choice: str, model_name_map_dict: dict = None
+) -> dict:
+    """
+    Re-register a model as inference-server after Bedrock reports it missing.
+    """
+    if model_name_map_dict is None:
+        from tools.config import model_name_map
+
+        model_name_map_dict = model_name_map
+
+    existing = model_name_map_dict.get(model_choice, {})
+    model_name_map_dict[model_choice] = {
+        "short_name": existing.get("short_name", model_choice),
+        "source": "inference-server",
+        "dynamically_registered": True,
+    }
+    print(
+        f"Switched custom model '{model_choice}' to inference-server "
+        "(Bedrock reported the model as missing)"
+    )
+    return model_name_map_dict
+
+
 def ensure_model_in_map(model_choice: str, model_name_map_dict: dict = None) -> dict:
     """
     Ensures that a model_choice is registered in model_name_map.
-    If the model_choice is not found, it assumes it's an inference-server model
-    and adds it to the map with source "inference-server".
+
+    If the model_choice is not found and AWS Bedrock models are enabled, it is
+    registered as an AWS Bedrock model so the app tries Bedrock first. Call sites
+    can fall back to inference-server if Bedrock reports that the model does not
+    exist. If Bedrock is disabled, unknown models are registered as
+    inference-server models.
 
     Args:
         model_choice (str): The model name to check/register
@@ -2280,12 +2346,25 @@ def ensure_model_in_map(model_choice: str, model_name_map_dict: dict = None) -> 
 
         model_name_map_dict = model_name_map
 
-    # If model_choice is not in the map, assume it's an inference-server model
+    # If model_choice is not in the map, prefer AWS Bedrock when enabled
     if model_choice not in model_name_map_dict:
+        from tools.config import RUN_AWS_BEDROCK_MODELS
+
+        if RUN_AWS_BEDROCK_MODELS == "1":
+            source = "AWS"
+            print(
+                f"Registered custom model '{model_choice}' as AWS Bedrock model "
+                "(will fall back to inference-server if Bedrock reports the model "
+                "does not exist)"
+            )
+        else:
+            source = "inference-server"
+            print(f"Registered custom model '{model_choice}' as inference-server model")
+
         model_name_map_dict[model_choice] = {
             "short_name": model_choice,
-            "source": "inference-server",
+            "source": source,
+            "dynamically_registered": True,
         }
-        print(f"Registered custom model '{model_choice}' as inference-server model")
 
     return model_name_map_dict
