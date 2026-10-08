@@ -491,43 +491,99 @@ if RUN_LOCAL_MODEL == "1" and CHOSEN_LOCAL_MODEL_TYPE:
     model_source.append("Local")
 
 if RUN_AWS_BEDROCK_MODELS == "1":
+    # Curated EU-available Bedrock text models (see https://amazonbedrockmodels.github.io).
+    # Prefer active chat/instruct models available in EU regions (esp. eu-west-2).
     amazon_models = [
+        # Google
+        "google.gemma-3-4b-it",
         "google.gemma-3-12b-it",
         "google.gemma-3-27b-it",
-        # "anthropic.claude-3-haiku-20240307-v1:0",
-        # "anthropic.claude-3-7-sonnet-20250219-v1:0",
+        # Anthropic Claude
+        "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "anthropic.claude-haiku-5-5",
+        "anthropic.claude-sonnet-4-5-20250929-v1:0",
         "anthropic.claude-sonnet-4-6",
+        "anthropic.claude-sonnet-5",
+        "anthropic.claude-sonnet-5-5",
+        "anthropic.claude-opus-4-5-20251101-v1:0",
         "anthropic.claude-opus-4-6-v1",
-        # "amazon.nova-micro-v1:0",
+        "anthropic.claude-opus-4-7",
+        "anthropic.claude-opus-4-8",
+        "anthropic.claude-opus-5",
+        "anthropic.claude-opus-5-5",
+        "anthropic.claude-fable-5-1",
+        # Amazon Nova
+        "amazon.nova-micro-v1:0",
         "amazon.nova-lite-v1:0",
+        "amazon.nova-2-lite-v1:0",
         "amazon.nova-pro-v1:0",
-        # "deepseek.v3-v1:0",
+        # DeepSeek
+        "deepseek.v3-v1:0",
+        "deepseek.v3.2",
+        # OpenAI (OSS on Bedrock Runtime)
         "openai.gpt-oss-20b-1:0",
         "openai.gpt-oss-120b-1:0",
+        # Mistral
         "mistral.ministral-3-14b-instruct",
         "mistral.magistral-small-2509",
         "mistral.devstral-2-123b",
+        # NVIDIA
+        "nvidia.nemotron-nano-3-30b",
         "nvidia.nemotron-super-3-120b",
+        # Moonshot / MiniMax / Qwen / Z.AI / xAI
+        "moonshotai.kimi-k2.5",
+        "moonshotai.kimi-k3",
+        "minimax.minimax-m2.5",
+        "qwen.qwen3-32b-v1:0",
+        "qwen.qwen3-next-80b-a3b",
+        "qwen.qwen3-235b-a22b-2507-v1:0",
+        "zai.glm-5",
+        "zai.glm-5.3",
+        "xai.grok-4.6",
+        "xai.grok-4.7",
     ]
     model_full_names.extend(amazon_models)
     model_short_names.extend(
         [
+            "gemma_3_4b_it",
             "gemma_3_12b_it",
             "gemma_3_27b_it",
-            # "haiku",
-            # "sonnet_3_7",
+            "haiku_4_5",
+            "haiku_5_5",
+            "sonnet_4_5",
             "sonnet_4_6",
+            "sonnet_5",
+            "sonnet_5_5",
+            "claude_opus_4_5",
             "claude_opus_4_6",
-            # "nova_micro",
+            "claude_opus_4_7",
+            "claude_opus_4_8",
+            "claude_opus_5",
+            "claude_opus_5_5",
+            "claude_fable_5_1",
+            "nova_micro",
             "nova_lite",
+            "nova_2_lite",
             "nova_pro",
-            # "deepseek_v3",
+            "deepseek_v3",
+            "deepseek_v3_2",
             "gpt_oss_20b_aws",
             "gpt_oss_120b_aws",
             "ministral_3_14b_instruct",
             "magistral_small_2509",
             "devstral_2_123b",
+            "nemotron_nano_3_30b",
             "nemotron_super_3_120b",
+            "kimi_k2_5",
+            "kimi_k3",
+            "minimax_m2_5",
+            "qwen3_32b",
+            "qwen3_next_80b",
+            "qwen3_235b",
+            "glm_5",
+            "glm_5_3",
+            "grok_4_6",
+            "grok_4_7",
         ]
     )
     model_source.extend(["AWS"] * len(amazon_models))
