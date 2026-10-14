@@ -1,6 +1,10 @@
 import os
 import re
 from datetime import date, datetime
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from pathlib import Path
 from typing import List, Optional, Union
 
 import pandas as pd
@@ -30,6 +34,38 @@ from tools.helper_functions import (
     read_file,
     write_candidate_topics_csv,
 )
+
+_PACKAGE_NAME = "llm_topic_modelling"
+_PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
+
+
+@lru_cache(maxsize=1)
+def get_app_version() -> str:
+    """
+    Return the app version for cover-sheet / output provenance.
+
+    Prefer pyproject.toml when present next to the source tree (local/HF Space
+    checkouts), so the reported version matches the code being run even if an
+    older package install is also on the path. Fall back to the installed
+    package metadata when pyproject.toml is unavailable.
+    """
+    try:
+        if _PYPROJECT_PATH.is_file():
+            text = _PYPROJECT_PATH.read_text(encoding="utf-8")
+            match = re.search(r'(?m)^version\s*=\s*["\']([^"\']+)["\']', text)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        print(f"Could not read app version from pyproject.toml due to: {e}")
+
+    try:
+        return package_version(_PACKAGE_NAME)
+    except PackageNotFoundError:
+        pass
+    except Exception as e:
+        print(f"Could not read installed package version due to: {e}")
+
+    return "unknown"
 
 
 def markdown_to_richtext(
@@ -463,6 +499,7 @@ def add_cover_sheet(
     meta_start = row + 1
     metadata = {
         "Date Excel file created": date.today().strftime("%Y-%m-%d"),
+        "App version": get_app_version(),
         "File name": file_name,
         "Column name": column_name,
     }

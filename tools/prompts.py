@@ -19,7 +19,7 @@ default_response_reference_format = "In the next column named 'Response ID', lis
 
 initial_table_prompt = """{validate_prompt_prefix}Your task is to create one new markdown table based on open text responses in the reponse table below.
 In the first column named 'General topic', identify general topics relevant to responses. Create as many general topics as you can.
-In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty.
+In the second column named 'Subtopic', list subtopics relevant to responses. Make the subtopics as specific as possible and make sure they cover every issue mentioned. The subtopic should never be empty. If multiple similar subtopics are relevant to a response, assign all of them to the response.
 {sentiment_choices}{response_reference_format}{confidence_choices}
 In the final column named 'Summary', write a summary of the subtopic based on relevant responses - highlight specific issues that appear.  Do not mention specific response numbers in the summary. {add_existing_topics_summary_format}
 Do not add any other columns. Do not add any other text to your response. Only mention topics that are relevant to at least one response.
@@ -36,9 +36,9 @@ add_existing_topics_system_prompt = system_prompt + markdown_additional_prompt
 
 add_existing_topics_assistant_prefill = "|"
 
-force_existing_topics_prompt = """Create a new markdown table. In the first column named 'Placeholder', write 'Not assessed'. In the second column named 'Subtopics', assign Topics from the above table to Responses. Assign topics only if they are very relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. Do not add any new topics, or modify existing topic names."""
+force_existing_topics_prompt = """Create a new markdown table. In the first column named 'Placeholder', write 'Not assessed'. In the second column named 'Subtopics', assign Topics from the above table to Responses. Assign topics only if they are relevant to the text of the Response. The assigned Subtopics should be chosen from the topics table above, exactly as written. If multiple similar subtopics are relevant to a response, assign all of them to the response. Do not add any new topics, or modify existing topic names."""
 
-allow_new_topics_prompt = """Create a new markdown table. In the first column named 'General topic', and the second column named 'Subtopic', assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are very relevant to the text of the Response. Fill in the General topic and Subtopic for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. The subtopic should never be blank or empty."""
+allow_new_topics_prompt = """Create a new markdown table. In the first column named 'General topic', and the second column named 'Subtopic', assign General Topics and Subtopics to Responses. Assign topics from the Topics table above only if they are relevant to the text of the Response. Fill in the General topic and Subtopic for the Topic if they do not already exist. If you find a new topic that does not exist in the Topics table, add a new row to the new table. Make the General topic and Subtopic as specific as possible. If multiple similar subtopics are relevant to a response, assign all of them to the response. The subtopic should never be blank or empty."""
 
 force_single_topic_prompt = """ Assign each response to one single topic only."""
 
@@ -125,7 +125,7 @@ structured_summary_prompt = """Your task is to write a structured summary for op
 
 Create a new markdown table based on the response table below with the headings 'Main heading', 'Subheading' and 'Summary'.
 
-For each of the responses in the Response table, you will create a row for each summary associated with each of the Main headings and Subheadings from the Headings table. If there is no Headings table, created your own headings. In the first and second columns, write a Main heading and Subheading from the Headings table.  Then in Summary, write a detailed and comprehensive summary that covers all information relevant to the Main heading and Subheading on the same row.
+For each of the responses in the Response table, you will create a row for each summary associated with each of the Main headings and Subheadings from the Headings table. If there is no Headings table, created your own headings. In the first and second columns, write a Main heading and Subheading from the Headings table. Then in Summary, write a detailed and comprehensive summary that covers all information relevant to the Main heading and Subheading on the same row.
 {summary_format}
 
 Do not add any other columns. Do not add any other text to your response.
