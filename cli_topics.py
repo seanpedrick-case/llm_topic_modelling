@@ -1418,6 +1418,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         force_zero_shot=args.force_zero_shot,
                         force_single_topic=args.force_single_topic,
                         sentiment_analysis=args.sentiment,
+                        consultation_context=args.context,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1724,6 +1725,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         force_zero_shot=args.force_zero_shot,
                         force_single_topic=args.force_single_topic,
                         sentiment_analysis=args.sentiment,
+                        consultation_context=args.context,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -1910,6 +1912,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         force_zero_shot=args.force_zero_shot,
                         force_single_topic=args.force_single_topic,
                         sentiment_analysis=args.sentiment,
+                        consultation_context=args.context,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2067,6 +2070,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         force_zero_shot=args.force_zero_shot,
                         force_single_topic=args.force_single_topic,
                         sentiment_analysis=args.sentiment,
+                        consultation_context=args.context,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2200,6 +2204,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         force_zero_shot=args.force_zero_shot,
                         force_single_topic=args.force_single_topic,
                         sentiment_analysis=args.sentiment,
+                        consultation_context=args.context,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")
@@ -2412,6 +2417,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                         force_zero_shot=args.force_zero_shot,
                         force_single_topic=args.force_single_topic,
                         sentiment_analysis=args.sentiment,
+                        consultation_context=args.context,
                     )
                     # if xlsx_files:
                     #    print(f"Excel output created: {sorted(xlsx_files)}")

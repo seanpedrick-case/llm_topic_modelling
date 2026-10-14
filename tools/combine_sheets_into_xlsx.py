@@ -1,6 +1,10 @@
 import os
 import re
 from datetime import date, datetime
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from pathlib import Path
 from typing import List, Optional, Union
 
 import pandas as pd
@@ -30,6 +34,38 @@ from tools.helper_functions import (
     read_file,
     write_candidate_topics_csv,
 )
+
+_PACKAGE_NAME = "llm_topic_modelling"
+_PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
+
+
+@lru_cache(maxsize=1)
+def get_app_version() -> str:
+    """
+    Return the app version for cover-sheet / output provenance.
+
+    Prefer pyproject.toml when present next to the source tree (local/HF Space
+    checkouts), so the reported version matches the code being run even if an
+    older package install is also on the path. Fall back to the installed
+    package metadata when pyproject.toml is unavailable.
+    """
+    try:
+        if _PYPROJECT_PATH.is_file():
+            text = _PYPROJECT_PATH.read_text(encoding="utf-8")
+            match = re.search(r'(?m)^version\s*=\s*["\']([^"\']+)["\']', text)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        print(f"Could not read app version from pyproject.toml due to: {e}")
+
+    try:
+        return package_version(_PACKAGE_NAME)
+    except PackageNotFoundError:
+        pass
+    except Exception as e:
+        print(f"Could not read installed package version due to: {e}")
+
+    return "unknown"
 
 
 def markdown_to_richtext(
@@ -365,6 +401,22 @@ def _yes_no_label(value) -> str:
     return text
 
 
+def _normalize_consultation_context(value) -> str:
+    """Return the user-facing consultation context string, or empty if none."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    # llm_api_call may wrap raw context before prompting; unwrap for display.
+    prefix = "The context of this analysis is '"
+    suffix = "'."
+    if text.startswith(prefix) and text.endswith(suffix):
+        return text[len(prefix) : -len(suffix)].strip()
+    return text
+
+
 def _build_run_settings_metadata(
     temperature=None,
     batch_size=None,
@@ -374,9 +426,14 @@ def _build_run_settings_metadata(
     sentiment_analysis: str = "",
     validation_used: str = "",
     llm_deduplication_used: str = "",
+    consultation_context: str = "",
 ) -> dict:
     """Build ordered cover-sheet metadata describing analysis run settings."""
     metadata = {}
+
+    context_label = _normalize_consultation_context(consultation_context)
+    if context_label:
+        metadata["Additional context provided to model"] = context_label
 
     if temperature is not None and str(temperature).strip() != "":
         try:
@@ -463,6 +520,7 @@ def add_cover_sheet(
     meta_start = row + 1
     metadata = {
         "Date Excel file created": date.today().strftime("%Y-%m-%d"),
+        "App version": get_app_version(),
         "File name": file_name,
         "Column name": column_name,
     }
@@ -773,6 +831,7 @@ def collect_output_csvs_and_create_excel_output(
     force_zero_shot: str = "",
     force_single_topic: str = "",
     sentiment_analysis: str = "",
+    consultation_context: str = "",
     validation_used: str = "",
     llm_deduplication_used: str = "",
 ):
@@ -806,6 +865,9 @@ def collect_output_csvs_and_create_excel_output(
         force_zero_shot (str, optional): Whether responses were forced into suggested topics.
         force_single_topic (str, optional): Whether responses were forced to a single topic.
         sentiment_analysis (str, optional): Sentiment analysis option used for the run.
+        consultation_context (str, optional): Extra context supplied to the model
+            (e.g. Gradio context textbox / DIRECT_MODE_CONTEXT). Shown on the cover sheet
+            when non-empty.
         validation_used (str, optional): Whether LLM validation was used. Defaults from ENABLE_VALIDATION.
         llm_deduplication_used (str, optional): Whether LLM deduplication was used.
             Defaults from ALL_IN_ONE_USE_LLM_DEDUP.
@@ -836,6 +898,7 @@ def collect_output_csvs_and_create_excel_output(
         sentiment_analysis=sentiment_analysis,
         validation_used=validation_used,
         llm_deduplication_used=llm_deduplication_used,
+        consultation_context=consultation_context,
     )
 
     if not chosen_cols:

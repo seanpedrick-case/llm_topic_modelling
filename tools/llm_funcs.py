@@ -45,6 +45,8 @@ full_text = (
 _model = None
 _tokenizer = None
 _assistant_model = None
+# Log once per model when sampling params are omitted (avoids spam on every call)
+_bedrock_sampling_omit_logged: set[str] = set()
 
 from tools.config import (
     ASSISTANT_MODEL,
@@ -1238,7 +1240,8 @@ def call_aws_bedrock(
         inference_config["temperature"] = temperature
         if not is_anthropic:
             inference_config["topP"] = 0.999
-    else:
+    elif model_choice not in _bedrock_sampling_omit_logged:
+        _bedrock_sampling_omit_logged.add(model_choice)
         print(
             f"Omitting temperature/topP for '{model_choice}' "
             "(sampling parameters are not supported on this model)"

@@ -280,11 +280,28 @@ def load_in_data_file(
     return file_data, file_name, num_batches
 
 
+def resolve_column_name(column_name: Any) -> str:
+    """Return a plain column name string from a list/tuple or scalar.
+
+    Gradio often passes chosen columns as a list (e.g. ``['Response text']``).
+    Using ``str()`` on that list embeds brackets into prompts and filenames
+    (e.g. ``"['Response text']"``). The primary analysis column is the first
+    selected column.
+    """
+    if isinstance(column_name, (list, tuple)):
+        if not column_name:
+            return ""
+        column_name = column_name[0]
+    if column_name is None:
+        return ""
+    return str(column_name)
+
+
 def clean_column_name(
     column_name: str, max_length: int = 20, front_characters: bool = True
 ):
-    # Convert to string
-    column_name = str(column_name)
+    # Unwrap list/tuple column selections before stringifying
+    column_name = resolve_column_name(column_name)
     # Replace non-alphanumeric characters (except underscores) with underscores
     column_name = re.sub(r"\W+", "_", column_name)
     # Remove leading/trailing underscores
