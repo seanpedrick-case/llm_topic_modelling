@@ -21,12 +21,9 @@ presidio_anonymizer<=2.2.364
 spacy<=3.8.16
 # GPU (for huggingface instance)
 # Torch/Unsloth and llama-cpp-python
-torch<=2.13.0 --extra-index-url https://download.pytorch.org/whl/cu128
+torch<=2.13.0 --extra-index-url https://download.pytorch.org/whl/cu130
 unsloth<=2026.10.2
 unsloth_zoo<=2026.10.2
 timm
 # llama-cpp-python direct wheel link for GPU compatible version for use with Python 3.10 and Hugging Face
-https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.31-cu125/llama_cpp_python-0.3.31-py3-none-manylinux_2_35_x86_64.whl
-
-
-
+https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.31-cu130/llama_cpp_python-0.3.31-py3-none-manylinux_2_35_x86_64.whl
