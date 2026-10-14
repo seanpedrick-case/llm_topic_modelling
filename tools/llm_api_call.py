@@ -71,6 +71,7 @@ from tools.helper_functions import (
     parse_topic_confidence_value,
     put_columns_in_df,
     read_file,
+    resolve_column_name,
     resolve_uploaded_file_path,
     safe_output_file_path,
     sample_responses_for_topic,
@@ -686,7 +687,8 @@ def validate_topics(
 
             # Always use the consolidated topics from the first run for validation
             validation_formatted_system_prompt = validation_system_prompt.format(
-                consultation_context=context_textbox, column_name=chosen_cols
+                consultation_context=context_textbox,
+                column_name=resolve_column_name(chosen_cols),
             )
 
             # Use the accumulated topic summary from previous validation batches (or initial if first batch)
@@ -4275,7 +4277,8 @@ def extract_topics(
                 ):
 
                     formatted_system_prompt = add_existing_topics_system_prompt.format(
-                        consultation_context=context_textbox, column_name=chosen_cols
+                        consultation_context=context_textbox,
+                        column_name=resolve_column_name(chosen_cols),
                     )
 
                     # Preparing candidate topics if no topics currently exist
@@ -4654,7 +4657,8 @@ def extract_topics(
                 # If this is the first batch, run this
                 else:
                     formatted_system_prompt = initial_table_system_prompt.format(
-                        consultation_context=context_textbox, column_name=chosen_cols
+                        consultation_context=context_textbox,
+                        column_name=resolve_column_name(chosen_cols),
                     )
 
                     # Format the summary prompt with the response table and topics
@@ -6245,11 +6249,7 @@ def discover_topics_from_sample(
     )
 
     acc_topic_summary_df = wrapper_results[2]
-    chosen_col_str = (
-        chosen_cols[0]
-        if isinstance(chosen_cols, list) and chosen_cols
-        else str(chosen_cols) if chosen_cols else ""
-    )
+    chosen_col_str = resolve_column_name(chosen_cols)
     file_name_cleaned = clean_column_name(
         file_name, max_length=20, front_characters=True
     )
@@ -7479,7 +7479,7 @@ def suggest_improved_topic_names(
         consultation_context = str(context_textbox).strip()
 
     system_prompt = improve_topic_names_system_prompt.format(
-        column_name=response_col,
+        column_name=resolve_column_name(response_col),
         consultation_context=consultation_context,
     )
 

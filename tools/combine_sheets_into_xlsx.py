@@ -401,6 +401,22 @@ def _yes_no_label(value) -> str:
     return text
 
 
+def _normalize_consultation_context(value) -> str:
+    """Return the user-facing consultation context string, or empty if none."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    # llm_api_call may wrap raw context before prompting; unwrap for display.
+    prefix = "The context of this analysis is '"
+    suffix = "'."
+    if text.startswith(prefix) and text.endswith(suffix):
+        return text[len(prefix) : -len(suffix)].strip()
+    return text
+
+
 def _build_run_settings_metadata(
     temperature=None,
     batch_size=None,
@@ -410,9 +426,14 @@ def _build_run_settings_metadata(
     sentiment_analysis: str = "",
     validation_used: str = "",
     llm_deduplication_used: str = "",
+    consultation_context: str = "",
 ) -> dict:
     """Build ordered cover-sheet metadata describing analysis run settings."""
     metadata = {}
+
+    context_label = _normalize_consultation_context(consultation_context)
+    if context_label:
+        metadata["Additional context provided to model"] = context_label
 
     if temperature is not None and str(temperature).strip() != "":
         try:
@@ -810,6 +831,7 @@ def collect_output_csvs_and_create_excel_output(
     force_zero_shot: str = "",
     force_single_topic: str = "",
     sentiment_analysis: str = "",
+    consultation_context: str = "",
     validation_used: str = "",
     llm_deduplication_used: str = "",
 ):
@@ -843,6 +865,9 @@ def collect_output_csvs_and_create_excel_output(
         force_zero_shot (str, optional): Whether responses were forced into suggested topics.
         force_single_topic (str, optional): Whether responses were forced to a single topic.
         sentiment_analysis (str, optional): Sentiment analysis option used for the run.
+        consultation_context (str, optional): Extra context supplied to the model
+            (e.g. Gradio context textbox / DIRECT_MODE_CONTEXT). Shown on the cover sheet
+            when non-empty.
         validation_used (str, optional): Whether LLM validation was used. Defaults from ENABLE_VALIDATION.
         llm_deduplication_used (str, optional): Whether LLM deduplication was used.
             Defaults from ALL_IN_ONE_USE_LLM_DEDUP.
@@ -873,6 +898,7 @@ def collect_output_csvs_and_create_excel_output(
         sentiment_analysis=sentiment_analysis,
         validation_used=validation_used,
         llm_deduplication_used=llm_deduplication_used,
+        consultation_context=consultation_context,
     )
 
     if not chosen_cols:
