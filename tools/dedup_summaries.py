@@ -62,6 +62,7 @@ from tools.helper_functions import (
     normalize_topic_name_for_llm,
     parse_topic_confidence_value,
     read_file,
+    resolve_column_name,
     safe_output_file_path,
     wrap_text,
 )
@@ -3205,7 +3206,8 @@ def summarise_output_topics(
 
             formatted_summarise_topic_descriptions_system_prompt = (
                 summarise_topic_descriptions_system_prompt.format(
-                    column_name=chosen_cols, consultation_context=context_textbox
+                    column_name=resolve_column_name(chosen_cols),
+                    consultation_context=context_textbox,
                 )
             )
 
@@ -3889,7 +3891,8 @@ def wrapper_summarise_output_topics_per_group(
             summarise_format_radio + ". " + additional_summary_instructions_provided
         )
         formatted_sys = summarise_topic_descriptions_system_prompt.format(
-            column_name=chosen_cols, consultation_context=context_textbox
+            column_name=resolve_column_name(chosen_cols),
+            consultation_context=context_textbox,
         )
         # Apply reasoning suffix for GPT-OSS models (Local, inference-server, or AWS)
         is_gpt_oss_model = (
@@ -4486,7 +4489,8 @@ def overall_summary(
             # Prepare the system prompt first (needed for token counting)
             formatted_summarise_everything_system_prompt = (
                 summarise_everything_system_prompt.format(
-                    column_name=chosen_cols, consultation_context=context_textbox
+                    column_name=resolve_column_name(chosen_cols),
+                    consultation_context=context_textbox,
                 )
             )
 
