@@ -387,7 +387,7 @@ ENABLE_ORIGINAL_DATA_REDACTION = convert_string_to_boolean(
 
 REDACTION_ENTITIES = get_or_create_env_var(
     "REDACTION_ENTITIES",
-    "['EMAIL_ADDRESS', 'PHONE_NUMBER', 'CREDIT_CARD', 'IBAN_CODE', 'UK_NHS', 'UKPOSTCODE', 'IP_ADDRESS', 'STREETNAME']",
+    "['EMAIL_ADDRESS', 'PHONE_NUMBER', 'CREDIT_CARD', 'IBAN_CODE', 'UK_NHS', 'IP_ADDRESS']",
 )  # Presidio entity types to redact when either redaction flag is on
 
 REDACTION_STRATEGY = get_or_create_env_var(

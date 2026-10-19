@@ -69,10 +69,12 @@ from tools.helper_functions import (
     normalize_topic_name_for_llm,
     order_topics_for_batch_prompt,
     parse_topic_confidence_value,
+    protect_presidio_placeholders,
     put_columns_in_df,
     read_file,
     resolve_column_name,
     resolve_uploaded_file_path,
+    restore_presidio_placeholders,
     safe_output_file_path,
     sample_responses_for_topic,
     subsample_responses_for_topic_discovery,
@@ -1910,12 +1912,18 @@ def data_file_to_markdown_table(
         batch_basic_response_data["Response ID"].astype(int) - start_row
     )
 
-    # Remove problematic characters including control characters, special characters, and excessive leading/trailing whitespace
+    # Remove problematic characters including control characters, special characters,
+    # and angle brackets — but keep Presidio entity placeholders like <PHONE_NUMBER>.
+    def _strip_special_chars_keep_presidio(value):
+        if not isinstance(value, str):
+            return value
+        protected, placeholders = protect_presidio_placeholders(value)
+        protected = re.sub(r'[\x00-\x1F\x7F]|[""<>]|\\', "", protected)
+        return restore_presidio_placeholders(protected, placeholders)
+
     batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data[
         "Response"
-    ].str.replace(
-        r'[\x00-\x1F\x7F]|[""<>]|\\', "", regex=True
-    )  # Remove control and special characters
+    ].map(_strip_special_chars_keep_presidio)
     batch_basic_response_data.loc[:, "Response"] = batch_basic_response_data[
         "Response"
     ].str.strip()  # Remove leading and trailing whitespace
