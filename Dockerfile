@@ -55,8 +55,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV APP_HOME=/home/user
 
 # Set env variables for Gradio & other apps
+# TLDEXTRACT_CACHE: Presidio email validation (read-only ECS root FS cannot use ~/.cache)
 ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     MPLCONFIGDIR=/tmp/matplotlib_cache/ \
+    TLDEXTRACT_CACHE=/tmp/tldextract_cache/ \
     GRADIO_OUTPUT_FOLDER=$APP_HOME/app/output/ \
     GRADIO_INPUT_FOLDER=$APP_HOME/app/input/ \
     FEEDBACK_LOGS_FOLDER=$APP_HOME/app/feedback/ \
@@ -136,9 +138,9 @@ RUN mkdir -p \
     ${APP_HOME}/app/config
 
 # Now handle the /tmp directories
-RUN mkdir -p /tmp/gradio_tmp /tmp/matplotlib_cache /tmp /var/tmp \
-    && chown user:user /tmp /var/tmp /tmp/gradio_tmp /tmp/matplotlib_cache \
-    && chmod 1777 /tmp /var/tmp /tmp/gradio_tmp /tmp/matplotlib_cache
+RUN mkdir -p /tmp/gradio_tmp /tmp/matplotlib_cache /tmp/tldextract_cache /tmp /var/tmp \
+    && chown user:user /tmp /var/tmp /tmp/gradio_tmp /tmp/matplotlib_cache /tmp/tldextract_cache \
+    && chmod 1777 /tmp /var/tmp /tmp/gradio_tmp /tmp/matplotlib_cache /tmp/tldextract_cache
 
 # Fix apply user ownership to all files in the home directory
 RUN chown -R user:user /home/user

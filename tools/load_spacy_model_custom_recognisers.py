@@ -264,6 +264,30 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
     raise RuntimeError(error_msg)
 
 
+def _configure_tldextract_for_readonly_fs() -> None:
+    """Point Presidio's EmailRecognizer tldextract cache at a writable dir.
+
+    ECS tasks use a read-only root filesystem (see ECS_READ_ONLY_FILE_SYSTEM).
+    tldextract defaults to ``~/.cache/python-tldextract``, which is not writable
+    and triggers a warning plus HTTP Public Suffix List fetches on every start.
+    Use ``/tmp`` (ephemeral mount) and the bundled suffix snapshot instead.
+    """
+    import tldextract
+
+    cache_dir = os.environ.get("TLDEXTRACT_CACHE", "/tmp/tldextract_cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        use_cache = os.access(cache_dir, os.W_OK)
+    except OSError:
+        use_cache = False
+
+    tldextract.extract = tldextract.TLDExtract(
+        cache_dir=cache_dir if use_cache else None,
+        suffix_list_urls=(),
+        fallback_to_snapshot=True,
+    )
+
+
 def create_nlp_analyser(
     language: str = DEFAULT_LANGUAGE,
     existing_nlp_analyser: Optional[AnalyzerEngine] = None,
@@ -276,6 +300,9 @@ def create_nlp_analyser(
         if supported and supported[0] == base_lang_code:
             print(f"Using existing nlp_analyser for {language}")
             return existing_nlp_analyser
+
+    # Must run before AnalyzerEngine loads EmailRecognizer (uses tldextract.extract)
+    _configure_tldextract_for_readonly_fs()
 
     nlp_model = load_spacy_model(language)
     loaded_nlp_engine = LoadedSpacyNlpEngine(
