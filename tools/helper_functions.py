@@ -1081,10 +1081,70 @@ def normalize_topic_name_for_llm(name):
     return normalized
 
 
-def initial_clean(text: str):
-    #### Some of my cleaning functions
+# Presidio entity_type placeholders look like HTML (e.g. <PHONE_NUMBER>) but must
+# survive HTML stripping. Multi-token UPPER_SNAKE names are treated as placeholders;
+# common single-token Presidio types are allow-listed so <BR>/<DIV> still strip.
+_PRESIDIO_PLACEHOLDER_RE = re.compile(r"<([A-Z][A-Z0-9_]*)>")
+_SINGLE_TOKEN_PRESIDIO_ENTITIES = frozenset(
+    {
+        "PERSON",
+        "LOCATION",
+        "NRP",
+        "URL",
+        "CRYPTO",
+        "ORGANIZATION",
+        "GPE",
+        "NORP",
+        "DATE_TIME",
+    }
+)
+
+
+def _is_presidio_entity_placeholder(tag_body: str) -> bool:
+    if "_" in tag_body:
+        return bool(re.fullmatch(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+", tag_body))
+    return tag_body in _SINGLE_TOKEN_PRESIDIO_ENTITIES
+
+
+def protect_presidio_placeholders(text: str) -> tuple[str, list[str]]:
+    """Replace Presidio ``<ENTITY_TYPE>`` tags with opaque tokens; return (text, tags)."""
+    if not isinstance(text, str) or "<" not in text:
+        return text, []
+    placeholders: list[str] = []
+
+    def _stash(match: re.Match) -> str:
+        if not _is_presidio_entity_placeholder(match.group(1)):
+            return match.group(0)
+        placeholders.append(match.group(0))
+        return f"__PRESIDIO_ENTITY_{len(placeholders) - 1}__"
+
+    return _PRESIDIO_PLACEHOLDER_RE.sub(_stash, text), placeholders
+
+
+def restore_presidio_placeholders(text: str, placeholders: list[str]) -> str:
+    """Restore tags previously stashed by ``protect_presidio_placeholders``."""
+    if not placeholders:
+        return text
+    for index, placeholder in enumerate(placeholders):
+        text = text.replace(f"__PRESIDIO_ENTITY_{index}__", placeholder)
+    return text
+
+
+def strip_html_markup(text: str) -> str:
+    """Remove HTML tags and entities from text, keeping Presidio entity placeholders."""
+    if not isinstance(text, str):
+        return text
+    text, placeholders = protect_presidio_placeholders(text)
     html_pattern_regex = r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});|\xa0|&nbsp;"
     html_start_pattern_end_dots_regex = r"<(.*?)\.\."
+    text = re.sub(html_pattern_regex, " ", text)
+    text = re.sub(html_start_pattern_end_dots_regex, " ", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return restore_presidio_placeholders(text, placeholders)
+
+
+def initial_clean(text: str):
+    #### Some of my cleaning functions
     non_ascii_pattern = r"[^\x00-\x7F]+"
     multiple_spaces_regex = r"\s{2,}"
 
@@ -1112,12 +1172,12 @@ def initial_clean(text: str):
         (markdown_italic_underscore, r"\1"),  # Remove _ but keep text
         (markdown_inline_code, r"\1"),  # Remove ` but keep text
         (markdown_header, ""),  # Remove header markers
-        # HTML and other patterns
-        (html_pattern_regex, " "),
-        (html_start_pattern_end_dots_regex, " "),
         (non_ascii_pattern, " "),
         (multiple_spaces_regex, " "),
     ]
+
+    # HTML first (shared with Original data export); Presidio entity tags are kept
+    text = strip_html_markup(text)
 
     # Apply each regex replacement
     for pattern, replacement in patterns:

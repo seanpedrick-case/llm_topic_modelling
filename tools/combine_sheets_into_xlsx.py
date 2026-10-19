@@ -32,6 +32,7 @@ from tools.helper_functions import (
     get_basic_response_data,
     load_in_data_file,
     read_file,
+    strip_html_markup,
     write_candidate_topics_csv,
 )
 
@@ -761,6 +762,19 @@ def csvs_to_excel(
     return output_filename
 
 
+def _strip_html_from_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip HTML markup from string cells, keeping Presidio ``<ENTITY>`` tags."""
+    work = df.copy()
+    for col in work.columns:
+        series = work[col]
+        if series.dtype != object and not pd.api.types.is_string_dtype(series):
+            continue
+        work[col] = series.map(
+            lambda value: strip_html_markup(value) if isinstance(value, str) else value
+        )
+    return work
+
+
 def stage_original_data_csv(
     original_data_file_path: str,
     output_folder: str,
@@ -771,6 +785,10 @@ def stage_original_data_csv(
 
     When redaction is off and the source is already a CSV, the original path is
     used. Otherwise a temp CSV is written (redacted across all cells when enabled).
+
+    After redaction, HTML tags are stripped while Presidio ``<ENTITY_TYPE>``
+    placeholders are retained, matching the cleaned Response text on the
+    Topic response pivot table.
 
     Returns:
         tuple: (csv_path, is_temp_file)
@@ -792,6 +810,14 @@ def stage_original_data_csv(
 
         df = redact_dataframe(df)
         print("Applied PII redaction to Original data tab (all columns).")
+
+    # Always strip HTML on staged Original data; keep Presidio entity placeholders.
+    df = _strip_html_from_dataframe(df)
+    if redact:
+        print(
+            "Stripped HTML markup from Original data tab "
+            "(Presidio entity placeholders retained)."
+        )
 
     original_data_csv_path = os.path.join(
         output_folder,

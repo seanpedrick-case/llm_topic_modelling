@@ -146,6 +146,62 @@ class TestOriginalDataRedaction(unittest.TestCase):
             reread = pd.read_csv(path)
             self.assertEqual(reread["Contact"].iloc[0], "jane@example.com")
 
+    def test_html_stripped_but_entity_placeholders_kept_on_both_tabs(self):
+        from tools.combine_sheets_into_xlsx import stage_original_data_csv
+        from tools.helper_functions import (
+            get_basic_response_data,
+            strip_html_markup,
+        )
+
+        raw = (
+            "Call me on 07700 900123 or email jane@example.com. "
+            "See <br> notes <div>here</div>."
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "original.csv")
+            pd.DataFrame({"Response": [raw]}).to_csv(path, index=False)
+
+            with patch(
+                "tools.data_redaction.redact_dataframe", side_effect=_fake_redact
+            ):
+                csv_path, _ = stage_original_data_csv(path, tmp, redact=True)
+                file_data = _fake_redact(pd.read_csv(path), columns=["Response"])
+
+            staged_text = str(pd.read_csv(csv_path)["Response"].iloc[0])
+            pivot_text = str(
+                get_basic_response_data(file_data, ["Response"], verify_titles="No")[
+                    "Response"
+                ].iloc[0]
+            )
+
+            for text in (staged_text, pivot_text):
+                self.assertIn("<PHONE_NUMBER>", text)
+                self.assertIn("<EMAIL_ADDRESS>", text)
+                self.assertNotIn("<br>", text.lower())
+                self.assertNotIn("<div>", text.lower())
+                self.assertNotIn("07700 900123", text)
+                self.assertNotIn("jane@example.com", text)
+
+            self.assertEqual(staged_text, pivot_text)
+            self.assertEqual(strip_html_markup(staged_text), staged_text)
+
+
+class TestPresidioPlaceholderHtmlCleaning(unittest.TestCase):
+    def test_strip_html_keeps_entity_tags_removes_real_html(self):
+        from tools.helper_functions import initial_clean, strip_html_markup
+
+        text = "Phone <PHONE_NUMBER> and <br/>email <EMAIL_ADDRESS> <div>x</div>"
+        stripped = strip_html_markup(text)
+        self.assertIn("<PHONE_NUMBER>", stripped)
+        self.assertIn("<EMAIL_ADDRESS>", stripped)
+        self.assertNotIn("<br", stripped.lower())
+        self.assertNotIn("<div>", stripped.lower())
+
+        cleaned = initial_clean(text)
+        self.assertIn("<PHONE_NUMBER>", cleaned)
+        self.assertIn("<EMAIL_ADDRESS>", cleaned)
+        self.assertNotIn("<br", cleaned.lower())
+
 
 @requires_spacy
 class TestLivePresidioRedaction(unittest.TestCase):
