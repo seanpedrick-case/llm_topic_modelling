@@ -1087,11 +1087,19 @@ def normalize_topic_name_for_llm(name):
 _PRESIDIO_PLACEHOLDER_RE = re.compile(r"<([A-Z][A-Z0-9_]*)>")
 _SINGLE_TOKEN_PRESIDIO_ENTITIES = frozenset(
     {
+        # Full spaCy/Presidio redaction entity set (single-token names).
+        # Multi-token UPPER_SNAKE tags (PHONE_NUMBER, EMAIL_ADDRESS, etc.)
+        # are protected separately via the underscore regex.
+        "TITLES",
         "PERSON",
-        "LOCATION",
-        "NRP",
-        "URL",
+        "STREETNAME",
+        "UKPOSTCODE",
         "CRYPTO",
+        "NRP",
+        "LOCATION",
+        "URL",
+        "CUSTOM",
+        # Extra spaCy NER labels that may appear as placeholders
         "ORGANIZATION",
         "GPE",
         "NORP",
