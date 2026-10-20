@@ -103,6 +103,39 @@ default_number_of_sampled_summaries = DEFAULT_SAMPLED_SUMMARIES
 max_text_length = 500
 max_number_of_topics = MAXIMUM_ALLOWED_TOPICS
 
+# Markdown table alignment cells, e.g. ---: , :--- , :---: , ---
+_MARKDOWN_DIVIDER_CELL_RE = re.compile(r"^:?-+:?$")
+
+
+def is_markdown_table_divider_row(row) -> bool:
+    """Return True if a parsed markdown row is a table separator.
+
+    ``pd.read_csv(..., sep="|")`` often turns alignment rows such as
+    ``|:---|:---|`` into data rows with values like ``:---``. Those must not be
+    treated as topic merge suggestions.
+    """
+    values = []
+    for val in row.values:
+        if pd.isna(val):
+            continue
+        text = str(val).strip()
+        if not text or text.lower() in ("nan", "none"):
+            continue
+        values.append(text)
+
+    if not values:
+        return True
+
+    if all(_MARKDOWN_DIVIDER_CELL_RE.fullmatch(value) for value in values):
+        return True
+
+    # Fallback for odd separator variants (underscores, equals, mixed spacing)
+    row_clean = "".join(values).replace("|", "").replace(" ", "")
+    if not row_clean:
+        return True
+    divider_count = sum(1 for c in row_clean if c in "-_=:.")
+    return divider_count > 0.8 * len(row_clean)
+
 
 def _topic_name_near_duplicate_key(name: object) -> str:
     """Normalise a topic label for light near-duplicate matching.
@@ -1292,7 +1325,11 @@ def deduplicate_topics_llm(
         raise ValueError(f"Unsupported model source: {model_source}")
 
     # Call LLM to get deduplication suggestions
-    print("Calling LLM for topic deduplication analysis...")
+    print(
+        "Calling LLM for topic deduplication analysis... "
+        f"Current topics: {input_unique_topics}, "
+        f"maximum allowed topics: {max_number_of_topics}."
+    )
 
     # Use the existing call_llm_with_markdown_table_checks function
     (
@@ -1467,23 +1504,9 @@ def deduplicate_topics_llm(
                     .replace("None", "")
                 )
 
-            # Filter out markdown table divider rows (rows that are primarily dashes/hyphens)
-            # These are false positives from parsing the markdown table structure
-            def is_divider_row(row):
-                """Check if a row is a markdown table divider (contains mostly dashes/hyphens)."""
-                row_str = " ".join(str(val) for val in row.values if pd.notna(val))
-                # Remove whitespace and check if it's mostly dashes/hyphens
-                row_clean = row_str.replace(" ", "").replace("|", "").strip()
-                # If the row is empty or consists mostly of dashes/hyphens, it's a divider
-                if not row_clean or len(row_clean) == 0:
-                    return True
-                # Check if more than 80% of characters are dashes/hyphens
-                dash_count = sum(1 for c in row_clean if c in ["-", "_", "="])
-                return dash_count > 0.8 * len(row_clean) if len(row_clean) > 0 else True
-
-            # Remove divider rows
+            # Filter out markdown table divider/alignment rows (e.g. :--- | ---:)
             merge_suggestions_df = merge_suggestions_df[
-                ~merge_suggestions_df.apply(is_divider_row, axis=1)
+                ~merge_suggestions_df.apply(is_markdown_table_divider_row, axis=1)
             ]
 
             if not merge_suggestions_df.empty:
@@ -2128,16 +2151,15 @@ def deduplicate_topics_llm(
         output_unique_topics = topic_summary_df.drop_duplicates(
             subset=["General topic", "Subtopic"]
         ).shape[0]
-        print(
-            f"Topic count comparison: Input had {input_unique_topics} unique 'General topic' | 'Subtopic' combinations, "
-            f"Output has {output_unique_topics} unique 'General topic' | 'Subtopic' combinations. "
-            f"Reduction: {input_unique_topics - output_unique_topics} topics merged."
-        )
     else:
-        print(
-            f"Topic count comparison: Input had {input_unique_topics} unique 'General topic' | 'Subtopic' combinations, "
-            f"Output has 0 unique 'General topic' | 'Subtopic' combinations."
-        )
+        output_unique_topics = 0
+    print(
+        "LLM topic deduplication counts: "
+        f"maximum allowed topics={max_number_of_topics}, "
+        f"topics before={input_unique_topics}, "
+        f"topics after={output_unique_topics}, "
+        f"reduction={input_unique_topics - output_unique_topics}."
+    )
 
     # Calculate estimated time taken (rough estimate based on token usage)
     toc = time.perf_counter()
