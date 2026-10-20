@@ -1078,6 +1078,12 @@ def normalize_topic_name_for_llm(name):
     normalized = normalized.lower()
     # Capitalize first letter of each word for better readability
     normalized = normalized.title()
+    # str.title() treats apostrophes as word boundaries, so possessives/contractions
+    # become e.g. "Council'S" / "Don'T". Lowercase a single capital letter after an
+    # apostrophe when it ends the token (preserves names like "O'Neill").
+    normalized = re.sub(
+        r"'([A-Z])\b", lambda match: "'" + match.group(1).lower(), normalized
+    )
     return normalized
 
 

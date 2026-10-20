@@ -4,7 +4,11 @@ import unittest
 
 import pandas as pd
 
-from tools.dedup_summaries import deduplicate_topics
+from tools.dedup_summaries import (
+    deduplicate_topics,
+    is_markdown_table_divider_row,
+)
+from tools.helper_functions import normalize_topic_name_for_llm
 
 
 class TestDeduplicateTopicsMemory(unittest.TestCase):
@@ -288,6 +292,46 @@ class TestLightNearDuplicateTopicMerge(unittest.TestCase):
     def test_distinct_topics_are_not_merged(self):
         out_ref = self._run(["Housing repairs", "Housing wait times"])
         self.assertEqual(out_ref["Subtopic"].nunique(), 2)
+
+
+class TestMarkdownTableDividerRow(unittest.TestCase):
+    def test_colon_aligned_separator_cells_are_dividers(self):
+        row = pd.Series([":---", ":---", ":---:", "---:"])
+        self.assertTrue(is_markdown_table_divider_row(row))
+
+    def test_plain_dash_separator_cells_are_dividers(self):
+        row = pd.Series(["---", "---", "---"])
+        self.assertTrue(is_markdown_table_divider_row(row))
+
+    def test_real_topic_row_is_not_a_divider(self):
+        row = pd.Series(
+            [
+                "Transport",
+                "Parking",
+                "Transport",
+                "Parking availability",
+                "Near duplicate wording",
+            ]
+        )
+        self.assertFalse(is_markdown_table_divider_row(row))
+
+
+class TestNormalizeTopicNameForLlm(unittest.TestCase):
+    def test_possessive_s_is_lowercase_after_title_case(self):
+        self.assertEqual(
+            normalize_topic_name_for_llm("council's housing"),
+            "Council's Housing",
+        )
+        self.assertEqual(
+            normalize_topic_name_for_llm("CHILDREN'S SERVICES"),
+            "Children's Services",
+        )
+
+    def test_contraction_letter_is_lowercase_after_title_case(self):
+        self.assertEqual(normalize_topic_name_for_llm("don't ask"), "Don't Ask")
+
+    def test_irish_style_name_keeps_capital_after_apostrophe(self):
+        self.assertEqual(normalize_topic_name_for_llm("o'neill park"), "O'Neill Park")
 
 
 if __name__ == "__main__":
