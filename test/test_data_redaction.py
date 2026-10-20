@@ -202,6 +202,42 @@ class TestPresidioPlaceholderHtmlCleaning(unittest.TestCase):
         self.assertIn("<EMAIL_ADDRESS>", cleaned)
         self.assertNotIn("<br", cleaned.lower())
 
+    def test_strip_html_keeps_full_entity_tag_set(self):
+        from tools.helper_functions import initial_clean, strip_html_markup
+
+        single_token = [
+            "TITLES",
+            "PERSON",
+            "STREETNAME",
+            "UKPOSTCODE",
+            "CRYPTO",
+            "NRP",
+            "LOCATION",
+            "URL",
+            "CUSTOM",
+        ]
+        multi_token = [
+            "PHONE_NUMBER",
+            "EMAIL_ADDRESS",
+            "CREDIT_CARD",
+            "DATE_TIME",
+            "IBAN_CODE",
+            "IP_ADDRESS",
+            "MEDICAL_LICENSE",
+            "UK_NHS",
+            "CUSTOM_FUZZY",
+        ]
+        tags = [f"<{name}>" for name in single_token + multi_token]
+        text = "See <br/>notes <div>here</div> and " + " ".join(tags) + " end"
+        stripped = strip_html_markup(text)
+        cleaned = initial_clean(text)
+        for tag in tags:
+            self.assertIn(tag, stripped, f"{tag} missing after strip_html_markup")
+            self.assertIn(tag, cleaned, f"{tag} missing after initial_clean")
+        self.assertNotIn("<br", stripped.lower())
+        self.assertNotIn("<div>", stripped.lower())
+        self.assertNotIn("<br", cleaned.lower())
+
 
 @requires_spacy
 class TestLivePresidioRedaction(unittest.TestCase):
