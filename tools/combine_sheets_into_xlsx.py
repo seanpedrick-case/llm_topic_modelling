@@ -20,6 +20,7 @@ from tools.config import (
     ENABLE_ORIGINAL_DATA_REDACTION,
     ENABLE_VALIDATION,
     EXPORT_FORMAT,
+    INCLUDE_GENERAL_TOPIC_PIVOT_TABLE,
     INCLUDE_RESPONSE_LEVEL_SUMMARY,
     OUTPUT_FOLDER,
 )
@@ -30,6 +31,7 @@ from tools.helper_functions import (
     ensure_model_in_map,
     ensure_safe_output_folder,
     get_basic_response_data,
+    has_assessed_general_topics,
     load_in_data_file,
     read_file,
     strip_html_markup,
@@ -949,8 +951,10 @@ def collect_output_csvs_and_create_excel_output(
     wrap_text_columns = dict()
     short_file_name = os.path.basename(reference_data_file_name_textbox)
     reference_pivot_table = pd.DataFrame()
+    general_topic_pivot_table = pd.DataFrame()
     reference_table_csv_path = ""
     reference_pivot_table_csv_path = ""
+    general_topic_pivot_table_csv_path = ""
     unique_topic_table_csv_path = ""
     missing_df_state_csv_path = ""
     overall_summary_csv_path = ""
@@ -1106,6 +1110,41 @@ def collect_output_csvs_and_create_excel_output(
         reference_pivot_table.to_csv(reference_pivot_table_csv_path, index=None)
         temp_csv_files_for_cleanup.append(reference_pivot_table_csv_path)
 
+        if INCLUDE_GENERAL_TOPIC_PIVOT_TABLE and has_assessed_general_topics(
+            master_reference_df_state
+        ):
+            general_topic_pivot_table = convert_reference_table_to_pivot_table(
+                master_reference_df_state,
+                basic_response_data,
+                general_topics_only=True,
+            )
+            general_topic_cols = list(general_topic_pivot_table.columns)
+            if (
+                "Original Response ID" in general_topic_cols
+                and "Response" in general_topic_cols
+            ):
+                general_topic_cols.remove("Original Response ID")
+                general_topic_cols.remove("Response")
+                general_topic_cols = [
+                    "Original Response ID",
+                    "Response",
+                ] + general_topic_cols
+                general_topic_pivot_table = general_topic_pivot_table[
+                    general_topic_cols
+                ]
+            general_topic_pivot_table_csv_path = (
+                output_folder + "general_topic_pivot_df_for_xlsx.csv"
+            )
+            general_topic_pivot_table.to_csv(
+                general_topic_pivot_table_csv_path, index=None
+            )
+            temp_csv_files_for_cleanup.append(general_topic_pivot_table_csv_path)
+        elif INCLUDE_GENERAL_TOPIC_PIVOT_TABLE:
+            print(
+                "INCLUDE_GENERAL_TOPIC_PIVOT_TABLE is enabled, but no assessed "
+                "General topics were found; skipping General topic pivot sheet."
+            )
+
         short_file_name = os.path.basename(file_name)
 
     if not master_unique_topics_df_state.empty:
@@ -1218,6 +1257,34 @@ def collect_output_csvs_and_create_excel_output(
         print(
             "Relevant reference pivot table files not found, excluding from xlsx output."
         )
+
+    if general_topic_pivot_table_csv_path:
+        if structured_summaries:
+            print(
+                "Structured summaries are being produced, excluding General topic "
+                "pivot table from xlsx output."
+            )
+        else:
+            csv_files.append(general_topic_pivot_table_csv_path)
+            sheet_names.append("General topic pivot table")
+
+            if general_topic_pivot_table.empty:
+                general_topic_pivot_table = pd.read_csv(
+                    general_topic_pivot_table_csv_path
+                )
+
+            column_widths["General topic pivot table"] = {"A": 12, "B": 100, "C": 12}
+            wrap_text_columns["General topic pivot table"] = ["B", "C"]
+
+            num_general_cols = len(general_topic_pivot_table.columns)
+            general_col_letters = [
+                get_column_letter(i) for i in range(4, num_general_cols + 1)
+            ]
+
+            for col_letter in general_col_letters:
+                column_widths["General topic pivot table"][col_letter] = 20
+
+            wrap_text_columns["General topic pivot table"].extend(general_col_letters)
 
     if not missing_df_state.empty:
         missing_df_state_csv_path = output_folder + "missing_df_state_df_for_xlsx.csv"
