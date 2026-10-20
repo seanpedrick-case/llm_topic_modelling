@@ -826,7 +826,7 @@ with app:
                             ["example_data/improved_dummy_consultation_responses.csv"],
                             "Response text",
                             "Consultation for the construction of flats on Main Street",
-                            " improved_dummy_consultation_responses.csv",
+                            "improved_dummy_consultation_responses.csv",
                             [
                                 "example_data/improved_dummy_consu_col_Response_text_gemini_flash_lite_theme_analysis.xlsx"
                             ],
@@ -926,7 +926,7 @@ with app:
                 # If example files don't exist (e.g., in CI environment), create empty Examples
                 # This allows the app to load without errors
                 print(
-                    f"Warning: Example files not found, skipping Examples creation: {e}"
+                    f"Warning: Example files not found, skipping example creation: {e}"
                 )
                 examples = gr.Examples(
                     examples=[],

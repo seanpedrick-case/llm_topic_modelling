@@ -231,6 +231,13 @@ INCLUDE_RESPONSE_LEVEL_SUMMARY = convert_string_to_boolean(
     get_or_create_env_var("INCLUDE_RESPONSE_LEVEL_SUMMARY", "False")
 )
 
+# Add a second Topic response pivot sheet with General topics only across the top
+# (no Subtopic in column headers). Created only when at least one General topic is
+# present and is not blank / 'Not assessed'.
+INCLUDE_GENERAL_TOPIC_PIVOT_TABLE = convert_string_to_boolean(
+    get_or_create_env_var("INCLUDE_GENERAL_TOPIC_PIVOT_TABLE", "False")
+)
+
 ###
 # LOGGING OPTIONS
 ###
