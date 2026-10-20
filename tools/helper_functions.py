@@ -638,11 +638,37 @@ def _flatten_pivot_column_label(col) -> str:
     return " - ".join(kept) if kept else "All"
 
 
+def has_assessed_general_topics(df: pd.DataFrame) -> bool:
+    """True when at least one General topic is non-blank and not 'Not assessed'."""
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return False
+    if "General topic" not in df.columns:
+        return False
+    return (
+        df["General topic"]
+        .map(lambda value: not _is_unassessed_topic_label(value))
+        .any()
+    )
+
+
 def convert_reference_table_to_pivot_table(
     df: pd.DataFrame,
     basic_response_data: pd.DataFrame = pd.DataFrame(),
     include_confidence: bool | None = None,
+    general_topics_only: bool = False,
 ):
+    """
+    Build a wide response-vs-topic pivot from the long reference table.
+
+    Args:
+        df: Long-format reference table with Response ID and topic columns.
+        basic_response_data: Optional response text / Original Response ID frame
+            to left-merge onto the pivot.
+        include_confidence: When True, pivot cells are max confidence scores;
+            when False, assignment counts. Defaults to whether Confidence exists.
+        general_topics_only: When True, column headers use General topic
+            (+ Sentiment when assessed) only, omitting Subtopic.
+    """
     df = df.copy()
     if df.columns.duplicated().any():
         df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -652,7 +678,12 @@ def convert_reference_table_to_pivot_table(
     if include_confidence is None:
         include_confidence = "Confidence" in df.columns
 
-    id_topic_cols = ["Response ID", "General topic", "Subtopic", "Sentiment"]
+    if general_topics_only:
+        topic_cols = ["General topic", "Sentiment"]
+    else:
+        topic_cols = ["General topic", "Subtopic", "Sentiment"]
+
+    id_topic_cols = ["Response ID"] + topic_cols
     df_in = df[id_topic_cols].copy()
 
     # Convert to numeric first (handles float strings like '1.0'), then to int
@@ -673,7 +704,7 @@ def convert_reference_table_to_pivot_table(
         pivot_table = pd.pivot_table(
             df_in,
             index="Response ID",
-            columns=["General topic", "Subtopic", "Sentiment"],
+            columns=topic_cols,
             values="Confidence",
             aggfunc="max",
         )
@@ -688,9 +719,10 @@ def convert_reference_table_to_pivot_table(
         )
         pivot_table = pivot_table.join(assignment_counts, how="left")
     else:
+        crosstab_columns = [df_in[col] for col in topic_cols]
         pivot_table = pd.crosstab(
             index=df_in["Response ID"],
-            columns=[df_in["General topic"], df_in["Subtopic"], df_in["Sentiment"]],
+            columns=crosstab_columns,
             margins=True,
         )
         pivot_table.columns = [

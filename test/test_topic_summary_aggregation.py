@@ -8,6 +8,7 @@ import pandas as pd
 from tools.helper_functions import (
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
+    has_assessed_general_topics,
     parse_topic_confidence_value,
 )
 
@@ -185,6 +186,49 @@ class TestConvertReferenceTableToPivotTable(unittest.TestCase):
             0
         ]
         self.assertEqual(int(pivot.loc[0, topic_col]), 1)
+
+    def test_general_topics_only_omits_subtopic_from_headers(self):
+        reference_df = pd.DataFrame(
+            {
+                "Response ID": [1, 1, 2],
+                "General topic": ["Housing", "Transport", "Housing"],
+                "Subtopic": ["Repairs", "Buses", "Rent"],
+                "Sentiment": ["Negative", "Negative", "Negative"],
+            }
+        )
+
+        pivot = convert_reference_table_to_pivot_table(
+            reference_df, include_confidence=False, general_topics_only=True
+        )
+        headers = [
+            str(col) for col in pivot.columns if col not in {"Response ID", "All"}
+        ]
+
+        self.assertIn("Housing - Negative", headers)
+        self.assertIn("Transport - Negative", headers)
+        self.assertFalse(
+            any("Repairs" in col or "Buses" in col or "Rent" in col for col in headers)
+        )
+        self.assertEqual(int(pivot.loc[0, "Housing - Negative"]), 1)
+        self.assertEqual(int(pivot.loc[1, "Housing - Negative"]), 1)
+
+    def test_has_assessed_general_topics(self):
+        only_unassessed = pd.DataFrame(
+            {
+                "General topic": ["Not Assessed", "", "Not assessed", None],
+                "Subtopic": ["A", "B", "C", "D"],
+            }
+        )
+        with_assessed = pd.DataFrame(
+            {
+                "General topic": ["Not assessed", "Housing"],
+                "Subtopic": ["A", "B"],
+            }
+        )
+
+        self.assertFalse(has_assessed_general_topics(only_unassessed))
+        self.assertTrue(has_assessed_general_topics(with_assessed))
+        self.assertFalse(has_assessed_general_topics(pd.DataFrame()))
 
 
 class TestParseTopicConfidenceValue(unittest.TestCase):
