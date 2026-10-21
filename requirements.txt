@@ -19,6 +19,7 @@ python-dotenv<=1.2.4
 presidio_analyzer<=2.2.364
 presidio_anonymizer<=2.2.364
 spacy<=3.8.16
+cryptography>=50.0.0
 # GPU (for huggingface instance)
 # Torch/Unsloth and llama-cpp-python
 torch<=2.13.0 --extra-index-url https://download.pytorch.org/whl/cu130
