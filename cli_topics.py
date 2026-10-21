@@ -1325,7 +1325,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 context_textbox=args.context,
                 sentiment_checkbox=args.sentiment,
                 force_zero_shot_radio=args.force_zero_shot,
-                in_excel_sheets=args.excel_sheets,
+                in_excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
                 force_single_topic_radio=args.force_single_topic,
                 include_topic_confidence_radio=getattr(
                     args,
@@ -1495,7 +1495,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 context_textbox=args.context,
                 sentiment_checkbox=args.sentiment,
                 force_zero_shot_radio=args.force_zero_shot,
-                in_excel_sheets=args.excel_sheets,
+                in_excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
                 force_single_topic_radio=args.force_single_topic,
                 include_topic_confidence_radio=getattr(
                     args,
@@ -2316,7 +2316,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 context_text=args.context,
                 sentiment_choice=args.sentiment,
                 force_zero_shot_choice=args.force_zero_shot,
-                in_excel_sheets=args.excel_sheets,
+                in_excel_sheets=args.excel_sheets[0] if args.excel_sheets else "",
                 force_single_topic_choice=args.force_single_topic,
                 include_topic_confidence_choice=getattr(
                     args,

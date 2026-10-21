@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.18.4"
+version = "0.18.5"
 description = "Generate topics and thematic summaries from open text in tabular data files with LLMs"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -72,6 +72,7 @@ dependencies = [
     "presidio_analyzer<=2.2.364",
     "presidio_anonymizer<=2.2.364",
     "spacy<=3.8.16",
+    "cryptography>=50.0.0"
 ]
 
 [project.optional-dependencies]

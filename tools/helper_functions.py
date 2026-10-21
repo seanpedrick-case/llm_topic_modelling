@@ -152,11 +152,39 @@ def detect_file_type(filename: str):
         raise ValueError("Unsupported file type.")
 
 
+def normalise_excel_sheet_arg(sheet: Any) -> Any:
+    """Coerce Gradio/CLI sheet selectors to a single sheet name or index.
+
+    ``pd.read_excel(..., sheet_name=<list|None>)`` returns a dict of DataFrames.
+    Callers often pass CLI ``nargs='+'`` lists or Gradio Dropdown components;
+    either must be reduced to one sheet name before reading.
+    """
+    if sheet is None or sheet == "" or sheet is False:
+        return ""
+    if isinstance(sheet, (list, tuple)):
+        if not sheet:
+            return ""
+        return normalise_excel_sheet_arg(sheet[0])
+    if isinstance(sheet, dict):
+        # Gradio update payloads / mistaken component serialisations
+        if "value" in sheet:
+            return normalise_excel_sheet_arg(sheet.get("value"))
+        return ""
+    # Gradio Dropdown (or similar) mistakenly passed through instead of its value
+    value = getattr(sheet, "value", None)
+    if value is not None and not isinstance(sheet, (str, bytes, int)):
+        return normalise_excel_sheet_arg(value)
+    if isinstance(sheet, int):
+        return sheet
+    return str(sheet).strip().strip("'\"")
+
+
 def read_file(filename: str, sheet: str = ""):
     """Read the file based on its detected type."""
     # Strip quotes and whitespace that might have been accidentally included
     filename = filename.strip().strip("'\"")
     file_type = detect_file_type(filename)
+    sheet = normalise_excel_sheet_arg(sheet)
 
     if file_type == "csv":
         # CSVs in UK local gov contexts are often Windows-1252 (smart quotes like 0x92),
@@ -188,7 +216,7 @@ def read_file(filename: str, sheet: str = ""):
                 raise last_err
             raise UnicodeDecodeError("utf-8", b"", 0, 1, "Could not decode CSV")
     elif file_type == "xlsx":
-        if sheet:
+        if sheet != "" and sheet is not None:
             return pd.read_excel(filename, sheet_name=sheet)
         else:
             return pd.read_excel(filename)
@@ -205,8 +233,16 @@ def load_in_file(file_path: str, colnames: List[str] = "", excel_sheet: str = ""
     - colnames (List[str], optional): list of colnames to load in
     """
 
+    file_path = resolve_uploaded_file_path(file_path)
     file_name = get_file_name_no_ext(file_path)
     file_data = read_file(file_path, excel_sheet)
+
+    if not isinstance(file_data, pd.DataFrame):
+        raise TypeError(
+            "Expected a single DataFrame from file load, got "
+            f"{type(file_data).__name__}. Check excel sheet selection "
+            f"(received {excel_sheet!r})."
+        )
 
     if colnames and isinstance(colnames, list):
         col_list = colnames
@@ -264,7 +300,12 @@ def load_in_data_file(
     except ColumnNotFoundError:
         raise
     except Exception as e:
-        print("Could not load data file due to:", e)
+        print(
+            "Could not load data file due to:",
+            e,
+            "- continuing with empty file data "
+            "(response-level pivot outputs may be skipped).",
+        )
         file_data = pd.DataFrame()
         file_name = ""
         num_batches = 1
