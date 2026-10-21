@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.13.16-slim-trixie AS builder
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -41,7 +41,7 @@ RUN rm requirements_lightweight.txt
 # ===================================================================
 # Stage 2: A common 'base' for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.13.16-slim-trixie AS base
 
 # Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
@@ -50,6 +50,9 @@ ENV APP_MODE=${APP_MODE}
 # Install runtime system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas0 \
+    openssl \
+    libpcre2-8-0 \
+    && apt-get upgrade -y openssl libpcre2-8-0 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ENV APP_HOME=/home/user
