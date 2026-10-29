@@ -1,6 +1,6 @@
 # Note that this requirements file is optimised for Hugging Face spaces / Python 3.10. Please use requirements_lightweight.txt for installation without local model inference (simplest approach to get going). Please use requirements_cpu.txt for CPU instances and requirements_gpu.txt for GPU instances using Python 3.11
 gradio>=6.26.0,<7
-transformers>=5.30.0,<6
+transformers>=5.19.0,<6
 spaces
 boto3>=1.43.121,<2
 pandas>=3.0.6,<4
@@ -20,7 +20,7 @@ presidio_analyzer>=2.2.364,<3
 presidio_anonymizer>=2.2.364,<3
 spacy>=3.8.16,<4
 cryptography>=50.0.0
-pillow>=13.0.0
+pillow>=12.3.0
 # GPU (for huggingface instance)
 # Torch/Unsloth and llama-cpp-python
 torch<=2.13.0 --extra-index-url https://download.pytorch.org/whl/cu130

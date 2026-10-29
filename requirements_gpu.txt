@@ -1,5 +1,5 @@
 gradio>=6.26.0,<7
-transformers>=5.30.0,<6
+transformers>=5.19.0,<6
 spaces
 pandas>=3.0.6,<4
 boto3>=1.43.121,<2
@@ -19,7 +19,7 @@ presidio_analyzer>=2.2.364,<3
 presidio_anonymizer>=2.2.364,<3
 spacy>=3.8.16,<4
 cryptography>=50.0.0
-pillow>=13.0.0
+pillow>=12.3.0
 # Torch/Unsloth
 # Latest compatible with CUDA 12.4
 torch<=2.14.1 --extra-index-url https://download.pytorch.org/whl/cu128
