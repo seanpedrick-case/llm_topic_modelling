@@ -236,9 +236,11 @@ class LlamaCPPGenerationConfig:
 
 # ResponseObject class for AWS Bedrock calls
 class ResponseObject:
-    def __init__(self, text, usage_metadata):
+    def __init__(self, text, usage_metadata, stop_reason=None):
         self.text = text
         self.usage_metadata = usage_metadata
+        self.stop_reason = stop_reason
+        self.guardrail_intervened = stop_reason == "guardrail_intervened"
 
 
 ###
@@ -1180,6 +1182,55 @@ def _is_bedrock_sampling_param_deprecated_error(error: Exception) -> bool:
     )
 
 
+def _bedrock_guardrail_config_for_converse() -> dict | None:
+    """Build guardrailConfig for Converse when enabled in tools.config."""
+    from tools.config import (
+        BEDROCK_GUARDRAIL_IDENTIFIER,
+        BEDROCK_GUARDRAIL_TRACE,
+        BEDROCK_GUARDRAIL_VERSION,
+        ENABLE_BEDROCK_GUARDRAILS,
+    )
+
+    if not ENABLE_BEDROCK_GUARDRAILS:
+        return None
+    guardrail_config = {
+        "guardrailIdentifier": BEDROCK_GUARDRAIL_IDENTIFIER,
+        "guardrailVersion": BEDROCK_GUARDRAIL_VERSION,
+    }
+    if BEDROCK_GUARDRAIL_TRACE != "disabled":
+        guardrail_config["trace"] = BEDROCK_GUARDRAIL_TRACE
+    return guardrail_config
+
+
+def _bedrock_converse(
+    bedrock_runtime: boto3.Session.client,
+    *,
+    model_choice: str,
+    messages: list,
+    system_prompt_list: list,
+    inference_config: dict,
+) -> dict:
+    """Invoke Bedrock Converse with optional guardrailConfig."""
+    converse_kwargs = {
+        "modelId": model_choice,
+        "messages": messages,
+        "system": system_prompt_list,
+        "inferenceConfig": inference_config,
+    }
+    guardrail_config = _bedrock_guardrail_config_for_converse()
+    if guardrail_config:
+        converse_kwargs["guardrailConfig"] = guardrail_config
+    return bedrock_runtime.converse(**converse_kwargs)
+
+
+def _log_bedrock_guardrail_intervention(api_response: dict) -> None:
+    """Log guardrail intervention without dumping assessed text (PII-safe)."""
+    stop_reason = api_response.get("stopReason")
+    print(f"Bedrock guardrail intervened (stopReason={stop_reason}).")
+    if api_response.get("trace"):
+        print("Guardrail trace was returned; assessment details are omitted from logs.")
+
+
 def _extract_bedrock_converse_text(
     output_message: dict,
     assistant_prefill: str = "",
@@ -1283,11 +1334,12 @@ def call_aws_bedrock(
     # The converse API call. If an unlisted newer model still rejects sampling
     # params, retry once with temperature/topP removed.
     try:
-        api_response = bedrock_runtime.converse(
-            modelId=model_choice,
+        api_response = _bedrock_converse(
+            bedrock_runtime,
+            model_choice=model_choice,
             messages=messages,
-            system=system_prompt_list,
-            inferenceConfig=inference_config,
+            system_prompt_list=system_prompt_list,
+            inference_config=inference_config,
         )
     except Exception as e:
         if (
@@ -1301,14 +1353,19 @@ def call_aws_bedrock(
             )
             inference_config.pop("temperature", None)
             inference_config.pop("topP", None)
-            api_response = bedrock_runtime.converse(
-                modelId=model_choice,
+            api_response = _bedrock_converse(
+                bedrock_runtime,
+                model_choice=model_choice,
                 messages=messages,
-                system=system_prompt_list,
-                inferenceConfig=inference_config,
+                system_prompt_list=system_prompt_list,
+                inference_config=inference_config,
             )
         else:
             raise
+
+    stop_reason = api_response.get("stopReason")
+    if stop_reason == "guardrail_intervened":
+        _log_bedrock_guardrail_intervention(api_response)
 
     output_message = api_response["output"]["message"]
     text = _extract_bedrock_converse_text(
@@ -1324,7 +1381,7 @@ def call_aws_bedrock(
     api_response["ResponseMetadata"]
 
     # Create ResponseObject with the cleanly extracted data.
-    response = ResponseObject(text=text, usage_metadata=usage)
+    response = ResponseObject(text=text, usage_metadata=usage, stop_reason=stop_reason)
 
     return response
 
@@ -1659,6 +1716,13 @@ def send_request(
                     bedrock_runtime=bedrock_runtime,
                     assistant_prefill=assistant_prefill,
                 )
+
+                if response.guardrail_intervened:
+                    print(
+                        "Bedrock guardrail blocked or altered this call; "
+                        "not retrying."
+                    )
+                    break
 
                 # print("Successful call to Claude model.")
                 break

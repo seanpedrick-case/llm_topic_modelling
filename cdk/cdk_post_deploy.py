@@ -1211,6 +1211,7 @@ def seed_headless_batch_s3_layout(
     default_params_key: str = "general-config/app_defaults.env",
     app_defaults_local_path: str = "",
     s3_outputs_bucket_name: str = "",
+    env_overrides: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     Ensure headless batch prefixes and example job .env exist on the output bucket.
@@ -1281,9 +1282,29 @@ def seed_headless_batch_s3_layout(
         from cdk_functions import build_headless_app_defaults_env_content
 
         seed_dir = os.path.join(os.path.dirname(__file__), "config", "headless_s3_seed")
+        if env_overrides is None:
+            try:
+                from cdk_config import (
+                    BEDROCK_GUARDRAIL_IDENTIFIER,
+                    BEDROCK_GUARDRAIL_TRACE,
+                    BEDROCK_GUARDRAIL_VERSION,
+                    ENABLE_BEDROCK_GUARDRAILS,
+                )
+                from cdk_functions import bedrock_guardrail_env_overrides_for_defaults
+
+                env_overrides = bedrock_guardrail_env_overrides_for_defaults(
+                    ENABLE_BEDROCK_GUARDRAILS,
+                    BEDROCK_GUARDRAIL_IDENTIFIER,
+                    BEDROCK_GUARDRAIL_VERSION,
+                    BEDROCK_GUARDRAIL_TRACE,
+                )
+            except Exception:
+                env_overrides = {}
+
         rendered = build_headless_app_defaults_env_content(
             seed_dir,
             s3_outputs_bucket_name=s3_outputs_bucket_name or output_bucket,
+            env_overrides=env_overrides or None,
         )
         body = rendered.encode("utf-8")
     except Exception as exc:

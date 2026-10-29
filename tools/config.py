@@ -462,6 +462,36 @@ BEDROCK_CONNECT_TIMEOUT_SECONDS = int(
     get_or_create_env_var("BEDROCK_CONNECT_TIMEOUT_SECONDS", "180")
 )
 
+# Optional Amazon Bedrock Guardrails on Converse (guardrail must exist in the same Region).
+# PII/topic/content rules are defined on the published guardrail version in AWS, not here.
+# Keep REDACTION_ENTITIES aligned when republishing guardrail versions (see README).
+ENABLE_BEDROCK_GUARDRAILS = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_BEDROCK_GUARDRAILS", "False")
+)
+BEDROCK_GUARDRAIL_IDENTIFIER = get_or_create_env_var(
+    "BEDROCK_GUARDRAIL_IDENTIFIER", ""
+).strip()
+BEDROCK_GUARDRAIL_VERSION = get_or_create_env_var(
+    "BEDROCK_GUARDRAIL_VERSION", ""
+).strip()
+_BEDROCK_GUARDRAIL_TRACE_RAW = (
+    get_or_create_env_var("BEDROCK_GUARDRAIL_TRACE", "disabled").strip().lower()
+)
+if _BEDROCK_GUARDRAIL_TRACE_RAW not in ("disabled", "enabled", "enabled_full"):
+    raise ValueError(
+        "BEDROCK_GUARDRAIL_TRACE must be disabled, enabled, or enabled_full; "
+        f"got {_BEDROCK_GUARDRAIL_TRACE_RAW!r}"
+    )
+BEDROCK_GUARDRAIL_TRACE = _BEDROCK_GUARDRAIL_TRACE_RAW
+
+if ENABLE_BEDROCK_GUARDRAILS and (
+    not BEDROCK_GUARDRAIL_IDENTIFIER or not BEDROCK_GUARDRAIL_VERSION
+):
+    raise ValueError(
+        "ENABLE_BEDROCK_GUARDRAILS is True but BEDROCK_GUARDRAIL_IDENTIFIER and/or "
+        "BEDROCK_GUARDRAIL_VERSION is empty. Set both from your published guardrail."
+    )
+
 # When we cannot do server-side token counting for inference-server, our local estimates can be low.
 # Apply an additional safety multiplier to sampler token budgets in that case.
 INFERENCE_SERVER_SAMPLER_TOKEN_BUDGET_FRACTION = float(

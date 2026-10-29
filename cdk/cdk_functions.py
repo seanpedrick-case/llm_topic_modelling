@@ -3851,10 +3851,72 @@ def create_headless_output_notifications(
     }
 
 
+def bedrock_guardrail_env_overrides_for_defaults(
+    enable: str,
+    identifier: str,
+    version: str,
+    trace: str,
+) -> Dict[str, str]:
+    """Headless app_defaults.env keys when guardrails are enabled in cdk_config.env."""
+    if (enable or "").strip() != "True":
+        return {}
+    ident = (identifier or "").strip()
+    ver = (version or "").strip()
+    if not ident or not ver:
+        return {}
+    trace_value = (trace or "disabled").strip().lower()
+    if trace_value not in ("disabled", "enabled", "enabled_full"):
+        trace_value = "disabled"
+    return {
+        "ENABLE_BEDROCK_GUARDRAILS": "True",
+        "BEDROCK_GUARDRAIL_IDENTIFIER": ident,
+        "BEDROCK_GUARDRAIL_VERSION": ver,
+        "BEDROCK_GUARDRAIL_TRACE": trace_value,
+    }
+
+
+def _merge_env_overrides_into_defaults_lines(
+    lines: List[str],
+    env_overrides: Dict[str, str],
+) -> List[str]:
+    """Apply KEY=VALUE overrides; replaces active or commented template lines."""
+    if not env_overrides:
+        return lines
+
+    applied: set[str] = set()
+    merged: List[str] = []
+
+    for raw_line in lines:
+        line = raw_line.rstrip("\n")
+        stripped = line.strip()
+        key = None
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+        elif stripped.startswith("#") and "=" in stripped:
+            comment_body = stripped.lstrip("#").strip()
+            if "=" in comment_body:
+                key = comment_body.split("=", 1)[0].strip()
+
+        if key and key in env_overrides:
+            merged.append(f"{key}={env_overrides[key]}")
+            applied.add(key)
+        else:
+            merged.append(line)
+
+    for key, value in env_overrides.items():
+        if key not in applied:
+            if merged and merged[-1].strip():
+                merged.append("")
+            merged.append(f"{key}={value}")
+
+    return merged
+
+
 def build_headless_app_defaults_env_content(
     seed_asset_directory: str,
     *,
     s3_outputs_bucket_name: str,
+    env_overrides: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Render general-config/app_defaults.env for headless batch jobs.
@@ -3894,6 +3956,9 @@ def build_headless_app_defaults_env_content(
             out_lines.append("")
         out_lines.append(f"S3_OUTPUTS_BUCKET={s3_outputs_bucket_name}")
 
+    if env_overrides:
+        out_lines = _merge_env_overrides_into_defaults_lines(out_lines, env_overrides)
+
     return "\n".join(out_lines).rstrip() + "\n"
 
 
@@ -3906,6 +3971,7 @@ def create_headless_s3_batch_seed(
     seed_asset_directory: str,
     s3_outputs_bucket_name: str,
     default_params_key: str = "general-config/app_defaults.env",
+    env_overrides: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     Seed headless batch S3 layout across two buckets:
@@ -3919,6 +3985,7 @@ def create_headless_s3_batch_seed(
     app_defaults_content = build_headless_app_defaults_env_content(
         seed_asset_directory,
         s3_outputs_bucket_name=s3_outputs_bucket_name,
+        env_overrides=env_overrides,
     )
 
     # Job inputs / example .env stay on the output bucket (triggered by Lambda).

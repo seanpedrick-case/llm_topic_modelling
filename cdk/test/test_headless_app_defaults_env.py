@@ -20,3 +20,20 @@ def test_build_headless_app_defaults_env_sets_outputs_bucket():
     assert "RUN_DIRECT_MODE=1" in content
     assert "SAVE_OUTPUTS_TO_S3=True" in content
     assert content.count("S3_OUTPUTS_BUCKET=") == 1
+
+
+def test_build_headless_app_defaults_env_merges_bedrock_guardrails():
+    seed_dir = str(CDK_DIR / "config" / "headless_s3_seed")
+    content = build_headless_app_defaults_env_content(
+        seed_dir,
+        s3_outputs_bucket_name="test-output-bucket",
+        env_overrides={
+            "ENABLE_BEDROCK_GUARDRAILS": "True",
+            "BEDROCK_GUARDRAIL_IDENTIFIER": "gr-test",
+            "BEDROCK_GUARDRAIL_VERSION": "1",
+            "BEDROCK_GUARDRAIL_TRACE": "disabled",
+        },
+    )
+    assert "ENABLE_BEDROCK_GUARDRAILS=True" in content
+    assert "BEDROCK_GUARDRAIL_IDENTIFIER=gr-test" in content
+    assert "# ENABLE_BEDROCK_GUARDRAILS" not in content
