@@ -180,7 +180,14 @@ class TestCallAwsBedrockGuardrails(unittest.TestCase):
             "tools.llm_funcs.call_aws_bedrock",
             return_value=blocked,
         ) as mock_call:
-            process_requests(
+            (
+                _responses,
+                _history,
+                _whole,
+                _meta,
+                _text,
+                guardrail_intervened,
+            ) = process_requests(
                 ["prompt"],
                 "system",
                 [],
@@ -198,6 +205,7 @@ class TestCallAwsBedrockGuardrails(unittest.TestCase):
             )
 
         self.assertEqual(mock_call.call_count, 1)
+        self.assertTrue(guardrail_intervened)
 
 
 if __name__ == "__main__":

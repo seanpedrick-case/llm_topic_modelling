@@ -1338,6 +1338,7 @@ def deduplicate_topics_llm(
         whole_conversation,
         whole_conversation_metadata,
         response_text,
+        _guardrail_intervened,
     ) = call_llm_with_markdown_table_checks(
         batch_prompts=[formatted_prompt],
         system_prompt=llm_deduplication_system_prompt,

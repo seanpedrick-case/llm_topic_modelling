@@ -2173,12 +2173,19 @@ def process_requests(
         except KeyError as e:
             print(f"Key error: {e} - Check the structure of response.usage_metadata")
 
+    guardrail_intervened = any(
+        getattr(r, "guardrail_intervened", False)
+        for r in responses
+        if isinstance(r, ResponseObject)
+    )
+
     return (
         responses,
         conversation_history,
         whole_conversation,
         whole_conversation_metadata,
         response_text,
+        guardrail_intervened,
     )
 
 
@@ -2216,7 +2223,7 @@ def call_llm_with_markdown_table_checks(
     CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
     random_seed: int = seed,
     api_url: str = None,
-) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str]:
+) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str, bool]:
     """
     Call the large language model with checks for a valid markdown table.
 
@@ -2243,10 +2250,12 @@ def call_llm_with_markdown_table_checks(
     - api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
-    - Tuple[List[ResponseObject], List[dict], List[str], List[str], str]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, the updated whole conversation metadata, and the response text.
+    - Tuple ending with response text and whether Bedrock guardrail intervened on any call.
     """
 
     call_temperature = temperature  # This is correct now with the fixed parameter name
+    guardrail_intervened = False
+    stripped_response = ""
 
     # Update Gemini config with the new temperature settings
     client_config = types.GenerateContentConfig(
@@ -2265,6 +2274,7 @@ def call_llm_with_markdown_table_checks(
             whole_conversation,
             whole_conversation_metadata,
             response_text,
+            batch_guardrail_intervened,
         ) = process_requests(
             batch_prompts,
             system_prompt,
@@ -2284,8 +2294,16 @@ def call_llm_with_markdown_table_checks(
             assistant_prefill=assistant_prefill,
             api_url=api_url,
         )
+        guardrail_intervened = guardrail_intervened or batch_guardrail_intervened
 
         stripped_response = response_text.strip()
+
+        if batch_guardrail_intervened:
+            print(
+                "Bedrock guardrail intervened for this batch; "
+                "skipping further output validation retries."
+            )
+            break
 
         # Check if response meets our criteria (length and contains table) OR is "No change"
         if (
@@ -2316,6 +2334,7 @@ def call_llm_with_markdown_table_checks(
         whole_conversation,
         whole_conversation_metadata,
         stripped_response,
+        guardrail_intervened,
     )
 
 

@@ -39,6 +39,8 @@ The guardrail must be created in the **same AWS Region** as Bedrock model invoca
 
 **IAM:** The runtime role needs `bedrock:InvokeModel` (or inference-profile access) plus `bedrock:ApplyGuardrail` on the guardrail ARN. The ECS task role’s `AmazonBedrockLimitedAccess` managed policy may not include `ApplyGuardrail`; add a scoped inline policy via `POLICY_FILE_LOCATIONS` in CDK if Converse returns access denied.
 
+When a batch is blocked (`stopReason: guardrail_intervened`), topic extraction **continues** with other batches: affected responses get no assignments (they may appear under **Missing responses** in the workbook). If any batch was guardrail-blocked, the combined xlsx includes a **Batch status** sheet listing batch number, row range, and task type.
+
 # Installation guide
 
 Here is a step-by-step guide to clone the repository, create a virtual environment, and install dependencies from the relevant `requirements` file. This guide assumes you have **Git** and **Python 3.11** installed.

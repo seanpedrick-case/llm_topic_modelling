@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 from tools import config as app_config
 from tools.aws_functions import connect_to_bedrock_runtime
+from tools.bedrock_guardrail_batch_status import append_guardrail_batch_status
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
     BATCH_DEDUPLICATION_EVERY_N_BATCHES,
@@ -3502,6 +3503,122 @@ def write_llm_output_and_logs(
     )
 
 
+def _finalize_guardrail_rejected_batch(
+    *,
+    formatted_system_prompt: str,
+    formatted_prompt: str,
+    batch_file_path_details: str,
+    model_choice_clean: str,
+    response_text: str,
+    whole_conversation: list,
+    all_metadata_content: list,
+    log_files_output_paths: list,
+    existing_reference_df: pd.DataFrame,
+    existing_topic_summary_df: pd.DataFrame,
+    output_folder: str,
+    output_debug_files: str,
+    task_type: str,
+    reported_batch_no: int,
+    start_row: int,
+    end_row: int,
+) -> Tuple:
+    """Record guardrail rejection and return empty batch assignments (run continues)."""
+    append_guardrail_batch_status(
+        output_folder,
+        batch_number=reported_batch_no,
+        start_row=start_row,
+        end_row=end_row,
+        task_type=task_type,
+    )
+    print(
+        f"Batch {reported_batch_no} ({task_type}): guardrail rejected — "
+        "no topic assignments for this batch."
+    )
+
+    model_choice_clean_short = clean_column_name(
+        model_choice_clean, max_length=20, front_characters=False
+    )
+    topic_table_out_path = (
+        output_folder
+        + batch_file_path_details
+        + "_topic_table_"
+        + model_choice_clean_short
+        + ".csv"
+    )
+    reference_table_out_path = (
+        output_folder
+        + batch_file_path_details
+        + "_reference_table_"
+        + model_choice_clean_short
+        + ".csv"
+    )
+    topic_summary_df_out_path = (
+        output_folder
+        + batch_file_path_details
+        + "_unique_topics_"
+        + model_choice_clean_short
+        + ".csv"
+    )
+
+    new_topic_df = pd.DataFrame(
+        columns=["General topic", "Subtopic", "Sentiment", "Response ID", "Summary"]
+    )
+    # Keep prior assignments; this batch adds no reference rows (responses stay unassigned).
+    new_reference_df = (
+        existing_reference_df.copy()
+        if isinstance(existing_reference_df, pd.DataFrame)
+        and not existing_reference_df.empty
+        else pd.DataFrame(
+            columns=[
+                "Response ID",
+                "General topic",
+                "Subtopic",
+                "Sentiment",
+                "Summary",
+                "Start row of group",
+            ]
+        )
+    )
+    new_topic_summary_df = (
+        existing_topic_summary_df.copy()
+        if isinstance(existing_topic_summary_df, pd.DataFrame)
+        else pd.DataFrame()
+    )
+
+    full_prompt = formatted_system_prompt + "\n" + formatted_prompt
+    (
+        current_prompt_content_logged,
+        current_summary_content_logged,
+        current_conversation_content_logged,
+        current_metadata_content_logged,
+    ) = process_debug_output_iteration(
+        output_debug_files,
+        output_folder,
+        batch_file_path_details,
+        model_choice_clean,
+        full_prompt,
+        response_text,
+        whole_conversation,
+        all_metadata_content,
+        log_files_output_paths,
+        task_type=task_type,
+    )
+
+    return (
+        new_topic_df,
+        new_reference_df,
+        new_topic_summary_df,
+        False,
+        current_prompt_content_logged,
+        current_summary_content_logged,
+        current_conversation_content_logged,
+        current_metadata_content_logged,
+        topic_table_out_path,
+        reference_table_out_path,
+        topic_summary_df_out_path,
+    )
+
+
 def process_batch_with_llm(
     is_first_batch: bool,
     formatted_system_prompt: str,
@@ -3703,6 +3820,9 @@ def process_batch_with_llm(
     retry_needed = True
     original_temperature = temperature
     current_temperature = temperature
+    guardrail_intervened = False
+    is_error = False
+    has_incomplete_output = False
 
     while retry_needed and retry_count < max_retries:
         # Adjust temperature on each retry (not on first attempt). Bedrock rejects values above 1.0.
@@ -3730,6 +3850,7 @@ def process_batch_with_llm(
             whole_conversation,
             all_metadata_content,
             response_text,
+            guardrail_intervened,
         ) = call_llm_with_markdown_table_checks(
             batch_prompts,
             formatted_system_prompt,
@@ -3750,6 +3871,26 @@ def process_batch_with_llm(
             master=not is_first_batch,
             api_url=api_url,
         )
+
+        if guardrail_intervened:
+            return _finalize_guardrail_rejected_batch(
+                formatted_system_prompt=formatted_system_prompt,
+                formatted_prompt=formatted_prompt,
+                batch_file_path_details=batch_file_path_details,
+                model_choice_clean=model_choice_clean,
+                response_text=response_text,
+                whole_conversation=whole_conversation,
+                all_metadata_content=all_metadata_content,
+                log_files_output_paths=log_files_output_paths,
+                existing_reference_df=existing_reference_df,
+                existing_topic_summary_df=existing_topic_summary_df,
+                output_folder=output_folder,
+                output_debug_files=output_debug_files,
+                task_type=task_type,
+                reported_batch_no=reported_batch_no,
+                start_row=start_row,
+                end_row=end_row,
+            )
 
         # print("Response text:", response_text)
 
@@ -4183,6 +4324,11 @@ def extract_topics(
 
     latest_batch_completed = int(latest_batch_completed)
     num_batches = int(num_batches)
+
+    if latest_batch_completed == 0:
+        from tools.bedrock_guardrail_batch_status import clear_guardrail_batch_status
+
+        clear_guardrail_batch_status(output_folder)
 
     if latest_batch_completed < num_batches:
 
@@ -7554,6 +7700,7 @@ def suggest_improved_topic_names(
             whole_conversation,
             topic_metadata,
             response_text,
+            _guardrail_intervened,
         ) = call_llm_with_markdown_table_checks(
             batch_prompts=[formatted_prompt],
             system_prompt=system_prompt,
