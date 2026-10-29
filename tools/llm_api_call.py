@@ -1988,12 +1988,20 @@ def clean_markdown_table(text: str):
     # Step 1: Identify table structure and process line continuations
     table_rows = list()
     current_row = None
+    table_ended = False
 
     for line in lines:
         stripped = line.strip()
 
-        # Skip empty lines
+        if table_ended:
+            continue
+
         if not stripped:
+            # Blank line after table rows: finish table; ignore trailing prose
+            if current_row is not None and table_rows:
+                table_rows.append(current_row)
+                current_row = None
+                table_ended = True
             continue
 
         # Check if this is a table row or alignment row
@@ -2007,14 +2015,14 @@ def clean_markdown_table(text: str):
             # Start a new row
             current_row = stripped
         elif current_row is not None:
-            # This must be a continuation of the previous row
+            # Multiline cell continuation (no pipe on this line)
             current_row += " " + stripped
-        else:
-            # Not part of the table
-            current_row = stripped
+        elif not table_rows:
+            # Preamble before the first table row — ignore
+            continue
 
     # Don't forget the last row
-    if current_row is not None:
+    if current_row is not None and not table_ended:
         table_rows.append(current_row)
 
     # Step 2: Properly format the table

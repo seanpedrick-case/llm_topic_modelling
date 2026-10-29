@@ -2070,7 +2070,7 @@ def process_requests(
     master: bool = False,
     assistant_prefill="",
     api_url: str = None,
-) -> Tuple[List[ResponseObject], List[dict], List[str], List[str]]:
+) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str, bool]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
 
@@ -2093,7 +2093,7 @@ def process_requests(
         api_url (str, optional): The API URL for inference-server calls. Required when model_source is 'inference-server'.
 
     Returns:
-        Tuple[List[ResponseObject], List[dict], List[str], List[str]]: A tuple containing the list of responses, the updated conversation history, the updated whole conversation, and the updated whole conversation metadata.
+        Tuple ending with response text and whether Bedrock guardrail intervened on any call.
     """
     responses = list()
 

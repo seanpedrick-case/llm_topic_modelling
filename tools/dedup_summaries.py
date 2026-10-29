@@ -2748,6 +2748,7 @@ def summarise_output_topics_query(
         whole_conversation,
         whole_conversation_metadata,
         response_text,
+        _guardrail_intervened,
     ) = process_requests(
         formatted_summary_prompt,
         summarise_topic_descriptions_system_prompt,
