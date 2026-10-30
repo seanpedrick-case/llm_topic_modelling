@@ -234,6 +234,9 @@ NAT_GATEWAY_EIP_NAME = get_or_create_env_var(
 NAT_GATEWAY_NAME = get_or_create_env_var("NAT_GATEWAY_NAME", f"{CDK_PREFIX}NatGateway")
 
 # IAM roles — managed policy *names* (AWS managed) and JSON policy *files* (inline statements)
+# Bedrock Guardrails (ENABLE_BEDROCK_GUARDRAILS in app config): task role may need
+# bedrock:ApplyGuardrail on the guardrail ARN in the same Region as Converse; add via
+# POLICY_FILE_LOCATIONS if AmazonBedrockLimitedAccess is insufficient.
 AWS_MANAGED_TASK_ROLES_LIST = get_or_create_env_var(
     "AWS_MANAGED_TASK_ROLES_LIST",
     '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockLimitedAccess"]',
@@ -748,6 +751,18 @@ BEDROCK_MODEL_INVOCATION_EMBEDDING_ENABLED = get_or_create_env_var(
 )
 BEDROCK_MODEL_INVOCATION_VIDEO_ENABLED = get_or_create_env_var(
     "BEDROCK_MODEL_INVOCATION_VIDEO_ENABLED", "True"
+)
+
+# Optional Bedrock Guardrails on Converse (app + headless batch defaults; set via cdk_install).
+ENABLE_BEDROCK_GUARDRAILS = get_or_create_env_var("ENABLE_BEDROCK_GUARDRAILS", "False")
+BEDROCK_GUARDRAIL_IDENTIFIER = get_or_create_env_var(
+    "BEDROCK_GUARDRAIL_IDENTIFIER", ""
+).strip()
+BEDROCK_GUARDRAIL_VERSION = get_or_create_env_var(
+    "BEDROCK_GUARDRAIL_VERSION", ""
+).strip()
+BEDROCK_GUARDRAIL_TRACE = (
+    get_or_create_env_var("BEDROCK_GUARDRAIL_TRACE", "disabled").strip().lower()
 )
 
 # Optional headless follow-on: S3 output PutRequests alarm -> SNS email + IAM user for downloads.

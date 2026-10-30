@@ -292,6 +292,41 @@ def test_validate_install_answers_bedrock_logging_requires_prefix():
     assert any("S3 key prefix" in err for err in errors)
 
 
+def test_build_env_values_bedrock_guardrails():
+    answers = _headless_answers()
+    answers.enable_bedrock_guardrails = True
+    answers.bedrock_guardrail_identifier = "gr-abc123"
+    answers.bedrock_guardrail_version = "2"
+    answers.bedrock_guardrail_trace = "enabled"
+    values = inst.build_env_values(answers)
+    assert values["ENABLE_BEDROCK_GUARDRAILS"] == "True"
+    assert values["BEDROCK_GUARDRAIL_IDENTIFIER"] == "gr-abc123"
+    assert values["BEDROCK_GUARDRAIL_VERSION"] == "2"
+    assert values["BEDROCK_GUARDRAIL_TRACE"] == "enabled"
+
+
+def test_build_app_config_env_values_includes_bedrock_guardrails():
+    answers = _headless_answers()
+    answers.enable_bedrock_guardrails = True
+    answers.bedrock_guardrail_identifier = "gr-abc123"
+    answers.bedrock_guardrail_version = "1"
+    answers.bedrock_guardrail_trace = "disabled"
+    values = inst.build_env_values(answers)
+    updates = inst.build_app_config_env_values(values)
+    assert updates["ENABLE_BEDROCK_GUARDRAILS"] == "True"
+    assert updates["BEDROCK_GUARDRAIL_IDENTIFIER"] == "gr-abc123"
+
+
+def test_validate_install_answers_bedrock_guardrails_requires_id_and_version():
+    answers = _headless_answers()
+    answers.enable_bedrock_guardrails = True
+    answers.bedrock_guardrail_identifier = ""
+    answers.bedrock_guardrail_version = ""
+    errors = inst.validate_install_answers(answers)
+    assert any("GUARDRAIL_IDENTIFIER" in err for err in errors)
+    assert any("GUARDRAIL_VERSION" in err for err in errors)
+
+
 def test_default_bedrock_invocation_log_group_name():
     assert (
         inst.default_bedrock_invocation_log_group_name("Headless-Summarisation-")

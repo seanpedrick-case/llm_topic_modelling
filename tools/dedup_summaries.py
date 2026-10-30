@@ -1338,6 +1338,7 @@ def deduplicate_topics_llm(
         whole_conversation,
         whole_conversation_metadata,
         response_text,
+        _guardrail_intervened,
     ) = call_llm_with_markdown_table_checks(
         batch_prompts=[formatted_prompt],
         system_prompt=llm_deduplication_system_prompt,
@@ -2747,6 +2748,7 @@ def summarise_output_topics_query(
         whole_conversation,
         whole_conversation_metadata,
         response_text,
+        _guardrail_intervened,
     ) = process_requests(
         formatted_summary_prompt,
         summarise_topic_descriptions_system_prompt,

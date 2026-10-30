@@ -26,6 +26,21 @@ Basic use:
 5. Click 'Extract topics, deduplicate, and summarise'. This will run through the whole analysis process from topic extraction, to topic deduplication, to topic-level and overall summaries.
 6. A summary xlsx file workbook will be created on the front page in the box 'Overall summary xlsx file'. This will combine all the results from the different processes into one workbook.
 
+### Optional: Amazon Bedrock Guardrails (AWS models)
+
+When `RUN_AWS_BEDROCK_MODELS=1`, you can attach an existing Bedrock guardrail to every `Converse` call by setting variables in `config/app_config.env` (see `tools/config.py`):
+
+- `ENABLE_BEDROCK_GUARDRAILS=True`
+- `BEDROCK_GUARDRAIL_IDENTIFIER` — guardrail ID or ARN from the AWS console / CloudFormation output
+- `BEDROCK_GUARDRAIL_VERSION` — published version number (not `DRAFT` in production)
+- `BEDROCK_GUARDRAIL_TRACE` — `disabled`, `enabled`, or `enabled_full`
+
+The guardrail must be created in the **same AWS Region** as Bedrock model invocation (`AWS_REGION`). Content filters, denied topics, and PII actions are defined on that guardrail version in AWS; the app only passes ID and version. For topic modelling, avoid chatbot-style topic denies on citizen open text; prefer PII and harmful-content policies. Optional Presidio redaction (`ENABLE_INPUT_REDACTION`, `REDACTION_ENTITIES`) runs before prompts are built and can be kept aligned with the guardrail’s PII policy when you publish new guardrail versions.
+
+**IAM:** The runtime role needs `bedrock:InvokeModel` (or inference-profile access) plus `bedrock:ApplyGuardrail` on the guardrail ARN. The ECS task role’s `AmazonBedrockLimitedAccess` managed policy may not include `ApplyGuardrail`; add a scoped inline policy via `POLICY_FILE_LOCATIONS` in CDK if Converse returns access denied.
+
+When a batch is blocked (`stopReason: guardrail_intervened`), topic extraction **continues** with other batches: affected responses get no assignments (they may appear under **Missing responses** in the workbook). If any batch was guardrail-blocked, the combined xlsx includes a **Batch status** sheet listing batch number, row range, and task type.
+
 # Installation guide
 
 Here is a step-by-step guide to clone the repository, create a virtual environment, and install dependencies from the relevant `requirements` file. This guide assumes you have **Git** and **Python 3.11** installed.

@@ -44,6 +44,10 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc --yes \\
         --bedrock-model-invocation-logging
 
+    # Attach an existing Bedrock guardrail to Converse calls (app + headless defaults)
+    python cdk_install.py --profile headless --vpc-name my-vpc --yes \\
+        --bedrock-guardrails --bedrock-guardrail-id abc123 --bedrock-guardrail-version 1
+
     # Prefer Resource Groups + tags; leave AppRegistry off (default)
     python cdk_install.py --profile production --vpc-name my-vpc --yes \\
         --application-resource-group --application-name my-prefix-llm-topic-modeller
@@ -1293,6 +1297,10 @@ class InstallAnswers:
     bedrock_invocation_s3_prefix: str = "bedrock-logs"
     bedrock_invocation_log_group_name: str = ""
     bedrock_invocation_log_retention_days: str = "90"
+    enable_bedrock_guardrails: bool = False
+    bedrock_guardrail_identifier: str = ""
+    bedrock_guardrail_version: str = ""
+    bedrock_guardrail_trace: str = "disabled"
     enable_appregistry: bool = False
     enable_application_resource_group: bool = True
     application_name: str = ""
@@ -1954,6 +1962,115 @@ def default_bedrock_invocation_log_group_name(cdk_prefix: str) -> str:
     return f"/aws/bedrock/{prefix}model-invocations".rstrip("/")
 
 
+BEDROCK_GUARDRAIL_TRACE_CHOICES = ("disabled", "enabled", "enabled_full")
+
+
+def bedrock_guardrail_env_entries(answers: InstallAnswers) -> Dict[str, str]:
+    """App/runtime guardrail keys written to cdk_config.env and app_config.env."""
+    if not answers.enable_bedrock_guardrails:
+        return {}
+    trace = (answers.bedrock_guardrail_trace or "disabled").strip().lower()
+    return {
+        "ENABLE_BEDROCK_GUARDRAILS": "True",
+        "BEDROCK_GUARDRAIL_IDENTIFIER": answers.bedrock_guardrail_identifier.strip(),
+        "BEDROCK_GUARDRAIL_VERSION": answers.bedrock_guardrail_version.strip(),
+        "BEDROCK_GUARDRAIL_TRACE": trace,
+    }
+
+
+def bedrock_guardrail_app_config_from_values(values: Dict[str, str]) -> Dict[str, str]:
+    """Subset of cdk_config.env keys merged into config/app_config.env."""
+    if values.get("ENABLE_BEDROCK_GUARDRAILS") != "True":
+        return {}
+    return {
+        "ENABLE_BEDROCK_GUARDRAILS": "True",
+        "BEDROCK_GUARDRAIL_IDENTIFIER": (
+            values.get("BEDROCK_GUARDRAIL_IDENTIFIER") or ""
+        ).strip(),
+        "BEDROCK_GUARDRAIL_VERSION": (
+            values.get("BEDROCK_GUARDRAIL_VERSION") or ""
+        ).strip(),
+        "BEDROCK_GUARDRAIL_TRACE": (values.get("BEDROCK_GUARDRAIL_TRACE") or "disabled")
+        .strip()
+        .lower(),
+    }
+
+
+def prompt_bedrock_guardrails_options(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    """
+    Configure Bedrock Guardrails on Converse (existing guardrail ID + version in AWS).
+
+    Writes ENABLE_BEDROCK_GUARDRAILS* into cdk_config.env and app_config.env.
+    """
+    if getattr(args, "bedrock_guardrails", False):
+        answers.enable_bedrock_guardrails = True
+    elif getattr(args, "no_bedrock_guardrails", False):
+        answers.enable_bedrock_guardrails = False
+        return
+    elif interactive:
+        answers.enable_bedrock_guardrails = ask_yes_no(
+            "Attach an Amazon Bedrock guardrail to model calls "
+            "(requires guardrail ID + published version in this Region)?",
+            default=False,
+        )
+    else:
+        return
+
+    if not answers.enable_bedrock_guardrails:
+        return
+
+    if getattr(args, "bedrock_guardrail_id", "").strip():
+        answers.bedrock_guardrail_identifier = args.bedrock_guardrail_id.strip()
+    elif interactive:
+        answers.bedrock_guardrail_identifier = ask(
+            "Bedrock guardrail identifier (ID or ARN)",
+            answers.bedrock_guardrail_identifier,
+        ).strip()
+    else:
+        answers.bedrock_guardrail_identifier = (
+            answers.bedrock_guardrail_identifier or ""
+        ).strip()
+
+    if getattr(args, "bedrock_guardrail_version", "").strip():
+        answers.bedrock_guardrail_version = args.bedrock_guardrail_version.strip()
+    elif interactive:
+        answers.bedrock_guardrail_version = ask(
+            "Published guardrail version (e.g. 1, not DRAFT)",
+            answers.bedrock_guardrail_version or "1",
+        ).strip()
+    else:
+        answers.bedrock_guardrail_version = (
+            answers.bedrock_guardrail_version or ""
+        ).strip()
+
+    trace_arg = getattr(args, "bedrock_guardrail_trace", "") or ""
+    if trace_arg.strip():
+        answers.bedrock_guardrail_trace = trace_arg.strip().lower()
+    elif interactive:
+        trace_idx = ask_choice(
+            "Guardrail trace in Converse responses",
+            [
+                "disabled (default)",
+                "enabled",
+                "enabled_full",
+            ],
+            default_index=0,
+        )
+        answers.bedrock_guardrail_trace = BEDROCK_GUARDRAIL_TRACE_CHOICES[trace_idx]
+    else:
+        answers.bedrock_guardrail_trace = (
+            answers.bedrock_guardrail_trace or "disabled"
+        ).lower()
+
+    if answers.bedrock_guardrail_trace not in BEDROCK_GUARDRAIL_TRACE_CHOICES:
+        answers.bedrock_guardrail_trace = "disabled"
+
+
 def prompt_bedrock_model_invocation_logging_options(
     answers: "InstallAnswers",
     args: argparse.Namespace,
@@ -2158,6 +2275,23 @@ def validate_install_answers(answers: "InstallAnswers") -> List[str]:
             errors.append(
                 "Bedrock invocation log retention days must be a positive integer."
             )
+    if answers.enable_bedrock_guardrails:
+        if not (answers.bedrock_guardrail_identifier or "").strip():
+            errors.append(
+                "Bedrock guardrails require BEDROCK_GUARDRAIL_IDENTIFIER "
+                "(guardrail ID or ARN)."
+            )
+        if not (answers.bedrock_guardrail_version or "").strip():
+            errors.append(
+                "Bedrock guardrails require BEDROCK_GUARDRAIL_VERSION "
+                "(published version number)."
+            )
+        trace = (answers.bedrock_guardrail_trace or "").strip().lower()
+        if trace not in BEDROCK_GUARDRAIL_TRACE_CHOICES:
+            errors.append(
+                "BEDROCK_GUARDRAIL_TRACE must be one of: "
+                + ", ".join(BEDROCK_GUARDRAIL_TRACE_CHOICES)
+            )
     if answers.enable_application_resource_group:
         app_name = answers.application_name.strip() or default_application_name(
             answers.cdk_prefix
@@ -2303,6 +2437,10 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
                 ),
             }
         )
+
+    guardrail_entries = bedrock_guardrail_env_entries(answers)
+    if guardrail_entries:
+        values.update(guardrail_entries)
 
     # Application tags + Resource Groups (preferred); AppRegistry is legacy opt-in.
     # Always write tagging identity so Tags.of(app) has stable values even when
@@ -2567,7 +2705,7 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
 
     output_bucket = _name("S3_OUTPUT_BUCKET_NAME", "s3-output")
 
-    return {
+    updates = {
         "COGNITO_AUTH": "False" if headless or pi_express else "True",
         "RUN_AWS_FUNCTIONS": "True",
         "RUN_AWS_BEDROCK_MODELS": "True",
@@ -2594,6 +2732,8 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
             "USAGE_LOG_DYNAMODB_TABLE_NAME", "dynamodb-usage-logs"
         ),
     }
+    updates.update(bedrock_guardrail_app_config_from_values(values))
+    return updates
 
 
 def write_app_config_env_file(
@@ -3830,6 +3970,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     prompt_bedrock_model_invocation_logging_options(
         answers, args, interactive=interactive
     )
+    prompt_bedrock_guardrails_options(answers, args, interactive=interactive)
     prompt_application_tagging_and_appregistry_options(
         answers, args, interactive=interactive
     )
@@ -4009,6 +4150,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DAYS",
         help="CloudWatch retention for Bedrock invocation logs (default: 90)",
+    )
+    p.add_argument(
+        "--bedrock-guardrails",
+        action="store_true",
+        help=(
+            "Enable Bedrock Guardrails on Converse (requires --bedrock-guardrail-id "
+            "and --bedrock-guardrail-version)"
+        ),
+    )
+    p.add_argument(
+        "--no-bedrock-guardrails",
+        action="store_true",
+        help="Do not configure Bedrock Guardrails in interactive installs",
+    )
+    p.add_argument(
+        "--bedrock-guardrail-id",
+        default="",
+        help="Bedrock guardrail identifier (ID or ARN) for app_config.env",
+    )
+    p.add_argument(
+        "--bedrock-guardrail-version",
+        default="",
+        help="Published Bedrock guardrail version (e.g. 1)",
+    )
+    p.add_argument(
+        "--bedrock-guardrail-trace",
+        choices=BEDROCK_GUARDRAIL_TRACE_CHOICES,
+        default="",
+        help="Guardrail trace mode for Converse (default: disabled)",
     )
     p.add_argument(
         "--appregistry",
