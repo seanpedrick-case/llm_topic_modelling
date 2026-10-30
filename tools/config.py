@@ -487,8 +487,13 @@ BEDROCK_GUARDRAIL_IDENTIFIER = get_or_create_env_var(
 BEDROCK_GUARDRAIL_VERSION = get_or_create_env_var(
     "BEDROCK_GUARDRAIL_VERSION", ""
 ).strip()
+_BEDROCK_GUARDRAIL_TRACE_DEFAULT = (
+    "enabled" if ENABLE_BEDROCK_GUARDRAILS else "disabled"
+)
 _BEDROCK_GUARDRAIL_TRACE_RAW = (
-    get_or_create_env_var("BEDROCK_GUARDRAIL_TRACE", "disabled").strip().lower()
+    get_or_create_env_var("BEDROCK_GUARDRAIL_TRACE", _BEDROCK_GUARDRAIL_TRACE_DEFAULT)
+    .strip()
+    .lower()
 )
 if _BEDROCK_GUARDRAIL_TRACE_RAW not in ("disabled", "enabled", "enabled_full"):
     raise ValueError(

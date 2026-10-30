@@ -17,7 +17,9 @@ from tqdm import tqdm
 from tools import config as app_config
 from tools.aws_functions import connect_to_bedrock_runtime
 from tools.bedrock_guardrail_batch_status import (
+    GUARDRAIL_INTERVENTIONS_SHEET_NAME,
     append_guardrail_batch_status,
+    guardrail_categories_from_responses,
     load_guardrail_batch_status,
 )
 from tools.config import (
@@ -3578,7 +3580,8 @@ def _guardrail_no_assignments_ui_text(
         )
     detail = (
         "No responses were assigned to topics. Download the Excel output and open the "
-        "**Batch status** sheet for batch numbers, row ranges, and notes."
+        f"**{GUARDRAIL_INTERVENTIONS_SHEET_NAME}** sheet for batch numbers, row ranges, "
+        "intervention categories (when tracing is enabled), and notes."
     )
     markdown = f"### Guardrail rejection\n\n{headline}\n\n{detail}"
     plain = f"{headline} {detail}"
@@ -3603,6 +3606,7 @@ def _finalize_guardrail_rejected_batch(
     reported_batch_no: int,
     start_row: int,
     end_row: int,
+    intervention_categories: str = "",
 ) -> Tuple:
     """Record guardrail rejection and return empty batch assignments (run continues)."""
     append_guardrail_batch_status(
@@ -3611,6 +3615,7 @@ def _finalize_guardrail_rejected_batch(
         start_row=start_row,
         end_row=end_row,
         task_type=task_type,
+        intervention_categories=intervention_categories,
     )
     print(
         f"Batch {reported_batch_no} ({task_type}): guardrail rejected — "
@@ -3972,6 +3977,7 @@ def process_batch_with_llm(
                 reported_batch_no=reported_batch_no,
                 start_row=start_row,
                 end_row=end_row,
+                intervention_categories=guardrail_categories_from_responses(responses),
             )
 
         # print("Response text:", response_text)
@@ -7223,8 +7229,6 @@ def all_in_one_pipeline(
     )
 
     skip_post_extraction = False
-    guardrail_ui_plain = None
-    guardrail_ui_markdown = None
     guardrail_batch_status_df = load_guardrail_batch_status(output_folder)
 
     if not _reference_table_has_topic_assignments(reference_df_for_dedup):
@@ -7251,15 +7255,10 @@ def all_in_one_pipeline(
                 "errors. Cannot continue to deduplication."
             )
         skip_post_extraction = True
-        rejected_batches = int(guardrail_batch_status_df["Batch"].nunique())
-        guardrail_ui_markdown, guardrail_ui_plain = _guardrail_no_assignments_ui_text(
-            rejected_batches,
-            total_number_of_batches,
-        )
-        print(guardrail_ui_plain)
         print(
+            "Topic extraction produced no topic assignments after guardrail rejections. "
             "Skipping deduplication and summarisation; Excel export can still include "
-            "Batch status."
+            f"{GUARDRAIL_INTERVENTIONS_SHEET_NAME}."
         )
 
     if skip_post_extraction:
@@ -7282,7 +7281,7 @@ def all_in_one_pipeline(
         summarised_outputs_list = list()
         latest_summary_completed_num = 0
         conversation_metadata_text_updated = out_conversation_metadata
-        display_markdown_updated = guardrail_ui_markdown
+        display_markdown_updated = display_markdown
         log_files_output_after_sum = list(log_files_output_list_state or [])
         overall_summarisation_input_files = list()
         overall_summary_output_files = list()
@@ -7520,8 +7519,6 @@ def all_in_one_pipeline(
         out_message.append(output_messages_textbox)
 
     out_message = "\n".join(out_message)
-    if guardrail_ui_plain:
-        out_message = guardrail_ui_plain + "\n\n" + out_message
     out_message = (
         out_message + "\n" + f"Overall time for all processes: {total_time_taken:.2f}s"
     )

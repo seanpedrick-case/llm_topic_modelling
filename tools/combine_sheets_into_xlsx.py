@@ -15,7 +15,10 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-from tools.bedrock_guardrail_batch_status import load_guardrail_batch_status
+from tools.bedrock_guardrail_batch_status import (
+    GUARDRAIL_INTERVENTIONS_SHEET_NAME,
+    load_guardrail_batch_status,
+)
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
     ENABLE_ORIGINAL_DATA_REDACTION,
@@ -1036,20 +1039,22 @@ def collect_output_csvs_and_create_excel_output(
         )
         temp_csv_files_for_cleanup.append(guardrail_batch_status_csv_path)
         csv_files.append(guardrail_batch_status_csv_path)
-        sheet_names.append("Batch status")
-        column_widths["Batch status"] = {
+        sheet_names.append(GUARDRAIL_INTERVENTIONS_SHEET_NAME)
+        column_widths[GUARDRAIL_INTERVENTIONS_SHEET_NAME] = {
             "A": 10,
             "B": 18,
             "C": 18,
             "D": 22,
-            "E": 70,
+            "E": 40,
+            "F": 70,
         }
-        wrap_text_columns["Batch status"] = ["E"]
+        wrap_text_columns[GUARDRAIL_INTERVENTIONS_SHEET_NAME] = ["E", "F"]
         if master_reference_df_state.empty:
             intro_guardrail_note = (
                 "No topic assignments were produced: one or more extraction batches "
-                "were rejected by the Bedrock guardrail. See the Batch status sheet "
-                "for batch numbers, row ranges, and notes."
+                f"were rejected by the Bedrock guardrail. See the "
+                f"{GUARDRAIL_INTERVENTIONS_SHEET_NAME} sheet for batch numbers, row "
+                "ranges, intervention categories (when tracing is enabled), and notes."
             )
 
     # Always load response-level source data for cover-sheet stats (and for the
