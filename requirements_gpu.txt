@@ -3,7 +3,7 @@ transformers>=5.19.0,<6
 spaces
 pandas>=2.3.3,<4
 boto3>=1.43.121,<2
-pyarrow>=26.0.0,<30
+pyarrow>=25.0.1,<30
 openpyxl>=3.1.5,<4
 pyexcel>=0.7.6,<1
 markdown>=3.11,<4
