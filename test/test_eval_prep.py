@@ -64,7 +64,9 @@ class TestEvalPrepIdJoin(unittest.TestCase):
                 }
             )
             with pd.ExcelWriter(path) as writer:
-                pivot.to_excel(writer, sheet_name="Topic response pivot table", index=False)
+                pivot.to_excel(
+                    writer, sheet_name="Topic response pivot table", index=False
+                )
             self.assertEqual(
                 eval_prep._detect_llm_workbook_format(path),
                 "pivot_only",
