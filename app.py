@@ -1081,6 +1081,10 @@ with app:
                     "Do not assess sentiment",
                 ],
             )
+        with gr.Accordion(
+            "Provide additional context to the model for the analysis", open=False
+        ):
+            context_textbox.render()
 
         if GET_COST_CODES == "True" or ENFORCE_COST_CODES == "True":
             with gr.Accordion("Assign task to cost code", open=True, visible=True):
@@ -1149,7 +1153,6 @@ with app:
             "1. Extract topics - go to first tab for file upload, model choice, and other settings before clicking this button",
             open=True,
         ):
-            context_textbox.render()
             if SHOW_ADDITIONAL_INSTRUCTION_TEXTBOXES == "True":
                 additional_summary_instructions_textbox = gr.Textbox(
                     value="", visible=True, label="Additional summary instructions"

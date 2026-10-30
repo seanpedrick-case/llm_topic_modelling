@@ -3,6 +3,8 @@
 import tempfile
 import unittest
 
+import pandas as pd
+
 from tools.bedrock_guardrail_batch_status import (
     GUARDRAIL_BATCH_STATUS_COLUMNS,
     append_guardrail_batch_status,
@@ -38,6 +40,38 @@ class TestBedrockGuardrailBatchStatus(unittest.TestCase):
             df = load_guardrail_batch_status(folder)
             self.assertTrue(df.empty)
             self.assertEqual(list(df.columns), GUARDRAIL_BATCH_STATUS_COLUMNS)
+
+    def test_reference_table_has_assignments_empty_schema_only(self):
+        from tools.llm_api_call import _reference_table_has_topic_assignments
+
+        empty_with_columns = pd.DataFrame(
+            columns=[
+                "Response ID",
+                "General topic",
+                "Subtopic",
+                "Sentiment",
+                "Summary",
+            ]
+        )
+        self.assertFalse(_reference_table_has_topic_assignments(empty_with_columns))
+        self.assertFalse(_reference_table_has_topic_assignments(None))
+
+        with_rows = pd.DataFrame(
+            [{"Response ID": 1, "General topic": "A", "Subtopic": "B"}]
+        )
+        self.assertTrue(_reference_table_has_topic_assignments(with_rows))
+
+    def test_guardrail_no_assignments_ui_text_all_batches(self):
+        from tools.llm_api_call import _guardrail_no_assignments_ui_text
+
+        md, plain = _guardrail_no_assignments_ui_text(6, 6)
+        self.assertIn("All 6 extraction batches were rejected", plain)
+        self.assertIn("All 6 extraction batches were rejected", md)
+        self.assertIn("Batch status", md)
+
+        md_partial, plain_partial = _guardrail_no_assignments_ui_text(2, 6)
+        self.assertIn("2 batch(es)", plain_partial)
+        self.assertNotIn("All 6 extraction batches", plain_partial)
 
 
 if __name__ == "__main__":

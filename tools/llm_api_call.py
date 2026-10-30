@@ -16,7 +16,10 @@ from tqdm import tqdm
 
 from tools import config as app_config
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.bedrock_guardrail_batch_status import append_guardrail_batch_status
+from tools.bedrock_guardrail_batch_status import (
+    append_guardrail_batch_status,
+    load_guardrail_batch_status,
+)
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
     BATCH_DEDUPLICATION_EVERY_N_BATCHES,
@@ -3545,6 +3548,43 @@ def write_llm_output_and_logs(
     )
 
 
+def _reference_table_has_topic_assignments(
+    reference_df: pd.DataFrame | None,
+) -> bool:
+    """True when the reference table has at least one assigned response row."""
+    if reference_df is None or reference_df.empty:
+        return False
+    if "Response ID" not in reference_df.columns:
+        return False
+    numeric_ids = pd.to_numeric(reference_df["Response ID"], errors="coerce")
+    return bool((numeric_ids.fillna(0) > 0).any())
+
+
+def _guardrail_no_assignments_ui_text(
+    rejected_batch_count: int,
+    total_batches: int | None,
+) -> Tuple[str, str]:
+    """User-facing text when guardrails left no topic assignments (markdown, plain)."""
+    total_batches_int = int(total_batches) if total_batches else None
+    if total_batches_int and rejected_batch_count >= total_batches_int:
+        headline = (
+            f"All {rejected_batch_count} extraction batches were rejected by the "
+            "Bedrock guardrail."
+        )
+    else:
+        headline = (
+            f"No topic assignments were produced. {rejected_batch_count} batch(es) "
+            "were rejected by the Bedrock guardrail."
+        )
+    detail = (
+        "No responses were assigned to topics. Download the Excel output and open the "
+        "**Batch status** sheet for batch numbers, row ranges, and notes."
+    )
+    markdown = f"### Guardrail rejection\n\n{headline}\n\n{detail}"
+    plain = f"{headline} {detail}"
+    return markdown, plain
+
+
 def _finalize_guardrail_rejected_batch(
     *,
     formatted_system_prompt: str,
@@ -5475,6 +5515,16 @@ def extract_topics(
         unique_table_df_display_table_markdown = (
             unique_table_df_display_table.to_markdown(index=False)
         )
+        if not _reference_table_has_topic_assignments(existing_reference_df):
+            guardrail_status = load_guardrail_batch_status(output_folder)
+            if not guardrail_status.empty:
+                rejected_batches = int(guardrail_status["Batch"].nunique())
+                unique_table_df_display_table_markdown, _ = (
+                    _guardrail_no_assignments_ui_text(
+                        rejected_batches,
+                        num_batches,
+                    )
+                )
 
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if "_final_" in x]
@@ -6219,6 +6269,18 @@ def wrapper_extract_topics_per_column_value(
                 display_cols
             ].to_markdown(index=False)
 
+    guardrail_ui_notice_plain = None
+    if not _reference_table_has_topic_assignments(acc_reference_df):
+        guardrail_status = load_guardrail_batch_status(output_folder)
+        if not guardrail_status.empty:
+            rejected_batches = int(guardrail_status["Batch"].nunique())
+            acc_markdown_output, guardrail_ui_notice_plain = (
+                _guardrail_no_assignments_ui_text(
+                    rejected_batches,
+                    total_number_of_batches,
+                )
+            )
+
     acc_input_tokens, acc_output_tokens, acc_number_of_calls = (
         calculate_tokens_from_metadata(
             acc_all_metadata_content, model_choice, model_name_map
@@ -6226,6 +6288,8 @@ def wrapper_extract_topics_per_column_value(
     )
 
     out_message = "\n".join(out_message)
+    if guardrail_ui_notice_plain:
+        out_message = guardrail_ui_notice_plain + "\n\n" + out_message
     out_message = (
         out_message
         + " "
@@ -7158,253 +7222,306 @@ def all_in_one_pipeline(
         unique_df_loaded if not unique_df_loaded.empty else out_topic_summary_df
     )
 
-    if (
-        reference_df_for_dedup is None
-        or reference_df_for_dedup.empty
-        or "Response ID" not in reference_df_for_dedup.columns
-    ):
+    skip_post_extraction = False
+    guardrail_ui_plain = None
+    guardrail_ui_markdown = None
+    guardrail_batch_status_df = load_guardrail_batch_status(output_folder)
+
+    if not _reference_table_has_topic_assignments(reference_df_for_dedup):
         available_cols = (
             list(reference_df_for_dedup.columns)
             if reference_df_for_dedup is not None
             else []
         )
-        raise ValueError(
-            "Topic extraction produced no usable reference table "
-            f"(missing 'Response ID'; available columns: {available_cols}). "
-            "Check earlier logs for markdown table parsing or segment processing "
-            "errors. Cannot continue to deduplication."
+        if (
+            reference_df_for_dedup is None
+            or "Response ID" not in reference_df_for_dedup.columns
+        ):
+            raise ValueError(
+                "Topic extraction produced no usable reference table "
+                f"(missing 'Response ID' column; available columns: {available_cols}). "
+                "Check earlier logs for markdown table parsing or segment processing "
+                "errors. Cannot continue to deduplication."
+            )
+        if guardrail_batch_status_df.empty:
+            raise ValueError(
+                "Topic extraction produced no topic assignments "
+                f"(reference table is empty; available columns: {available_cols}). "
+                "Check earlier logs for markdown table parsing or segment processing "
+                "errors. Cannot continue to deduplication."
+            )
+        skip_post_extraction = True
+        rejected_batches = int(guardrail_batch_status_df["Batch"].nunique())
+        guardrail_ui_markdown, guardrail_ui_plain = _guardrail_no_assignments_ui_text(
+            rejected_batches,
+            total_number_of_batches,
+        )
+        print(guardrail_ui_plain)
+        print(
+            "Skipping deduplication and summarisation; Excel export can still include "
+            "Batch status."
         )
 
-    skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
-    if skip_llm_taxonomy_dedup:
-        reference_df_for_dedup = apply_forced_unassessed_general_topics(
-            reference_df_for_dedup, force_zero_shot_choice
+    if skip_post_extraction:
+        ref_df_after_dedup = (
+            reference_df_for_dedup.copy()
+            if isinstance(reference_df_for_dedup, pd.DataFrame)
+            else pd.DataFrame()
         )
-        topic_summary_for_dedup = apply_forced_unassessed_general_topics(
-            topic_summary_for_dedup, force_zero_shot_choice
+        unique_df_after_dedup = (
+            topic_summary_for_dedup.copy()
+            if isinstance(topic_summary_for_dedup, pd.DataFrame)
+            else pd.DataFrame()
         )
-        light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
-        print(
-            "Running light fuzzy topic merge for forced zero-shot taxonomy "
-            f"(threshold={light_threshold}; case, apostrophes, near-identical names)."
-        )
-        fuzzy_threshold = light_threshold
-        fuzzy_merge_general_topics = "No"
+        summarisation_input_files = list()
+        log_files_output_dedup = list()
+        summary_reference_table_sample_state = pd.DataFrame()
+        master_unique_topics_df_revised_summaries_state = unique_df_after_dedup
+        master_reference_df_revised_summaries_state = ref_df_after_dedup
+        summary_output_files = list()
+        summarised_outputs_list = list()
+        latest_summary_completed_num = 0
+        conversation_metadata_text_updated = out_conversation_metadata
+        display_markdown_updated = guardrail_ui_markdown
+        log_files_output_after_sum = list(log_files_output_list_state or [])
+        overall_summarisation_input_files = list()
+        overall_summary_output_files = list()
+        overall_summarised_output_markdown = ""
+        summarised_output_df = pd.DataFrame()
+        summarised_references_markdown = ""
     else:
-        print("Deduplicating topic names with fuzzy matching")
-        fuzzy_threshold = score_threshold
-        fuzzy_merge_general_topics = merge_general_topics
-    (
-        ref_df_after_dedup,
-        unique_df_after_dedup,
-        summarisation_input_files,
-        log_files_output_dedup,
-        summarised_output_markdown,
-    ) = deduplicate_topics(
-        reference_df=reference_df_for_dedup,
-        topic_summary_df=topic_summary_for_dedup,
-        reference_table_file_name=working_data_file_name_textbox,
-        unique_topics_table_file_name=unique_topics_table_file_name_textbox,
-        in_excel_sheets=in_excel_sheets,
-        merge_sentiment=merge_sentiment,
-        merge_general_topics=fuzzy_merge_general_topics,
-        score_threshold=fuzzy_threshold,
-        in_data_files=in_data_files,
-        chosen_cols=chosen_cols,
-        output_folder=output_folder,
-        sentiment_checkbox=sentiment_choice,
-        deduplicate_topics="Yes",
-    )
-
-    # LLM-based deduplication if enabled
-    if skip_llm_taxonomy_dedup:
-        print(
-            "Skipping LLM topic merge because force zero-shot is enabled "
-            "with a submitted candidate topics list."
-        )
-    elif ALL_IN_ONE_USE_LLM_DEDUP:
-        # Set up model source and bedrock runtime if needed
-
-        print("Deduplicating topic names with LLM")
-
-        # Call LLM deduplication
+        skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
+        if skip_llm_taxonomy_dedup:
+            reference_df_for_dedup = apply_forced_unassessed_general_topics(
+                reference_df_for_dedup, force_zero_shot_choice
+            )
+            topic_summary_for_dedup = apply_forced_unassessed_general_topics(
+                topic_summary_for_dedup, force_zero_shot_choice
+            )
+            light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
+            print(
+                "Running light fuzzy topic merge for forced zero-shot taxonomy "
+                f"(threshold={light_threshold}; case, apostrophes, near-identical names)."
+            )
+            fuzzy_threshold = light_threshold
+            fuzzy_merge_general_topics = "No"
+        else:
+            print("Deduplicating topic names with fuzzy matching")
+            fuzzy_threshold = score_threshold
+            fuzzy_merge_general_topics = merge_general_topics
         (
             ref_df_after_dedup,
             unique_df_after_dedup,
             summarisation_input_files,
             log_files_output_dedup,
             summarised_output_markdown,
-            dedup_input_tokens,
-            dedup_output_tokens,
-            dedup_number_of_calls,
-            dedup_estimated_time_taken,
-        ) = deduplicate_topics_llm(
-            reference_df=ref_df_after_dedup,
-            topic_summary_df=unique_df_after_dedup,
+        ) = deduplicate_topics(
+            reference_df=reference_df_for_dedup,
+            topic_summary_df=topic_summary_for_dedup,
             reference_table_file_name=working_data_file_name_textbox,
             unique_topics_table_file_name=unique_topics_table_file_name_textbox,
-            model_choice=model_choice,
-            in_api_key=in_api_key,
-            temperature=temperature,
-            model_source=model_source,
-            local_model=model,
-            tokenizer=tokenizer,
-            assistant_model=assistant_model,
             in_excel_sheets=in_excel_sheets,
             merge_sentiment=merge_sentiment,
-            merge_general_topics=merge_general_topics,
+            merge_general_topics=fuzzy_merge_general_topics,
+            score_threshold=fuzzy_threshold,
             in_data_files=in_data_files,
             chosen_cols=chosen_cols,
             output_folder=output_folder,
-            candidate_topics=candidate_topics,
-            azure_endpoint=azure_endpoint_text,
-            output_debug_files=output_debug_files,
-            api_url=api_url,
+            sentiment_checkbox=sentiment_choice,
+            deduplicate_topics="Yes",
+        )
+
+        # LLM-based deduplication if enabled
+        if skip_llm_taxonomy_dedup:
+            print(
+                "Skipping LLM topic merge because force zero-shot is enabled "
+                "with a submitted candidate topics list."
+            )
+        elif ALL_IN_ONE_USE_LLM_DEDUP:
+            # Set up model source and bedrock runtime if needed
+
+            print("Deduplicating topic names with LLM")
+
+            # Call LLM deduplication
+            (
+                ref_df_after_dedup,
+                unique_df_after_dedup,
+                summarisation_input_files,
+                log_files_output_dedup,
+                summarised_output_markdown,
+                dedup_input_tokens,
+                dedup_output_tokens,
+                dedup_number_of_calls,
+                dedup_estimated_time_taken,
+            ) = deduplicate_topics_llm(
+                reference_df=ref_df_after_dedup,
+                topic_summary_df=unique_df_after_dedup,
+                reference_table_file_name=working_data_file_name_textbox,
+                unique_topics_table_file_name=unique_topics_table_file_name_textbox,
+                model_choice=model_choice,
+                in_api_key=in_api_key,
+                temperature=temperature,
+                model_source=model_source,
+                local_model=model,
+                tokenizer=tokenizer,
+                assistant_model=assistant_model,
+                in_excel_sheets=in_excel_sheets,
+                merge_sentiment=merge_sentiment,
+                merge_general_topics=merge_general_topics,
+                in_data_files=in_data_files,
+                chosen_cols=chosen_cols,
+                output_folder=output_folder,
+                candidate_topics=candidate_topics,
+                azure_endpoint=azure_endpoint_text,
+                output_debug_files=output_debug_files,
+                api_url=api_url,
+                aws_access_key_textbox=aws_access_key_text,
+                aws_secret_key_textbox=aws_secret_key_text,
+                aws_region_textbox=aws_region_text,
+                azure_api_key_textbox=azure_api_key_text,
+                model_name_map=model_name_map_state,
+                sentiment_checkbox=sentiment_choice,
+            )
+
+            # Update token counts and time taken
+            total_input_tokens += dedup_input_tokens
+            total_output_tokens += dedup_output_tokens
+            total_number_of_calls += dedup_number_of_calls
+            total_time_taken += dedup_estimated_time_taken
+            out_message.append(
+                f"LLM deduplication completed. Total time: {dedup_estimated_time_taken:.2f}s"
+            )
+
+        # 3) Summarisation
+        (
+            ref_df_loaded_2,
+            unique_df_loaded_2,
+            _latest_batch_completed_no_loop_2,
+            _deduplication_input_files_status_2,
+            _working_name_2,
+            _unique_name_2,
+        ) = load_in_previous_data_files(summarisation_input_files)
+
+        (
+            summary_reference_table_sample_state,
+            master_unique_topics_df_revised_summaries_state,
+            master_reference_df_revised_summaries_state,
+            summary_output_files,
+            summarised_outputs_list,
+            latest_summary_completed_num,
+            conversation_metadata_text_updated,
+            display_markdown_updated,
+            log_files_output_after_sum,
+            overall_summarisation_input_files,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            estimated_time_taken_number,
+            output_messages_textbox,
+            out_logged_content,
+        ) = wrapper_summarise_output_topics_per_group(
+            grouping_col=grouping_col,
+            sampled_reference_table_df=ref_df_after_dedup,
+            topic_summary_df=unique_df_after_dedup,
+            reference_table_df=ref_df_after_dedup,
+            model_choice=model_choice,
+            in_api_key=in_api_key,
+            temperature=temperature,
+            reference_data_file_name=working_data_file_name_textbox,
+            summarised_outputs=list(),
+            latest_summary_completed=0,
+            out_metadata_str=out_conversation_metadata,
+            in_data_files=in_data_files,
+            in_excel_sheets=in_excel_sheets,
+            chosen_cols=chosen_cols,
+            log_output_files=log_files_output_list_state,
+            summarise_format_radio=summarise_format,
+            output_folder=output_folder,
+            context_textbox=context_text,
             aws_access_key_textbox=aws_access_key_text,
             aws_secret_key_textbox=aws_secret_key_text,
             aws_region_textbox=aws_region_text,
-            azure_api_key_textbox=azure_api_key_text,
             model_name_map=model_name_map_state,
-            sentiment_checkbox=sentiment_choice,
+            hf_api_key_textbox=hf_api_key_text,
+            azure_endpoint_textbox=azure_endpoint_text,
+            existing_logged_content=out_logged_content,
+            sample_reference_table=sample_reference_table_checkbox,
+            no_of_sampled_summaries=100,
+            random_seed=random_seed,
+            output_debug_files=output_debug_files,
+            api_url=api_url,
+            additional_summary_instructions_provided=additional_instructions_summary_format,
+            local_model=model,
+            tokenizer=tokenizer,
+            assistant_model=assistant_model,
+            do_summaries=do_summaries_from_config(),
         )
 
-        # Update token counts and time taken
-        total_input_tokens += dedup_input_tokens
-        total_output_tokens += dedup_output_tokens
-        total_number_of_calls += dedup_number_of_calls
-        total_time_taken += dedup_estimated_time_taken
-        out_message.append(
-            f"LLM deduplication completed. Total time: {dedup_estimated_time_taken:.2f}s"
+        # Generate summarised_references_markdown from the sampled reference table
+        summarised_references_markdown = (
+            summary_reference_table_sample_state.to_markdown(index=False)
         )
 
-    # 3) Summarisation
-    (
-        ref_df_loaded_2,
-        unique_df_loaded_2,
-        _latest_batch_completed_no_loop_2,
-        _deduplication_input_files_status_2,
-        _working_name_2,
-        _unique_name_2,
-    ) = load_in_previous_data_files(summarisation_input_files)
+        total_input_tokens += input_tokens_num
+        total_output_tokens += output_tokens_num
+        total_number_of_calls += number_of_calls_num
+        total_time_taken += estimated_time_taken_number
+        out_message.append(output_messages_textbox)
 
-    (
-        summary_reference_table_sample_state,
-        master_unique_topics_df_revised_summaries_state,
-        master_reference_df_revised_summaries_state,
-        summary_output_files,
-        summarised_outputs_list,
-        latest_summary_completed_num,
-        conversation_metadata_text_updated,
-        display_markdown_updated,
-        log_files_output_after_sum,
-        overall_summarisation_input_files,
-        input_tokens_num,
-        output_tokens_num,
-        number_of_calls_num,
-        estimated_time_taken_number,
-        output_messages_textbox,
-        out_logged_content,
-    ) = wrapper_summarise_output_topics_per_group(
-        grouping_col=grouping_col,
-        sampled_reference_table_df=ref_df_after_dedup,
-        topic_summary_df=unique_df_after_dedup,
-        reference_table_df=ref_df_after_dedup,
-        model_choice=model_choice,
-        in_api_key=in_api_key,
-        temperature=temperature,
-        reference_data_file_name=working_data_file_name_textbox,
-        summarised_outputs=list(),
-        latest_summary_completed=0,
-        out_metadata_str=out_conversation_metadata,
-        in_data_files=in_data_files,
-        in_excel_sheets=in_excel_sheets,
-        chosen_cols=chosen_cols,
-        log_output_files=log_files_output_list_state,
-        summarise_format_radio=summarise_format,
-        output_folder=output_folder,
-        context_textbox=context_text,
-        aws_access_key_textbox=aws_access_key_text,
-        aws_secret_key_textbox=aws_secret_key_text,
-        aws_region_textbox=aws_region_text,
-        model_name_map=model_name_map_state,
-        hf_api_key_textbox=hf_api_key_text,
-        azure_endpoint_textbox=azure_endpoint_text,
-        existing_logged_content=out_logged_content,
-        sample_reference_table=sample_reference_table_checkbox,
-        no_of_sampled_summaries=100,
-        random_seed=random_seed,
-        output_debug_files=output_debug_files,
-        api_url=api_url,
-        additional_summary_instructions_provided=additional_instructions_summary_format,
-        local_model=model,
-        tokenizer=tokenizer,
-        assistant_model=assistant_model,
-        do_summaries=do_summaries_from_config(),
-    )
+        # 4) Overall summary
+        (
+            _ref_df_loaded_3,
+            _unique_df_loaded_3,
+            _latest_batch_completed_no_loop_3,
+            _deduplication_input_files_status_3,
+            _working_name_3,
+            _unique_name_3,
+        ) = load_in_previous_data_files(overall_summarisation_input_files)
 
-    # Generate summarised_references_markdown from the sampled reference table
-    summarised_references_markdown = summary_reference_table_sample_state.to_markdown(
-        index=False
-    )
+        (
+            overall_summary_output_files,
+            overall_summarised_output_markdown,
+            summarised_output_df,
+            conversation_metadata_textbox,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            estimated_time_taken_number,
+            output_messages_textbox,
+            out_logged_content,
+        ) = overall_summary(
+            topic_summary_df=master_unique_topics_df_revised_summaries_state,
+            model_choice=model_choice,
+            in_api_key=in_api_key,
+            temperature=temperature,
+            reference_data_file_name=working_data_file_name_textbox,
+            output_folder=output_folder,
+            chosen_cols=chosen_cols,
+            context_textbox=context_text,
+            aws_access_key_textbox=aws_access_key_text,
+            aws_secret_key_textbox=aws_secret_key_text,
+            aws_region_textbox=aws_region_text,
+            model_name_map=model_name_map_state,
+            hf_api_key_textbox=hf_api_key_text,
+            azure_endpoint_textbox=azure_endpoint_text,
+            local_model=model,
+            tokenizer=tokenizer,
+            assistant_model=assistant_model,
+            existing_logged_content=out_logged_content,
+            output_debug_files=output_debug_files,
+            api_url=api_url,
+            do_summaries=do_summaries_from_config(),
+        )
 
-    total_input_tokens += input_tokens_num
-    total_output_tokens += output_tokens_num
-    total_number_of_calls += number_of_calls_num
-    total_time_taken += estimated_time_taken_number
-    out_message.append(output_messages_textbox)
-
-    # 4) Overall summary
-    (
-        _ref_df_loaded_3,
-        _unique_df_loaded_3,
-        _latest_batch_completed_no_loop_3,
-        _deduplication_input_files_status_3,
-        _working_name_3,
-        _unique_name_3,
-    ) = load_in_previous_data_files(overall_summarisation_input_files)
-
-    (
-        overall_summary_output_files,
-        overall_summarised_output_markdown,
-        summarised_output_df,
-        conversation_metadata_textbox,
-        input_tokens_num,
-        output_tokens_num,
-        number_of_calls_num,
-        estimated_time_taken_number,
-        output_messages_textbox,
-        out_logged_content,
-    ) = overall_summary(
-        topic_summary_df=master_unique_topics_df_revised_summaries_state,
-        model_choice=model_choice,
-        in_api_key=in_api_key,
-        temperature=temperature,
-        reference_data_file_name=working_data_file_name_textbox,
-        output_folder=output_folder,
-        chosen_cols=chosen_cols,
-        context_textbox=context_text,
-        aws_access_key_textbox=aws_access_key_text,
-        aws_secret_key_textbox=aws_secret_key_text,
-        aws_region_textbox=aws_region_text,
-        model_name_map=model_name_map_state,
-        hf_api_key_textbox=hf_api_key_text,
-        azure_endpoint_textbox=azure_endpoint_text,
-        local_model=model,
-        tokenizer=tokenizer,
-        assistant_model=assistant_model,
-        existing_logged_content=out_logged_content,
-        output_debug_files=output_debug_files,
-        api_url=api_url,
-        do_summaries=do_summaries_from_config(),
-    )
-
-    total_input_tokens += input_tokens_num
-    total_output_tokens += output_tokens_num
-    total_number_of_calls += number_of_calls_num
-    total_time_taken += estimated_time_taken_number
-    out_message.append(output_messages_textbox)
+        total_input_tokens += input_tokens_num
+        total_output_tokens += output_tokens_num
+        total_number_of_calls += number_of_calls_num
+        total_time_taken += estimated_time_taken_number
+        out_message.append(output_messages_textbox)
 
     out_message = "\n".join(out_message)
+    if guardrail_ui_plain:
+        out_message = guardrail_ui_plain + "\n\n" + out_message
     out_message = (
         out_message + "\n" + f"Overall time for all processes: {total_time_taken:.2f}s"
     )
@@ -7443,7 +7560,7 @@ def all_in_one_pipeline(
     final_display_markdown = (
         display_markdown_updated if display_markdown_updated else display_markdown
     )
-    if produce_structures_summary_choice == "Yes":
+    if produce_structures_summary_choice == "Yes" and not skip_post_extraction:
         final_display_markdown = unique_table_df_display_table_markdown
 
     return (
