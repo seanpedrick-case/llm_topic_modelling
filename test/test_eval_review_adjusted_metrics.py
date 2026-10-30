@@ -31,8 +31,12 @@ class TestDiscoverAndProvenance(unittest.TestCase):
     def test_discover_annotated_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            (out / "a_topic_disagreements_annotated.csv").write_text("x", encoding="utf-8")
-            (out / "b_topic_disagreements_annotated.csv").write_text("x", encoding="utf-8")
+            (out / "a_topic_disagreements_annotated.csv").write_text(
+                "x", encoding="utf-8"
+            )
+            (out / "b_topic_disagreements_annotated.csv").write_text(
+                "x", encoding="utf-8"
+            )
             (out / "not_a_match.csv").write_text("x", encoding="utf-8")
 
             found = review_adjusted.discover_annotated_files(out)
@@ -50,7 +54,10 @@ class TestDiscoverAndProvenance(unittest.TestCase):
             pd.DataFrame(
                 {
                     "stem": ["run_a", "run_a"],
-                    "scenario": ["observed_corrected_gold", "extrapolated_corrected_gold"],
+                    "scenario": [
+                        "observed_corrected_gold",
+                        "extrapolated_corrected_gold",
+                    ],
                     "adjusted_f1": [0.9, 0.95],
                 }
             ).to_csv(out / "partial_summary.csv", index=False)
