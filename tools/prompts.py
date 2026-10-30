@@ -1,3 +1,5 @@
+import re
+
 ###
 # System prompt
 ###
@@ -78,6 +80,33 @@ validation_prompt_suffix_default = """\n\nBased on the above information, you ne
 - Any other obvious errors that you can identify.
 
 With the above issues in mind, create a new, corrected version of the markdown table below. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
+
+validation_prompt_suffix_no_summary = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
+
+- Remove rows where responses are not relevant to the assigned topic, or where responses are not relevant to any topic.
+- Remove rows where a topic is not assigned to any specific response.
+- If the current topic assignment does not cover all information in a response, assign responses to relevant topics from the suggested topics table, or create a new topic if necessary.
+{additional_validation_issues}
+- Any other obvious errors that you can identify.
+
+With the above issues in mind, create a new, corrected version of the markdown table below. Leave every Summary cell empty. If there are no issues to correct, write simply "No change". Return only the corrected table without additional text, or 'no change' alone."""
+
+_PER_ROW_SUMMARY_INSTRUCTION_RE = re.compile(
+    r"In the final column named 'Summary', write a summary[^\n]*\n?",
+    re.IGNORECASE,
+)
+
+_EMPTY_SUMMARY_COLUMN_INSTRUCTION = "Include a final column named 'Summary' and leave every cell in that column empty.\n"
+
+
+def omit_per_row_summary_instruction(prompt: str) -> str:
+    """Replace per-row Summary LLM instructions with empty-column instructions."""
+    if not prompt:
+        return prompt
+    return _PER_ROW_SUMMARY_INSTRUCTION_RE.sub(
+        _EMPTY_SUMMARY_COLUMN_INSTRUCTION, prompt
+    )
+
 
 validation_prompt_suffix_struct_summary_default = """\n\nBased on the above information, you need to create a corrected version of the output table. Examples of issues to correct include:
 

@@ -231,6 +231,19 @@ INCLUDE_RESPONSE_LEVEL_SUMMARY = convert_string_to_boolean(
     get_or_create_env_var("INCLUDE_RESPONSE_LEVEL_SUMMARY", "False")
 )
 
+# When True, skip LLM calls whose primary purpose is summarisation (per-row Summary
+# during extraction is left blank; topic-level and overall summarisation steps are
+# skipped). Topic extraction and deduplication still run.
+SKIP_ALL_SUMMARISATION = convert_string_to_boolean(
+    get_or_create_env_var("SKIP_ALL_SUMMARISATION", "False")
+)
+
+
+def do_summaries_from_config() -> str:
+    """Return do_summaries flag for dedup_summaries ('Yes' or 'No')."""
+    return "No" if SKIP_ALL_SUMMARISATION else "Yes"
+
+
 # Add a second Topic response pivot sheet with General topics only across the top
 # (no Subtopic in column headers). Created only when at least one General topic is
 # present and is not blank / 'Not assessed'.
@@ -474,8 +487,13 @@ BEDROCK_GUARDRAIL_IDENTIFIER = get_or_create_env_var(
 BEDROCK_GUARDRAIL_VERSION = get_or_create_env_var(
     "BEDROCK_GUARDRAIL_VERSION", ""
 ).strip()
+_BEDROCK_GUARDRAIL_TRACE_DEFAULT = (
+    "enabled" if ENABLE_BEDROCK_GUARDRAILS else "disabled"
+)
 _BEDROCK_GUARDRAIL_TRACE_RAW = (
-    get_or_create_env_var("BEDROCK_GUARDRAIL_TRACE", "disabled").strip().lower()
+    get_or_create_env_var("BEDROCK_GUARDRAIL_TRACE", _BEDROCK_GUARDRAIL_TRACE_DEFAULT)
+    .strip()
+    .lower()
 )
 if _BEDROCK_GUARDRAIL_TRACE_RAW not in ("disabled", "enabled", "enabled_full"):
     raise ValueError(

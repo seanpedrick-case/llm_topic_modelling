@@ -92,6 +92,20 @@ def empty_output_vars_summarise():
     )
 
 
+_SUMMARY_COLUMN_NAMES = ("Summary", "Revised summary", "Revised Summary")
+
+
+def blank_summary_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Set known summary columns to empty strings (in place on a copy)."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    for col in _SUMMARY_COLUMN_NAMES:
+        if col in out.columns:
+            out[col] = ""
+    return out
+
+
 def get_or_create_env_var(var_name: str, default_value: str):
     # Get the environment variable if it exists
     value = os.environ.get(var_name)

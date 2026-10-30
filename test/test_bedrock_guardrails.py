@@ -145,9 +145,22 @@ class TestCallAwsBedrockGuardrails(unittest.TestCase):
 
     def test_guardrail_intervention_sets_response_flags(self):
         runtime = MagicMock()
-        runtime.converse.return_value = self._mock_converse_response(
-            "Sorry, blocked.", stop_reason="guardrail_intervened"
-        )
+        runtime.converse.return_value = {
+            **self._mock_converse_response(
+                "Sorry, blocked.", stop_reason="guardrail_intervened"
+            ),
+            "trace": {
+                "guardrail": {
+                    "inputAssessment": {
+                        "gr-1": {
+                            "contentPolicy": {
+                                "filters": [{"type": "INSULTS", "action": "BLOCKED"}]
+                            }
+                        }
+                    }
+                }
+            },
+        }
 
         with patch(
             "tools.config.ENABLE_BEDROCK_GUARDRAILS",
@@ -165,6 +178,25 @@ class TestCallAwsBedrockGuardrails(unittest.TestCase):
         self.assertTrue(resp.guardrail_intervened)
         self.assertEqual(resp.stop_reason, "guardrail_intervened")
         self.assertEqual(resp.text, "Sorry, blocked.")
+        self.assertIn("Content (INSULTS)", resp.guardrail_intervention_categories)
+
+    def test_intervention_categories_when_trace_disabled(self):
+        runtime = MagicMock()
+        runtime.converse.return_value = self._mock_converse_response(
+            "blocked", stop_reason="guardrail_intervened"
+        )
+
+        with patch("tools.config.ENABLE_BEDROCK_GUARDRAILS", False):
+            resp = call_aws_bedrock(
+                "user prompt",
+                "system",
+                0.5,
+                100,
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+                runtime,
+            )
+
+        self.assertIn("Tracing disabled", resp.guardrail_intervention_categories)
 
     def test_process_requests_does_not_retry_after_guardrail_intervention(self):
         from tools.llm_funcs import process_requests
