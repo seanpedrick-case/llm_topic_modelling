@@ -33,6 +33,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     REASONING_SUFFIX,
     RUN_LOCAL_MODEL,
+    SKIP_ALL_SUMMARISATION,
     TIMEOUT_WAIT,
     model_name_map,
 )
@@ -49,6 +50,7 @@ def _effective_context_limit() -> int:
 
 
 from tools.helper_functions import (
+    blank_summary_columns,
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_batch_file_path_details,
@@ -3499,6 +3501,15 @@ def summarise_output_topics(
                 tqdm._instances.clear()
                 break
 
+    if do_summaries != "Yes" and length_all_summaries > 0:
+        summarised_outputs = [""] * length_all_summaries
+        latest_summary_completed = length_all_summaries
+        try:
+            summary_loop.close()
+        except Exception:
+            pass
+        tqdm._instances.clear()
+
     # If all summaries completed, make final outputs
     if latest_summary_completed >= length_all_summaries:
         print("All summaries completed. Creating outputs.")
@@ -3877,6 +3888,9 @@ def wrapper_summarise_output_topics_per_group(
     :return: A tuple containing consolidated results, mimicking the return structure of `summarise_output_topics`
     """
 
+    if SKIP_ALL_SUMMARISATION:
+        do_summaries = "No"
+
     acc_input_tokens = 0
     acc_output_tokens = 0
     acc_number_of_calls = 0
@@ -3884,6 +3898,11 @@ def wrapper_summarise_output_topics_per_group(
 
     # Logged content
     all_groups_logged_content = existing_logged_content
+
+    if SKIP_ALL_SUMMARISATION:
+        reference_table_df = blank_summary_columns(reference_table_df)
+        sampled_reference_table_df = blank_summary_columns(sampled_reference_table_df)
+        topic_summary_df = blank_summary_columns(topic_summary_df)
 
     # Check if we have data to process
     # Allow empty sampled_reference_table_df if sample_reference_table is True (it will be created from reference_table_df)
@@ -4421,6 +4440,8 @@ def overall_summary(
     txt_summarised_outputs = list()
     summarised_outputs = list()
     summarised_outputs_for_df = list()
+    html_output_table = ""
+    summarised_outputs_df = pd.DataFrame()
     input_tokens_num = 0
     output_tokens_num = 0
     number_of_calls_num = 0
@@ -4800,6 +4821,42 @@ def overall_summary(
             existing_logged_content = existing_logged_content.to_dict(orient="records")
 
         out_logged_content = existing_logged_content + all_logged_content
+
+    else:
+        print("Skipping overall summary LLM calls (do_summaries is not 'Yes').")
+        summarised_outputs_for_df = [""] * length_groups
+        summarised_outputs = [""] * length_groups
+        overall_summary_output_csv_path = (
+            output_folder
+            + batch_file_path_details
+            + "_overall_summary_"
+            + model_choice_clean_short
+            + ".csv"
+        )
+        summarised_outputs_df = pd.DataFrame(
+            data={"Group": unique_groups, "Summary": summarised_outputs_for_df}
+        )
+        summarised_outputs_df.drop(["1", "2", "3"], axis=1, errors="ignore").to_csv(
+            overall_summary_output_csv_path, index=None, encoding="utf-8-sig"
+        )
+        output_files.append(overall_summary_output_csv_path)
+        summarised_outputs_df_for_display = pd.DataFrame(
+            data={"Group": unique_groups, "Summary": summarised_outputs}
+        )
+        html_output_table = summarised_outputs_df_for_display.to_html(
+            index=False, escape=False
+        )
+        output_files = list(set(output_files))
+        toc = time.perf_counter()
+        time_taken = toc - tic
+        out_message = (
+            "Overall summary skipped; empty summaries written. "
+            f"Total time: {time_taken:.2f}s"
+        )
+        print(out_message)
+        if isinstance(existing_logged_content, pd.DataFrame):
+            existing_logged_content = existing_logged_content.to_dict(orient="records")
+        out_logged_content = existing_logged_content
 
     return (
         output_files,

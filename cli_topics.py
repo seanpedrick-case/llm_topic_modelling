@@ -63,6 +63,7 @@ from tools.config import (
     convert_string_to_boolean,
     default_model_choice,
     default_model_source,
+    do_summaries_from_config,
     model_name_map,
 )
 from tools.dedup_summaries import (
@@ -2006,7 +2007,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 local_model=None,
                 tokenizer=None,
                 assistant_model=None,
-                do_summaries="Yes",
+                do_summaries=do_summaries_from_config(),
             )
 
             end_time = time.time()
@@ -2140,7 +2141,7 @@ python cli_topics.py --task all_in_one --input_file example_data/combined_case_n
                 local_model=None,
                 tokenizer=None,
                 assistant_model=None,
-                do_summaries="Yes",
+                do_summaries=do_summaries_from_config(),
             )
 
             end_time = time.time()

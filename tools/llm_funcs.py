@@ -48,6 +48,9 @@ _assistant_model = None
 # Log once per model when sampling params are omitted (avoids spam on every call)
 _bedrock_sampling_omit_logged: set[str] = set()
 
+from tools.bedrock_guardrail_batch_status import (
+    summarize_guardrail_intervention_for_export,
+)
 from tools.config import (
     ASSISTANT_MODEL,
     BATCH_SIZE_DEFAULT,
@@ -236,11 +239,18 @@ class LlamaCPPGenerationConfig:
 
 # ResponseObject class for AWS Bedrock calls
 class ResponseObject:
-    def __init__(self, text, usage_metadata, stop_reason=None):
+    def __init__(
+        self,
+        text,
+        usage_metadata,
+        stop_reason=None,
+        guardrail_intervention_categories=None,
+    ):
         self.text = text
         self.usage_metadata = usage_metadata
         self.stop_reason = stop_reason
         self.guardrail_intervened = stop_reason == "guardrail_intervened"
+        self.guardrail_intervention_categories = guardrail_intervention_categories or ""
 
 
 ###
@@ -1364,8 +1374,12 @@ def call_aws_bedrock(
             raise
 
     stop_reason = api_response.get("stopReason")
+    guardrail_intervention_categories = ""
     if stop_reason == "guardrail_intervened":
         _log_bedrock_guardrail_intervention(api_response)
+        guardrail_intervention_categories = summarize_guardrail_intervention_for_export(
+            api_response
+        )
 
     output_message = api_response["output"]["message"]
     text = _extract_bedrock_converse_text(
@@ -1381,7 +1395,12 @@ def call_aws_bedrock(
     api_response["ResponseMetadata"]
 
     # Create ResponseObject with the cleanly extracted data.
-    response = ResponseObject(text=text, usage_metadata=usage, stop_reason=stop_reason)
+    response = ResponseObject(
+        text=text,
+        usage_metadata=usage,
+        stop_reason=stop_reason,
+        guardrail_intervention_categories=guardrail_intervention_categories,
+    )
 
     return response
 

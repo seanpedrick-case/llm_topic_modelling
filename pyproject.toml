@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.19.0"
+version = "0.19.1"
 description = "Generate topics and thematic summaries from open text in tabular data files with LLMs"
 requires-python = ">=3.10"
 readme = "README.md"

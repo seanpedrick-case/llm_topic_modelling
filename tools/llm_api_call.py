@@ -16,7 +16,12 @@ from tqdm import tqdm
 
 from tools import config as app_config
 from tools.aws_functions import connect_to_bedrock_runtime
-from tools.bedrock_guardrail_batch_status import append_guardrail_batch_status
+from tools.bedrock_guardrail_batch_status import (
+    GUARDRAIL_INTERVENTIONS_SHEET_NAME,
+    append_guardrail_batch_status,
+    guardrail_categories_from_responses,
+    load_guardrail_batch_status,
+)
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
     BATCH_DEDUPLICATION_EVERY_N_BATCHES,
@@ -42,7 +47,9 @@ from tools.config import (
     OUTPUT_FOLDER,
     REASONING_SUFFIX,
     RUN_LOCAL_MODEL,
+    SKIP_ALL_SUMMARISATION,
     TIMEOUT_WAIT,
+    do_summaries_from_config,
     model_name_map,
 )
 from tools.dedup_summaries import (
@@ -54,6 +61,7 @@ from tools.dedup_summaries import (
 )
 from tools.helper_functions import (
     apply_forced_unassessed_general_topics,
+    blank_summary_columns,
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
@@ -114,15 +122,38 @@ from tools.prompts import (
     initial_table_system_prompt,
     negative_neutral_positive_sentiment_prompt,
     negative_or_positive_sentiment_prompt,
+    omit_per_row_summary_instruction,
     previous_table_introduction_default,
     structured_summary_prompt,
     validation_prompt_prefix_default,
     validation_prompt_suffix_default,
+    validation_prompt_suffix_no_summary,
     validation_prompt_suffix_struct_summary_default,
     validation_system_prompt,
 )
 
 max_tokens = LLM_MAX_NEW_TOKENS
+
+
+def _use_topic_extraction_prompts(produce_structured_summary_radio: str) -> bool:
+    """Topic table prompts (not structured-summary mode), including when summaries are skipped."""
+    if SKIP_ALL_SUMMARISATION:
+        return True
+    return produce_structured_summary_radio != "Yes"
+
+
+def _extraction_user_prompt(prompt: str) -> str:
+    if SKIP_ALL_SUMMARISATION:
+        return omit_per_row_summary_instruction(prompt)
+    return prompt
+
+
+def _validation_prompt_suffix_template():
+    if SKIP_ALL_SUMMARISATION:
+        return validation_prompt_suffix_no_summary
+    return validation_prompt_suffix_default
+
+
 timeout_wait = TIMEOUT_WAIT
 number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
@@ -754,7 +785,7 @@ def validate_topics(
                         "Description", axis=1, inplace=True
                     )
 
-            if produce_structured_summary_radio == "Yes":
+            if not _use_topic_extraction_prompts(produce_structured_summary_radio):
                 if "General topic" in validation_topics_df_for_markdown.columns:
                     validation_topics_df_for_markdown = (
                         validation_topics_df_for_markdown.rename(
@@ -825,7 +856,7 @@ def validate_topics(
             #    additional_validation_issues_provided = "\n" + additional_validation_issues_provided
 
             # Format the validation prompt with the response table and topics
-            if produce_structured_summary_radio != "Yes":
+            if _use_topic_extraction_prompts(produce_structured_summary_radio):
                 validation_formatted_summary_prompt = add_existing_topics_prompt.format(
                     validate_prompt_prefix=validation_prompt_prefix_default,
                     response_table=validation_response_table_prompt,
@@ -842,7 +873,7 @@ def validate_topics(
                     previous_table=(
                         previous_table_content if show_previous_table == "Yes" else ""
                     ),
-                    validate_prompt_suffix=validation_prompt_suffix_default.format(
+                    validate_prompt_suffix=_validation_prompt_suffix_template().format(
                         additional_validation_issues=(
                             _confidence_validation_text(include_topic_confidence_radio)
                             + additional_validation_issues_provided
@@ -883,7 +914,9 @@ def validate_topics(
             ) = process_batch_with_llm(
                 is_first_batch=False,
                 formatted_system_prompt=validation_formatted_system_prompt,
-                formatted_prompt=validation_formatted_summary_prompt,
+                formatted_prompt=_extraction_user_prompt(
+                    validation_formatted_summary_prompt
+                ),
                 batch_file_path_details=validation_batch_file_path_details,
                 model_source=model_source,
                 model_choice=model_choice,
@@ -1798,7 +1831,7 @@ def validate_topics_wrapper(
         )
 
         # Handle structured summary format
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             if "General topic" in validation_display_table.columns:
                 validation_display_table = validation_display_table.rename(
                     columns={"General topic": "Main heading"}
@@ -2640,7 +2673,7 @@ def write_llm_output_and_logs(
         batch_basic_response_df, batch_size_number
     )
 
-    if produce_structured_summary_radio == "Yes":
+    if not _use_topic_extraction_prompts(produce_structured_summary_radio):
         existing_topics_df.rename(
             columns={"Main heading": "General topic", "Subheading": "Subtopic"},
             inplace=True,
@@ -2720,7 +2753,7 @@ def write_llm_output_and_logs(
         # but we still need to process them through the same logic as normal processing
 
         # Create empty topic_with_response_df since no new topics were generated
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             topic_with_response_df = pd.DataFrame(
                 columns=[
                     "Main heading",
@@ -2812,7 +2845,7 @@ def write_llm_output_and_logs(
     include_confidence = _include_topic_confidence(include_topic_confidence_radio)
     # Structured summaries are prompted for 3 columns: Main heading, Subheading, Summary
     valid_column_counts = {4, 5}
-    if produce_structured_summary_radio == "Yes":
+    if not _use_topic_extraction_prompts(produce_structured_summary_radio):
         valid_column_counts.add(3)
     if include_confidence:
         valid_column_counts.add(6)
@@ -2831,7 +2864,7 @@ def write_llm_output_and_logs(
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
     if topic_with_response_df.shape[1] == 3 and (
-        produce_structured_summary_radio == "Yes"
+        not _use_topic_extraction_prompts(produce_structured_summary_radio)
         or (
             _find_parsed_table_column(topic_with_response_df, "Summary") is not None
             and _find_parsed_table_column(topic_with_response_df, "Response ID") is None
@@ -3013,7 +3046,7 @@ def write_llm_output_and_logs(
         assess_sentiment=assess_sentiment,
         include_confidence=include_confidence,
     )
-    if produce_structured_summary_radio != "Yes":
+    if _use_topic_extraction_prompts(produce_structured_summary_radio):
         topic_with_response_df = apply_forced_unassessed_general_topics(
             topic_with_response_df, force_zero_shot_radio
         )
@@ -3108,7 +3141,7 @@ def write_llm_output_and_logs(
     # Handle blank Response ID: remove rows if batch_size > 1, set to "1" if batch_size == 1
     # Skip this processing when producing structured summaries, as they don't have Response ID column
     if (
-        produce_structured_summary_radio != "Yes"
+        _use_topic_extraction_prompts(produce_structured_summary_radio)
         and "Response ID" in topic_with_response_df.columns
         and not topic_with_response_df.empty
     ):
@@ -3176,7 +3209,7 @@ def write_llm_output_and_logs(
         if not summary and (len(references_raw) > 30):
             summary = references_raw
 
-        if produce_structured_summary_radio != "Yes":
+        if _use_topic_extraction_prompts(produce_structured_summary_radio):
             summary = row_number_string_start + summary
 
         resolved_ids = []
@@ -3211,7 +3244,7 @@ def write_llm_output_and_logs(
         # every response in the current batch so rows are not dropped.
         if (
             not resolved_ids
-            and produce_structured_summary_radio == "Yes"
+            and not _use_topic_extraction_prompts(produce_structured_summary_radio)
             and isinstance(batch_basic_response_df, pd.DataFrame)
             and not batch_basic_response_df.empty
             and "Original Response ID" in batch_basic_response_df.columns
@@ -3479,7 +3512,7 @@ def write_llm_output_and_logs(
 
     out_topic_summary_df["Group"] = group_name
 
-    if produce_structured_summary_radio != "Yes":
+    if _use_topic_extraction_prompts(produce_structured_summary_radio):
         topic_with_response_df = apply_forced_unassessed_general_topics(
             topic_with_response_df, force_zero_shot_radio
         )
@@ -3489,6 +3522,12 @@ def write_llm_output_and_logs(
         out_topic_summary_df = apply_forced_unassessed_general_topics(
             out_topic_summary_df, force_zero_shot_radio
         )
+
+    if SKIP_ALL_SUMMARISATION:
+        topic_with_response_df = blank_summary_columns(topic_with_response_df)
+        out_reference_df = blank_summary_columns(out_reference_df)
+        if "Summary" in out_topic_summary_df.columns:
+            out_topic_summary_df = blank_summary_columns(out_topic_summary_df)
 
     topic_summary_df_out_path = (
         output_folder
@@ -3511,6 +3550,44 @@ def write_llm_output_and_logs(
     )
 
 
+def _reference_table_has_topic_assignments(
+    reference_df: pd.DataFrame | None,
+) -> bool:
+    """True when the reference table has at least one assigned response row."""
+    if reference_df is None or reference_df.empty:
+        return False
+    if "Response ID" not in reference_df.columns:
+        return False
+    numeric_ids = pd.to_numeric(reference_df["Response ID"], errors="coerce")
+    return bool((numeric_ids.fillna(0) > 0).any())
+
+
+def _guardrail_no_assignments_ui_text(
+    rejected_batch_count: int,
+    total_batches: int | None,
+) -> Tuple[str, str]:
+    """User-facing text when guardrails left no topic assignments (markdown, plain)."""
+    total_batches_int = int(total_batches) if total_batches else None
+    if total_batches_int and rejected_batch_count >= total_batches_int:
+        headline = (
+            f"All {rejected_batch_count} extraction batches were rejected by the "
+            "Bedrock guardrail."
+        )
+    else:
+        headline = (
+            f"No topic assignments were produced. {rejected_batch_count} batch(es) "
+            "were rejected by the Bedrock guardrail."
+        )
+    detail = (
+        "No responses were assigned to topics. Download the Excel output and open the "
+        f"**{GUARDRAIL_INTERVENTIONS_SHEET_NAME}** sheet for batch numbers, row ranges, "
+        "intervention categories (when tracing is enabled), and notes."
+    )
+    markdown = f"### Guardrail rejection\n\n{headline}\n\n{detail}"
+    plain = f"{headline} {detail}"
+    return markdown, plain
+
+
 def _finalize_guardrail_rejected_batch(
     *,
     formatted_system_prompt: str,
@@ -3529,6 +3606,7 @@ def _finalize_guardrail_rejected_batch(
     reported_batch_no: int,
     start_row: int,
     end_row: int,
+    intervention_categories: str = "",
 ) -> Tuple:
     """Record guardrail rejection and return empty batch assignments (run continues)."""
     append_guardrail_batch_status(
@@ -3537,6 +3615,7 @@ def _finalize_guardrail_rejected_batch(
         start_row=start_row,
         end_row=end_row,
         task_type=task_type,
+        intervention_categories=intervention_categories,
     )
     print(
         f"Batch {reported_batch_no} ({task_type}): guardrail rejected — "
@@ -3898,6 +3977,7 @@ def process_batch_with_llm(
                 reported_batch_no=reported_batch_no,
                 start_row=start_row,
                 end_row=end_row,
+                intervention_categories=guardrail_categories_from_responses(responses),
             )
 
         # print("Response text:", response_text)
@@ -4548,7 +4628,9 @@ def extract_topics(
                                 "Description", axis=1, inplace=True
                             )
 
-                    if produce_structured_summary_radio == "Yes":
+                    if not _use_topic_extraction_prompts(
+                        produce_structured_summary_radio
+                    ):
                         if "General topic" in topics_df_for_markdown.columns:
                             topics_df_for_markdown.rename(
                                 columns={"General topic": "Main heading"},
@@ -4659,7 +4741,7 @@ def extract_topics(
                         )
 
                     # Format the summary prompt with the response table and topics
-                    if produce_structured_summary_radio != "Yes":
+                    if _use_topic_extraction_prompts(produce_structured_summary_radio):
                         formatted_summary_prompt = add_existing_topics_prompt.format(
                             validate_prompt_prefix="",
                             response_table=response_table_prompt,
@@ -4701,7 +4783,9 @@ def extract_topics(
                     ) = process_batch_with_llm(
                         is_first_batch=False,
                         formatted_system_prompt=formatted_system_prompt,
-                        formatted_prompt=formatted_summary_prompt,
+                        formatted_prompt=_extraction_user_prompt(
+                            formatted_summary_prompt
+                        ),
                         batch_file_path_details=batch_file_path_details,
                         model_source=model_source,
                         model_choice=model_choice,
@@ -4782,7 +4866,9 @@ def extract_topics(
                         )
                     )
 
-                    if produce_structured_summary_radio == "Yes":
+                    if not _use_topic_extraction_prompts(
+                        produce_structured_summary_radio
+                    ):
                         unique_table_df_display_table = unique_table_df_display_table[
                             ["General topic", "Subtopic", "Summary"]
                         ]
@@ -4794,14 +4880,20 @@ def extract_topics(
                             inplace=True,
                         )
                     else:
+                        display_cols = ["General topic", "Subtopic"]
+                        if (
+                            _assess_sentiment(sentiment_checkbox)
+                            and "Sentiment" in unique_table_df_display_table.columns
+                        ):
+                            display_cols.append("Sentiment")
+                        display_cols.extend(["Number of responses", "Summary"])
+                        display_cols = [
+                            c
+                            for c in display_cols
+                            if c in unique_table_df_display_table.columns
+                        ]
                         unique_table_df_display_table = unique_table_df_display_table[
-                            [
-                                "General topic",
-                                "Subtopic",
-                                "Sentiment",
-                                "Number of responses",
-                                "Summary",
-                            ]
+                            display_cols
                         ]
 
                     unique_table_df_display_table_markdown = (
@@ -4824,7 +4916,7 @@ def extract_topics(
                     )
 
                     # Format the summary prompt with the response table and topics
-                    if produce_structured_summary_radio != "Yes":
+                    if _use_topic_extraction_prompts(produce_structured_summary_radio):
                         formatted_initial_table_prompt = initial_table_prompt.format(
                             validate_prompt_prefix="",
                             response_table=response_table_prompt,
@@ -4867,7 +4959,9 @@ def extract_topics(
                     ) = process_batch_with_llm(
                         is_first_batch=True,
                         formatted_system_prompt=formatted_system_prompt,
-                        formatted_prompt=formatted_initial_table_prompt,
+                        formatted_prompt=_extraction_user_prompt(
+                            formatted_initial_table_prompt
+                        ),
                         batch_file_path_details=batch_file_path_details,
                         model_source=model_source,
                         model_choice=model_choice,
@@ -5401,7 +5495,7 @@ def extract_topics(
             lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
         )
 
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             unique_table_df_display_table = unique_table_df_display_table[
                 ["General topic", "Subtopic", "Summary"]
             ]
@@ -5427,6 +5521,16 @@ def extract_topics(
         unique_table_df_display_table_markdown = (
             unique_table_df_display_table.to_markdown(index=False)
         )
+        if not _reference_table_has_topic_assignments(existing_reference_df):
+            guardrail_status = load_guardrail_batch_status(output_folder)
+            if not guardrail_status.empty:
+                rejected_batches = int(guardrail_status["Batch"].nunique())
+                unique_table_df_display_table_markdown, _ = (
+                    _guardrail_no_assignments_ui_text(
+                        rejected_batches,
+                        num_batches,
+                    )
+                )
 
         # Ensure that we are only returning the final results to outputs
         out_file_paths = [x for x in out_file_paths if "_final_" in x]
@@ -6144,7 +6248,7 @@ def wrapper_extract_topics_per_column_value(
         unique_table_df_display_table = acc_topic_summary_df.apply(
             lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
         )
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             unique_table_df_display_table = unique_table_df_display_table[
                 ["General topic", "Subtopic", "Summary", "Group"]
             ]
@@ -6171,6 +6275,18 @@ def wrapper_extract_topics_per_column_value(
                 display_cols
             ].to_markdown(index=False)
 
+    guardrail_ui_notice_plain = None
+    if not _reference_table_has_topic_assignments(acc_reference_df):
+        guardrail_status = load_guardrail_batch_status(output_folder)
+        if not guardrail_status.empty:
+            rejected_batches = int(guardrail_status["Batch"].nunique())
+            acc_markdown_output, guardrail_ui_notice_plain = (
+                _guardrail_no_assignments_ui_text(
+                    rejected_batches,
+                    total_number_of_batches,
+                )
+            )
+
     acc_input_tokens, acc_output_tokens, acc_number_of_calls = (
         calculate_tokens_from_metadata(
             acc_all_metadata_content, model_choice, model_name_map
@@ -6178,6 +6294,8 @@ def wrapper_extract_topics_per_column_value(
     )
 
     out_message = "\n".join(out_message)
+    if guardrail_ui_notice_plain:
+        out_message = guardrail_ui_notice_plain + "\n\n" + out_message
     out_message = (
         out_message
         + " "
@@ -6291,7 +6409,7 @@ def discover_topics_from_sample(
     ensure_model_in_map(model_choice, model_name_map)
 
     warnings: list[str] = []
-    if produce_structured_summary_radio == "Yes":
+    if not _use_topic_extraction_prompts(produce_structured_summary_radio):
         raise ValueError(
             "Topic discovery cannot run with structured summaries enabled. "
             "Set 'Ask the model to produce structured summaries' to No."
@@ -7026,7 +7144,7 @@ def all_in_one_pipeline(
     log_files_output_list_state = out_log_files
 
     # If producing structured summaries, return the outputs after extraction
-    if produce_structures_summary_choice == "Yes":
+    if produce_structures_summary_choice == "Yes" and not SKIP_ALL_SUMMARISATION:
 
         # Write logged content to file
         column_clean = clean_column_name(chosen_cols, max_length=20)
@@ -7110,249 +7228,295 @@ def all_in_one_pipeline(
         unique_df_loaded if not unique_df_loaded.empty else out_topic_summary_df
     )
 
-    if (
-        reference_df_for_dedup is None
-        or reference_df_for_dedup.empty
-        or "Response ID" not in reference_df_for_dedup.columns
-    ):
+    skip_post_extraction = False
+    guardrail_batch_status_df = load_guardrail_batch_status(output_folder)
+
+    if not _reference_table_has_topic_assignments(reference_df_for_dedup):
         available_cols = (
             list(reference_df_for_dedup.columns)
             if reference_df_for_dedup is not None
             else []
         )
-        raise ValueError(
-            "Topic extraction produced no usable reference table "
-            f"(missing 'Response ID'; available columns: {available_cols}). "
-            "Check earlier logs for markdown table parsing or segment processing "
-            "errors. Cannot continue to deduplication."
+        if (
+            reference_df_for_dedup is None
+            or "Response ID" not in reference_df_for_dedup.columns
+        ):
+            raise ValueError(
+                "Topic extraction produced no usable reference table "
+                f"(missing 'Response ID' column; available columns: {available_cols}). "
+                "Check earlier logs for markdown table parsing or segment processing "
+                "errors. Cannot continue to deduplication."
+            )
+        if guardrail_batch_status_df.empty:
+            raise ValueError(
+                "Topic extraction produced no topic assignments "
+                f"(reference table is empty; available columns: {available_cols}). "
+                "Check earlier logs for markdown table parsing or segment processing "
+                "errors. Cannot continue to deduplication."
+            )
+        skip_post_extraction = True
+        print(
+            "Topic extraction produced no topic assignments after guardrail rejections. "
+            "Skipping deduplication and summarisation; Excel export can still include "
+            f"{GUARDRAIL_INTERVENTIONS_SHEET_NAME}."
         )
 
-    skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
-    if skip_llm_taxonomy_dedup:
-        reference_df_for_dedup = apply_forced_unassessed_general_topics(
-            reference_df_for_dedup, force_zero_shot_choice
+    if skip_post_extraction:
+        ref_df_after_dedup = (
+            reference_df_for_dedup.copy()
+            if isinstance(reference_df_for_dedup, pd.DataFrame)
+            else pd.DataFrame()
         )
-        topic_summary_for_dedup = apply_forced_unassessed_general_topics(
-            topic_summary_for_dedup, force_zero_shot_choice
+        unique_df_after_dedup = (
+            topic_summary_for_dedup.copy()
+            if isinstance(topic_summary_for_dedup, pd.DataFrame)
+            else pd.DataFrame()
         )
-        light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
-        print(
-            "Running light fuzzy topic merge for forced zero-shot taxonomy "
-            f"(threshold={light_threshold}; case, apostrophes, near-identical names)."
-        )
-        fuzzy_threshold = light_threshold
-        fuzzy_merge_general_topics = "No"
+        summarisation_input_files = list()
+        log_files_output_dedup = list()
+        summary_reference_table_sample_state = pd.DataFrame()
+        master_unique_topics_df_revised_summaries_state = unique_df_after_dedup
+        master_reference_df_revised_summaries_state = ref_df_after_dedup
+        summary_output_files = list()
+        summarised_outputs_list = list()
+        latest_summary_completed_num = 0
+        conversation_metadata_text_updated = out_conversation_metadata
+        display_markdown_updated = display_markdown
+        log_files_output_after_sum = list(log_files_output_list_state or [])
+        overall_summarisation_input_files = list()
+        overall_summary_output_files = list()
+        overall_summarised_output_markdown = ""
+        summarised_output_df = pd.DataFrame()
+        summarised_references_markdown = ""
     else:
-        print("Deduplicating topic names with fuzzy matching")
-        fuzzy_threshold = score_threshold
-        fuzzy_merge_general_topics = merge_general_topics
-    (
-        ref_df_after_dedup,
-        unique_df_after_dedup,
-        summarisation_input_files,
-        log_files_output_dedup,
-        summarised_output_markdown,
-    ) = deduplicate_topics(
-        reference_df=reference_df_for_dedup,
-        topic_summary_df=topic_summary_for_dedup,
-        reference_table_file_name=working_data_file_name_textbox,
-        unique_topics_table_file_name=unique_topics_table_file_name_textbox,
-        in_excel_sheets=in_excel_sheets,
-        merge_sentiment=merge_sentiment,
-        merge_general_topics=fuzzy_merge_general_topics,
-        score_threshold=fuzzy_threshold,
-        in_data_files=in_data_files,
-        chosen_cols=chosen_cols,
-        output_folder=output_folder,
-        sentiment_checkbox=sentiment_choice,
-        deduplicate_topics="Yes",
-    )
-
-    # LLM-based deduplication if enabled
-    if skip_llm_taxonomy_dedup:
-        print(
-            "Skipping LLM topic merge because force zero-shot is enabled "
-            "with a submitted candidate topics list."
-        )
-    elif ALL_IN_ONE_USE_LLM_DEDUP:
-        # Set up model source and bedrock runtime if needed
-
-        print("Deduplicating topic names with LLM")
-
-        # Call LLM deduplication
+        skip_llm_taxonomy_dedup = force_zero_shot_choice == "Yes"
+        if skip_llm_taxonomy_dedup:
+            reference_df_for_dedup = apply_forced_unassessed_general_topics(
+                reference_df_for_dedup, force_zero_shot_choice
+            )
+            topic_summary_for_dedup = apply_forced_unassessed_general_topics(
+                topic_summary_for_dedup, force_zero_shot_choice
+            )
+            light_threshold = max(int(score_threshold), FORCE_ZERO_SHOT_FUZZY_THRESHOLD)
+            print(
+                "Running light fuzzy topic merge for forced zero-shot taxonomy "
+                f"(threshold={light_threshold}; case, apostrophes, near-identical names)."
+            )
+            fuzzy_threshold = light_threshold
+            fuzzy_merge_general_topics = "No"
+        else:
+            print("Deduplicating topic names with fuzzy matching")
+            fuzzy_threshold = score_threshold
+            fuzzy_merge_general_topics = merge_general_topics
         (
             ref_df_after_dedup,
             unique_df_after_dedup,
             summarisation_input_files,
             log_files_output_dedup,
             summarised_output_markdown,
-            dedup_input_tokens,
-            dedup_output_tokens,
-            dedup_number_of_calls,
-            dedup_estimated_time_taken,
-        ) = deduplicate_topics_llm(
-            reference_df=ref_df_after_dedup,
-            topic_summary_df=unique_df_after_dedup,
+        ) = deduplicate_topics(
+            reference_df=reference_df_for_dedup,
+            topic_summary_df=topic_summary_for_dedup,
             reference_table_file_name=working_data_file_name_textbox,
             unique_topics_table_file_name=unique_topics_table_file_name_textbox,
-            model_choice=model_choice,
-            in_api_key=in_api_key,
-            temperature=temperature,
-            model_source=model_source,
-            local_model=model,
-            tokenizer=tokenizer,
-            assistant_model=assistant_model,
             in_excel_sheets=in_excel_sheets,
             merge_sentiment=merge_sentiment,
-            merge_general_topics=merge_general_topics,
+            merge_general_topics=fuzzy_merge_general_topics,
+            score_threshold=fuzzy_threshold,
             in_data_files=in_data_files,
             chosen_cols=chosen_cols,
             output_folder=output_folder,
-            candidate_topics=candidate_topics,
-            azure_endpoint=azure_endpoint_text,
-            output_debug_files=output_debug_files,
-            api_url=api_url,
+            sentiment_checkbox=sentiment_choice,
+            deduplicate_topics="Yes",
+        )
+
+        # LLM-based deduplication if enabled
+        if skip_llm_taxonomy_dedup:
+            print(
+                "Skipping LLM topic merge because force zero-shot is enabled "
+                "with a submitted candidate topics list."
+            )
+        elif ALL_IN_ONE_USE_LLM_DEDUP:
+            # Set up model source and bedrock runtime if needed
+
+            print("Deduplicating topic names with LLM")
+
+            # Call LLM deduplication
+            (
+                ref_df_after_dedup,
+                unique_df_after_dedup,
+                summarisation_input_files,
+                log_files_output_dedup,
+                summarised_output_markdown,
+                dedup_input_tokens,
+                dedup_output_tokens,
+                dedup_number_of_calls,
+                dedup_estimated_time_taken,
+            ) = deduplicate_topics_llm(
+                reference_df=ref_df_after_dedup,
+                topic_summary_df=unique_df_after_dedup,
+                reference_table_file_name=working_data_file_name_textbox,
+                unique_topics_table_file_name=unique_topics_table_file_name_textbox,
+                model_choice=model_choice,
+                in_api_key=in_api_key,
+                temperature=temperature,
+                model_source=model_source,
+                local_model=model,
+                tokenizer=tokenizer,
+                assistant_model=assistant_model,
+                in_excel_sheets=in_excel_sheets,
+                merge_sentiment=merge_sentiment,
+                merge_general_topics=merge_general_topics,
+                in_data_files=in_data_files,
+                chosen_cols=chosen_cols,
+                output_folder=output_folder,
+                candidate_topics=candidate_topics,
+                azure_endpoint=azure_endpoint_text,
+                output_debug_files=output_debug_files,
+                api_url=api_url,
+                aws_access_key_textbox=aws_access_key_text,
+                aws_secret_key_textbox=aws_secret_key_text,
+                aws_region_textbox=aws_region_text,
+                azure_api_key_textbox=azure_api_key_text,
+                model_name_map=model_name_map_state,
+                sentiment_checkbox=sentiment_choice,
+            )
+
+            # Update token counts and time taken
+            total_input_tokens += dedup_input_tokens
+            total_output_tokens += dedup_output_tokens
+            total_number_of_calls += dedup_number_of_calls
+            total_time_taken += dedup_estimated_time_taken
+            out_message.append(
+                f"LLM deduplication completed. Total time: {dedup_estimated_time_taken:.2f}s"
+            )
+
+        # 3) Summarisation
+        (
+            ref_df_loaded_2,
+            unique_df_loaded_2,
+            _latest_batch_completed_no_loop_2,
+            _deduplication_input_files_status_2,
+            _working_name_2,
+            _unique_name_2,
+        ) = load_in_previous_data_files(summarisation_input_files)
+
+        (
+            summary_reference_table_sample_state,
+            master_unique_topics_df_revised_summaries_state,
+            master_reference_df_revised_summaries_state,
+            summary_output_files,
+            summarised_outputs_list,
+            latest_summary_completed_num,
+            conversation_metadata_text_updated,
+            display_markdown_updated,
+            log_files_output_after_sum,
+            overall_summarisation_input_files,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            estimated_time_taken_number,
+            output_messages_textbox,
+            out_logged_content,
+        ) = wrapper_summarise_output_topics_per_group(
+            grouping_col=grouping_col,
+            sampled_reference_table_df=ref_df_after_dedup,
+            topic_summary_df=unique_df_after_dedup,
+            reference_table_df=ref_df_after_dedup,
+            model_choice=model_choice,
+            in_api_key=in_api_key,
+            temperature=temperature,
+            reference_data_file_name=working_data_file_name_textbox,
+            summarised_outputs=list(),
+            latest_summary_completed=0,
+            out_metadata_str=out_conversation_metadata,
+            in_data_files=in_data_files,
+            in_excel_sheets=in_excel_sheets,
+            chosen_cols=chosen_cols,
+            log_output_files=log_files_output_list_state,
+            summarise_format_radio=summarise_format,
+            output_folder=output_folder,
+            context_textbox=context_text,
             aws_access_key_textbox=aws_access_key_text,
             aws_secret_key_textbox=aws_secret_key_text,
             aws_region_textbox=aws_region_text,
-            azure_api_key_textbox=azure_api_key_text,
             model_name_map=model_name_map_state,
-            sentiment_checkbox=sentiment_choice,
+            hf_api_key_textbox=hf_api_key_text,
+            azure_endpoint_textbox=azure_endpoint_text,
+            existing_logged_content=out_logged_content,
+            sample_reference_table=sample_reference_table_checkbox,
+            no_of_sampled_summaries=100,
+            random_seed=random_seed,
+            output_debug_files=output_debug_files,
+            api_url=api_url,
+            additional_summary_instructions_provided=additional_instructions_summary_format,
+            local_model=model,
+            tokenizer=tokenizer,
+            assistant_model=assistant_model,
+            do_summaries=do_summaries_from_config(),
         )
 
-        # Update token counts and time taken
-        total_input_tokens += dedup_input_tokens
-        total_output_tokens += dedup_output_tokens
-        total_number_of_calls += dedup_number_of_calls
-        total_time_taken += dedup_estimated_time_taken
-        out_message.append(
-            f"LLM deduplication completed. Total time: {dedup_estimated_time_taken:.2f}s"
+        # Generate summarised_references_markdown from the sampled reference table
+        summarised_references_markdown = (
+            summary_reference_table_sample_state.to_markdown(index=False)
         )
 
-    # 3) Summarisation
-    (
-        ref_df_loaded_2,
-        unique_df_loaded_2,
-        _latest_batch_completed_no_loop_2,
-        _deduplication_input_files_status_2,
-        _working_name_2,
-        _unique_name_2,
-    ) = load_in_previous_data_files(summarisation_input_files)
+        total_input_tokens += input_tokens_num
+        total_output_tokens += output_tokens_num
+        total_number_of_calls += number_of_calls_num
+        total_time_taken += estimated_time_taken_number
+        out_message.append(output_messages_textbox)
 
-    (
-        summary_reference_table_sample_state,
-        master_unique_topics_df_revised_summaries_state,
-        master_reference_df_revised_summaries_state,
-        summary_output_files,
-        summarised_outputs_list,
-        latest_summary_completed_num,
-        conversation_metadata_text_updated,
-        display_markdown_updated,
-        log_files_output_after_sum,
-        overall_summarisation_input_files,
-        input_tokens_num,
-        output_tokens_num,
-        number_of_calls_num,
-        estimated_time_taken_number,
-        output_messages_textbox,
-        out_logged_content,
-    ) = wrapper_summarise_output_topics_per_group(
-        grouping_col=grouping_col,
-        sampled_reference_table_df=ref_df_after_dedup,
-        topic_summary_df=unique_df_after_dedup,
-        reference_table_df=ref_df_after_dedup,
-        model_choice=model_choice,
-        in_api_key=in_api_key,
-        temperature=temperature,
-        reference_data_file_name=working_data_file_name_textbox,
-        summarised_outputs=list(),
-        latest_summary_completed=0,
-        out_metadata_str=out_conversation_metadata,
-        in_data_files=in_data_files,
-        in_excel_sheets=in_excel_sheets,
-        chosen_cols=chosen_cols,
-        log_output_files=log_files_output_list_state,
-        summarise_format_radio=summarise_format,
-        output_folder=output_folder,
-        context_textbox=context_text,
-        aws_access_key_textbox=aws_access_key_text,
-        aws_secret_key_textbox=aws_secret_key_text,
-        aws_region_textbox=aws_region_text,
-        model_name_map=model_name_map_state,
-        hf_api_key_textbox=hf_api_key_text,
-        azure_endpoint_textbox=azure_endpoint_text,
-        existing_logged_content=out_logged_content,
-        sample_reference_table=sample_reference_table_checkbox,
-        no_of_sampled_summaries=100,
-        random_seed=random_seed,
-        output_debug_files=output_debug_files,
-        api_url=api_url,
-        additional_summary_instructions_provided=additional_instructions_summary_format,
-        local_model=model,
-        tokenizer=tokenizer,
-        assistant_model=assistant_model,
-    )
+        # 4) Overall summary
+        (
+            _ref_df_loaded_3,
+            _unique_df_loaded_3,
+            _latest_batch_completed_no_loop_3,
+            _deduplication_input_files_status_3,
+            _working_name_3,
+            _unique_name_3,
+        ) = load_in_previous_data_files(overall_summarisation_input_files)
 
-    # Generate summarised_references_markdown from the sampled reference table
-    summarised_references_markdown = summary_reference_table_sample_state.to_markdown(
-        index=False
-    )
+        (
+            overall_summary_output_files,
+            overall_summarised_output_markdown,
+            summarised_output_df,
+            conversation_metadata_textbox,
+            input_tokens_num,
+            output_tokens_num,
+            number_of_calls_num,
+            estimated_time_taken_number,
+            output_messages_textbox,
+            out_logged_content,
+        ) = overall_summary(
+            topic_summary_df=master_unique_topics_df_revised_summaries_state,
+            model_choice=model_choice,
+            in_api_key=in_api_key,
+            temperature=temperature,
+            reference_data_file_name=working_data_file_name_textbox,
+            output_folder=output_folder,
+            chosen_cols=chosen_cols,
+            context_textbox=context_text,
+            aws_access_key_textbox=aws_access_key_text,
+            aws_secret_key_textbox=aws_secret_key_text,
+            aws_region_textbox=aws_region_text,
+            model_name_map=model_name_map_state,
+            hf_api_key_textbox=hf_api_key_text,
+            azure_endpoint_textbox=azure_endpoint_text,
+            local_model=model,
+            tokenizer=tokenizer,
+            assistant_model=assistant_model,
+            existing_logged_content=out_logged_content,
+            output_debug_files=output_debug_files,
+            api_url=api_url,
+            do_summaries=do_summaries_from_config(),
+        )
 
-    total_input_tokens += input_tokens_num
-    total_output_tokens += output_tokens_num
-    total_number_of_calls += number_of_calls_num
-    total_time_taken += estimated_time_taken_number
-    out_message.append(output_messages_textbox)
-
-    # 4) Overall summary
-    (
-        _ref_df_loaded_3,
-        _unique_df_loaded_3,
-        _latest_batch_completed_no_loop_3,
-        _deduplication_input_files_status_3,
-        _working_name_3,
-        _unique_name_3,
-    ) = load_in_previous_data_files(overall_summarisation_input_files)
-
-    (
-        overall_summary_output_files,
-        overall_summarised_output_markdown,
-        summarised_output_df,
-        conversation_metadata_textbox,
-        input_tokens_num,
-        output_tokens_num,
-        number_of_calls_num,
-        estimated_time_taken_number,
-        output_messages_textbox,
-        out_logged_content,
-    ) = overall_summary(
-        topic_summary_df=master_unique_topics_df_revised_summaries_state,
-        model_choice=model_choice,
-        in_api_key=in_api_key,
-        temperature=temperature,
-        reference_data_file_name=working_data_file_name_textbox,
-        output_folder=output_folder,
-        chosen_cols=chosen_cols,
-        context_textbox=context_text,
-        aws_access_key_textbox=aws_access_key_text,
-        aws_secret_key_textbox=aws_secret_key_text,
-        aws_region_textbox=aws_region_text,
-        model_name_map=model_name_map_state,
-        hf_api_key_textbox=hf_api_key_text,
-        azure_endpoint_textbox=azure_endpoint_text,
-        local_model=model,
-        tokenizer=tokenizer,
-        assistant_model=assistant_model,
-        existing_logged_content=out_logged_content,
-        output_debug_files=output_debug_files,
-        api_url=api_url,
-    )
-
-    total_input_tokens += input_tokens_num
-    total_output_tokens += output_tokens_num
-    total_number_of_calls += number_of_calls_num
-    total_time_taken += estimated_time_taken_number
-    out_message.append(output_messages_textbox)
+        total_input_tokens += input_tokens_num
+        total_output_tokens += output_tokens_num
+        total_number_of_calls += number_of_calls_num
+        total_time_taken += estimated_time_taken_number
+        out_message.append(output_messages_textbox)
 
     out_message = "\n".join(out_message)
     out_message = (
@@ -7393,7 +7557,7 @@ def all_in_one_pipeline(
     final_display_markdown = (
         display_markdown_updated if display_markdown_updated else display_markdown
     )
-    if produce_structures_summary_choice == "Yes":
+    if produce_structures_summary_choice == "Yes" and not skip_post_extraction:
         final_display_markdown = unique_table_df_display_table_markdown
 
     return (

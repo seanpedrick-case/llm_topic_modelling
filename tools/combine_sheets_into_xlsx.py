@@ -15,7 +15,10 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-from tools.bedrock_guardrail_batch_status import load_guardrail_batch_status
+from tools.bedrock_guardrail_batch_status import (
+    GUARDRAIL_INTERVENTIONS_SHEET_NAME,
+    load_guardrail_batch_status,
+)
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
     ENABLE_ORIGINAL_DATA_REDACTION,
@@ -960,6 +963,8 @@ def collect_output_csvs_and_create_excel_output(
     missing_df_state_csv_path = ""
     overall_summary_csv_path = ""
     number_of_responses_with_topic_assignment = 0
+    unique_reference_numbers = []
+    intro_guardrail_note = ""
     # Track all temporary CSV files created for xlsx conversion
     temp_csv_files_for_cleanup = list()
 
@@ -1034,15 +1039,23 @@ def collect_output_csvs_and_create_excel_output(
         )
         temp_csv_files_for_cleanup.append(guardrail_batch_status_csv_path)
         csv_files.append(guardrail_batch_status_csv_path)
-        sheet_names.append("Batch status")
-        column_widths["Batch status"] = {
+        sheet_names.append(GUARDRAIL_INTERVENTIONS_SHEET_NAME)
+        column_widths[GUARDRAIL_INTERVENTIONS_SHEET_NAME] = {
             "A": 10,
             "B": 18,
             "C": 18,
             "D": 22,
-            "E": 70,
+            "E": 40,
+            "F": 70,
         }
-        wrap_text_columns["Batch status"] = ["E"]
+        wrap_text_columns[GUARDRAIL_INTERVENTIONS_SHEET_NAME] = ["E", "F"]
+        if master_reference_df_state.empty:
+            intro_guardrail_note = (
+                "No topic assignments were produced: one or more extraction batches "
+                f"were rejected by the Bedrock guardrail. See the "
+                f"{GUARDRAIL_INTERVENTIONS_SHEET_NAME} sheet for batch numbers, row "
+                "ranges, intervention categories (when tracing is enabled), and notes."
+            )
 
     # Always load response-level source data for cover-sheet stats (and for the
     # pivot when reference rows exist). Previously this only ran when
@@ -1055,14 +1068,14 @@ def collect_output_csvs_and_create_excel_output(
         file_data, chosen_cols, verify_titles="No"
     )
     short_file_name = os.path.basename(file_name)
+    if "Response ID" in basic_response_data.columns:
+        unique_reference_numbers = basic_response_data["Response ID"].tolist()
 
     if not master_reference_df_state.empty:
         # Simplify table to just responses column and the Response reference number
         reference_pivot_table = convert_reference_table_to_pivot_table(
             master_reference_df_state, basic_response_data
         )
-
-        unique_reference_numbers = basic_response_data["Response ID"].tolist()
 
         try:
             master_reference_df_state.rename(
@@ -1356,6 +1369,8 @@ def collect_output_csvs_and_create_excel_output(
         " Please contact the app administrator if you need any explanation on how to use the results."
         "LLMs are not 100% accurate and may produce biased or harmful outputs. All outputs from this analysis **need to be checked by a human** to check for harmful outputs, false information, and bias.",
     ]
+    if intro_guardrail_note:
+        intro_text.insert(1, intro_guardrail_note)
 
     # Get values for number of rows, number of responses, and number of responses longer than five words
     number_of_responses = basic_response_data.shape[0]
