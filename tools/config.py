@@ -231,6 +231,19 @@ INCLUDE_RESPONSE_LEVEL_SUMMARY = convert_string_to_boolean(
     get_or_create_env_var("INCLUDE_RESPONSE_LEVEL_SUMMARY", "False")
 )
 
+# When True, skip LLM calls whose primary purpose is summarisation (per-row Summary
+# during extraction is left blank; topic-level and overall summarisation steps are
+# skipped). Topic extraction and deduplication still run.
+SKIP_ALL_SUMMARISATION = convert_string_to_boolean(
+    get_or_create_env_var("SKIP_ALL_SUMMARISATION", "False")
+)
+
+
+def do_summaries_from_config() -> str:
+    """Return do_summaries flag for dedup_summaries ('Yes' or 'No')."""
+    return "No" if SKIP_ALL_SUMMARISATION else "Yes"
+
+
 # Add a second Topic response pivot sheet with General topics only across the top
 # (no Subtopic in column headers). Created only when at least one General topic is
 # present and is not blank / 'Not assessed'.

@@ -42,7 +42,9 @@ from tools.config import (
     OUTPUT_FOLDER,
     REASONING_SUFFIX,
     RUN_LOCAL_MODEL,
+    SKIP_ALL_SUMMARISATION,
     TIMEOUT_WAIT,
+    do_summaries_from_config,
     model_name_map,
 )
 from tools.dedup_summaries import (
@@ -54,6 +56,7 @@ from tools.dedup_summaries import (
 )
 from tools.helper_functions import (
     apply_forced_unassessed_general_topics,
+    blank_summary_columns,
     clean_column_name,
     convert_reference_table_to_pivot_table,
     create_topic_summary_df_from_reference_table,
@@ -114,15 +117,38 @@ from tools.prompts import (
     initial_table_system_prompt,
     negative_neutral_positive_sentiment_prompt,
     negative_or_positive_sentiment_prompt,
+    omit_per_row_summary_instruction,
     previous_table_introduction_default,
     structured_summary_prompt,
     validation_prompt_prefix_default,
     validation_prompt_suffix_default,
+    validation_prompt_suffix_no_summary,
     validation_prompt_suffix_struct_summary_default,
     validation_system_prompt,
 )
 
 max_tokens = LLM_MAX_NEW_TOKENS
+
+
+def _use_topic_extraction_prompts(produce_structured_summary_radio: str) -> bool:
+    """Topic table prompts (not structured-summary mode), including when summaries are skipped."""
+    if SKIP_ALL_SUMMARISATION:
+        return True
+    return produce_structured_summary_radio != "Yes"
+
+
+def _extraction_user_prompt(prompt: str) -> str:
+    if SKIP_ALL_SUMMARISATION:
+        return omit_per_row_summary_instruction(prompt)
+    return prompt
+
+
+def _validation_prompt_suffix_template():
+    if SKIP_ALL_SUMMARISATION:
+        return validation_prompt_suffix_no_summary
+    return validation_prompt_suffix_default
+
+
 timeout_wait = TIMEOUT_WAIT
 number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
 max_time_for_loop = MAX_TIME_FOR_LOOP
@@ -754,7 +780,7 @@ def validate_topics(
                         "Description", axis=1, inplace=True
                     )
 
-            if produce_structured_summary_radio == "Yes":
+            if not _use_topic_extraction_prompts(produce_structured_summary_radio):
                 if "General topic" in validation_topics_df_for_markdown.columns:
                     validation_topics_df_for_markdown = (
                         validation_topics_df_for_markdown.rename(
@@ -825,7 +851,7 @@ def validate_topics(
             #    additional_validation_issues_provided = "\n" + additional_validation_issues_provided
 
             # Format the validation prompt with the response table and topics
-            if produce_structured_summary_radio != "Yes":
+            if _use_topic_extraction_prompts(produce_structured_summary_radio):
                 validation_formatted_summary_prompt = add_existing_topics_prompt.format(
                     validate_prompt_prefix=validation_prompt_prefix_default,
                     response_table=validation_response_table_prompt,
@@ -842,7 +868,7 @@ def validate_topics(
                     previous_table=(
                         previous_table_content if show_previous_table == "Yes" else ""
                     ),
-                    validate_prompt_suffix=validation_prompt_suffix_default.format(
+                    validate_prompt_suffix=_validation_prompt_suffix_template().format(
                         additional_validation_issues=(
                             _confidence_validation_text(include_topic_confidence_radio)
                             + additional_validation_issues_provided
@@ -883,7 +909,9 @@ def validate_topics(
             ) = process_batch_with_llm(
                 is_first_batch=False,
                 formatted_system_prompt=validation_formatted_system_prompt,
-                formatted_prompt=validation_formatted_summary_prompt,
+                formatted_prompt=_extraction_user_prompt(
+                    validation_formatted_summary_prompt
+                ),
                 batch_file_path_details=validation_batch_file_path_details,
                 model_source=model_source,
                 model_choice=model_choice,
@@ -1798,7 +1826,7 @@ def validate_topics_wrapper(
         )
 
         # Handle structured summary format
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             if "General topic" in validation_display_table.columns:
                 validation_display_table = validation_display_table.rename(
                     columns={"General topic": "Main heading"}
@@ -2640,7 +2668,7 @@ def write_llm_output_and_logs(
         batch_basic_response_df, batch_size_number
     )
 
-    if produce_structured_summary_radio == "Yes":
+    if not _use_topic_extraction_prompts(produce_structured_summary_radio):
         existing_topics_df.rename(
             columns={"Main heading": "General topic", "Subheading": "Subtopic"},
             inplace=True,
@@ -2720,7 +2748,7 @@ def write_llm_output_and_logs(
         # but we still need to process them through the same logic as normal processing
 
         # Create empty topic_with_response_df since no new topics were generated
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             topic_with_response_df = pd.DataFrame(
                 columns=[
                     "Main heading",
@@ -2812,7 +2840,7 @@ def write_llm_output_and_logs(
     include_confidence = _include_topic_confidence(include_topic_confidence_radio)
     # Structured summaries are prompted for 3 columns: Main heading, Subheading, Summary
     valid_column_counts = {4, 5}
-    if produce_structured_summary_radio == "Yes":
+    if not _use_topic_extraction_prompts(produce_structured_summary_radio):
         valid_column_counts.add(3)
     if include_confidence:
         valid_column_counts.add(6)
@@ -2831,7 +2859,7 @@ def write_llm_output_and_logs(
     # If the table has 5 columns, rename them
     # Rename columns to ensure consistent use of data frames later in code
     if topic_with_response_df.shape[1] == 3 and (
-        produce_structured_summary_radio == "Yes"
+        not _use_topic_extraction_prompts(produce_structured_summary_radio)
         or (
             _find_parsed_table_column(topic_with_response_df, "Summary") is not None
             and _find_parsed_table_column(topic_with_response_df, "Response ID") is None
@@ -3013,7 +3041,7 @@ def write_llm_output_and_logs(
         assess_sentiment=assess_sentiment,
         include_confidence=include_confidence,
     )
-    if produce_structured_summary_radio != "Yes":
+    if _use_topic_extraction_prompts(produce_structured_summary_radio):
         topic_with_response_df = apply_forced_unassessed_general_topics(
             topic_with_response_df, force_zero_shot_radio
         )
@@ -3108,7 +3136,7 @@ def write_llm_output_and_logs(
     # Handle blank Response ID: remove rows if batch_size > 1, set to "1" if batch_size == 1
     # Skip this processing when producing structured summaries, as they don't have Response ID column
     if (
-        produce_structured_summary_radio != "Yes"
+        _use_topic_extraction_prompts(produce_structured_summary_radio)
         and "Response ID" in topic_with_response_df.columns
         and not topic_with_response_df.empty
     ):
@@ -3176,7 +3204,7 @@ def write_llm_output_and_logs(
         if not summary and (len(references_raw) > 30):
             summary = references_raw
 
-        if produce_structured_summary_radio != "Yes":
+        if _use_topic_extraction_prompts(produce_structured_summary_radio):
             summary = row_number_string_start + summary
 
         resolved_ids = []
@@ -3211,7 +3239,7 @@ def write_llm_output_and_logs(
         # every response in the current batch so rows are not dropped.
         if (
             not resolved_ids
-            and produce_structured_summary_radio == "Yes"
+            and not _use_topic_extraction_prompts(produce_structured_summary_radio)
             and isinstance(batch_basic_response_df, pd.DataFrame)
             and not batch_basic_response_df.empty
             and "Original Response ID" in batch_basic_response_df.columns
@@ -3479,7 +3507,7 @@ def write_llm_output_and_logs(
 
     out_topic_summary_df["Group"] = group_name
 
-    if produce_structured_summary_radio != "Yes":
+    if _use_topic_extraction_prompts(produce_structured_summary_radio):
         topic_with_response_df = apply_forced_unassessed_general_topics(
             topic_with_response_df, force_zero_shot_radio
         )
@@ -3489,6 +3517,12 @@ def write_llm_output_and_logs(
         out_topic_summary_df = apply_forced_unassessed_general_topics(
             out_topic_summary_df, force_zero_shot_radio
         )
+
+    if SKIP_ALL_SUMMARISATION:
+        topic_with_response_df = blank_summary_columns(topic_with_response_df)
+        out_reference_df = blank_summary_columns(out_reference_df)
+        if "Summary" in out_topic_summary_df.columns:
+            out_topic_summary_df = blank_summary_columns(out_topic_summary_df)
 
     topic_summary_df_out_path = (
         output_folder
@@ -4548,7 +4582,9 @@ def extract_topics(
                                 "Description", axis=1, inplace=True
                             )
 
-                    if produce_structured_summary_radio == "Yes":
+                    if not _use_topic_extraction_prompts(
+                        produce_structured_summary_radio
+                    ):
                         if "General topic" in topics_df_for_markdown.columns:
                             topics_df_for_markdown.rename(
                                 columns={"General topic": "Main heading"},
@@ -4659,7 +4695,7 @@ def extract_topics(
                         )
 
                     # Format the summary prompt with the response table and topics
-                    if produce_structured_summary_radio != "Yes":
+                    if _use_topic_extraction_prompts(produce_structured_summary_radio):
                         formatted_summary_prompt = add_existing_topics_prompt.format(
                             validate_prompt_prefix="",
                             response_table=response_table_prompt,
@@ -4701,7 +4737,9 @@ def extract_topics(
                     ) = process_batch_with_llm(
                         is_first_batch=False,
                         formatted_system_prompt=formatted_system_prompt,
-                        formatted_prompt=formatted_summary_prompt,
+                        formatted_prompt=_extraction_user_prompt(
+                            formatted_summary_prompt
+                        ),
                         batch_file_path_details=batch_file_path_details,
                         model_source=model_source,
                         model_choice=model_choice,
@@ -4782,7 +4820,9 @@ def extract_topics(
                         )
                     )
 
-                    if produce_structured_summary_radio == "Yes":
+                    if not _use_topic_extraction_prompts(
+                        produce_structured_summary_radio
+                    ):
                         unique_table_df_display_table = unique_table_df_display_table[
                             ["General topic", "Subtopic", "Summary"]
                         ]
@@ -4794,14 +4834,20 @@ def extract_topics(
                             inplace=True,
                         )
                     else:
+                        display_cols = ["General topic", "Subtopic"]
+                        if (
+                            _assess_sentiment(sentiment_checkbox)
+                            and "Sentiment" in unique_table_df_display_table.columns
+                        ):
+                            display_cols.append("Sentiment")
+                        display_cols.extend(["Number of responses", "Summary"])
+                        display_cols = [
+                            c
+                            for c in display_cols
+                            if c in unique_table_df_display_table.columns
+                        ]
                         unique_table_df_display_table = unique_table_df_display_table[
-                            [
-                                "General topic",
-                                "Subtopic",
-                                "Sentiment",
-                                "Number of responses",
-                                "Summary",
-                            ]
+                            display_cols
                         ]
 
                     unique_table_df_display_table_markdown = (
@@ -4824,7 +4870,7 @@ def extract_topics(
                     )
 
                     # Format the summary prompt with the response table and topics
-                    if produce_structured_summary_radio != "Yes":
+                    if _use_topic_extraction_prompts(produce_structured_summary_radio):
                         formatted_initial_table_prompt = initial_table_prompt.format(
                             validate_prompt_prefix="",
                             response_table=response_table_prompt,
@@ -4867,7 +4913,9 @@ def extract_topics(
                     ) = process_batch_with_llm(
                         is_first_batch=True,
                         formatted_system_prompt=formatted_system_prompt,
-                        formatted_prompt=formatted_initial_table_prompt,
+                        formatted_prompt=_extraction_user_prompt(
+                            formatted_initial_table_prompt
+                        ),
                         batch_file_path_details=batch_file_path_details,
                         model_source=model_source,
                         model_choice=model_choice,
@@ -5401,7 +5449,7 @@ def extract_topics(
             lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
         )
 
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             unique_table_df_display_table = unique_table_df_display_table[
                 ["General topic", "Subtopic", "Summary"]
             ]
@@ -6144,7 +6192,7 @@ def wrapper_extract_topics_per_column_value(
         unique_table_df_display_table = acc_topic_summary_df.apply(
             lambda col: col.map(lambda x: wrap_text(x, max_text_length=max_text_length))
         )
-        if produce_structured_summary_radio == "Yes":
+        if not _use_topic_extraction_prompts(produce_structured_summary_radio):
             unique_table_df_display_table = unique_table_df_display_table[
                 ["General topic", "Subtopic", "Summary", "Group"]
             ]
@@ -6291,7 +6339,7 @@ def discover_topics_from_sample(
     ensure_model_in_map(model_choice, model_name_map)
 
     warnings: list[str] = []
-    if produce_structured_summary_radio == "Yes":
+    if not _use_topic_extraction_prompts(produce_structured_summary_radio):
         raise ValueError(
             "Topic discovery cannot run with structured summaries enabled. "
             "Set 'Ask the model to produce structured summaries' to No."
@@ -7026,7 +7074,7 @@ def all_in_one_pipeline(
     log_files_output_list_state = out_log_files
 
     # If producing structured summaries, return the outputs after extraction
-    if produce_structures_summary_choice == "Yes":
+    if produce_structures_summary_choice == "Yes" and not SKIP_ALL_SUMMARISATION:
 
         # Write logged content to file
         column_clean = clean_column_name(chosen_cols, max_length=20)
@@ -7291,6 +7339,7 @@ def all_in_one_pipeline(
         local_model=model,
         tokenizer=tokenizer,
         assistant_model=assistant_model,
+        do_summaries=do_summaries_from_config(),
     )
 
     # Generate summarised_references_markdown from the sampled reference table
@@ -7346,6 +7395,7 @@ def all_in_one_pipeline(
         existing_logged_content=out_logged_content,
         output_debug_files=output_debug_files,
         api_url=api_url,
+        do_summaries=do_summaries_from_config(),
     )
 
     total_input_tokens += input_tokens_num
