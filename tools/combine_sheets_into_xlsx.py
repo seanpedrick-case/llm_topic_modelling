@@ -15,6 +15,7 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
+from tools.bedrock_guardrail_batch_status import load_guardrail_batch_status
 from tools.config import (
     ALL_IN_ONE_USE_LLM_DEDUP,
     ENABLE_ORIGINAL_DATA_REDACTION,
@@ -1021,6 +1022,27 @@ def collect_output_csvs_and_create_excel_output(
         sheet_names.append("Overall summary")
         column_widths["Overall summary"] = {"A": 15, "B": 120}
         wrap_text_columns["Overall summary"] = ["A", "B"]
+
+    guardrail_batch_status_df = load_guardrail_batch_status(output_folder)
+    guardrail_batch_status_csv_path = ""
+    if not guardrail_batch_status_df.empty:
+        guardrail_batch_status_csv_path = (
+            output_folder + "bedrock_guardrail_batch_status_for_xlsx.csv"
+        )
+        guardrail_batch_status_df.to_csv(
+            guardrail_batch_status_csv_path, index=False, encoding="utf-8-sig"
+        )
+        temp_csv_files_for_cleanup.append(guardrail_batch_status_csv_path)
+        csv_files.append(guardrail_batch_status_csv_path)
+        sheet_names.append("Batch status")
+        column_widths["Batch status"] = {
+            "A": 10,
+            "B": 18,
+            "C": 18,
+            "D": 22,
+            "E": 70,
+        }
+        wrap_text_columns["Batch status"] = ["E"]
 
     # Always load response-level source data for cover-sheet stats (and for the
     # pivot when reference rows exist). Previously this only ran when

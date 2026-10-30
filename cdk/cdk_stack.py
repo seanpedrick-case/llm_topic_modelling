@@ -42,6 +42,9 @@ from cdk_config import (
     AWS_ACCOUNT_ID,
     AWS_MANAGED_TASK_ROLES_LIST,
     AWS_REGION,
+    BEDROCK_GUARDRAIL_IDENTIFIER,
+    BEDROCK_GUARDRAIL_TRACE,
+    BEDROCK_GUARDRAIL_VERSION,
     BEDROCK_MODEL_INVOCATION_EMBEDDING_ENABLED,
     BEDROCK_MODEL_INVOCATION_IMAGE_ENABLED,
     BEDROCK_MODEL_INVOCATION_LOG_GROUP_NAME,
@@ -114,6 +117,7 @@ from cdk_config import (
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
     ENABLE_APPLICATION_RESOURCE_GROUP,
+    ENABLE_BEDROCK_GUARDRAILS,
     ENABLE_BEDROCK_MODEL_INVOCATION_LOGGING,
     ENABLE_DYNAMODB_USAGE_LOG_EXPORT,
     ENABLE_ECS_SERVICE_CONNECT,
@@ -184,6 +188,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     allow_express_load_balancer_to_ecs_security_group,
     attach_managed_policy_arns,
     attach_pi_agent_to_shared_alb,
+    bedrock_guardrail_env_overrides_for_defaults,
     build_ecs_execution_role_kms_policy,
     build_ecs_task_role_inline_policy,
     build_express_gateway_primary_container,
@@ -2756,6 +2761,14 @@ class CdkStack(Stack):
                         seed_asset_dir = os.path.join(
                             os.path.dirname(__file__), "config", "headless_s3_seed"
                         )
+                        headless_guardrail_overrides = (
+                            bedrock_guardrail_env_overrides_for_defaults(
+                                ENABLE_BEDROCK_GUARDRAILS,
+                                BEDROCK_GUARDRAIL_IDENTIFIER,
+                                BEDROCK_GUARDRAIL_VERSION,
+                                BEDROCK_GUARDRAIL_TRACE,
+                            )
+                        )
                         create_headless_s3_batch_seed(
                             self,
                             "HeadlessBatchS3Seed",
@@ -2764,6 +2777,7 @@ class CdkStack(Stack):
                             seed_asset_directory=seed_asset_dir,
                             s3_outputs_bucket_name=output_bucket.bucket_name,
                             default_params_key=S3_BATCH_DEFAULT_PARAMS_KEY,
+                            env_overrides=headless_guardrail_overrides or None,
                         )
                         CfnOutput(
                             self,
