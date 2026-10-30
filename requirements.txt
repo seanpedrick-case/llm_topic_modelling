@@ -3,8 +3,8 @@ gradio>=6.26.0,<7
 transformers>=5.19.0,<6
 spaces
 boto3>=1.43.121,<2
-pandas>=3.0.6,<4
-pyarrow>=25.0.1,<26
+pandas>=2.3.3,<4
+pyarrow>=26.0.0,<30
 openpyxl>=3.1.5,<4
 pyexcel>=0.7.6,<1
 markdown>=3.11,<4
