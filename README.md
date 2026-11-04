@@ -39,6 +39,8 @@ The guardrail must be created in the **same AWS Region** as Bedrock model invoca
 
 **IAM:** The runtime role needs `bedrock:InvokeModel` (or inference-profile access) plus `bedrock:ApplyGuardrail` on the guardrail ARN. The ECS task role’s `AmazonBedrockLimitedAccess` managed policy may not include `ApplyGuardrail`; add a scoped inline policy via `POLICY_FILE_LOCATIONS` in CDK if Converse returns access denied.
 
+Guardrails apply to **topic extraction and validation** Converse calls (raw response text). They are **not** attached for LLM topic deduplication, per-topic summarisation, or overall summary, which use aggregated topic tables rather than citizen verbatim text.
+
 When a batch is blocked (`stopReason: guardrail_intervened`), topic extraction **continues** with other batches: affected responses get no assignments (they may appear under **Missing responses** in the workbook). If any batch was guardrail-blocked, the combined xlsx includes a **Guardrails interventions** sheet listing batch number, row range, task type, and intervention categories when guardrail tracing is enabled (`BEDROCK_GUARDRAIL_TRACE`).
 
 # Installation guide

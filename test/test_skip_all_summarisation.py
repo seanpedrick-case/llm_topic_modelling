@@ -5,6 +5,7 @@ import unittest
 import pandas as pd
 
 from tools.config import SKIP_ALL_SUMMARISATION, do_summaries_from_config
+from tools.dedup_summaries import _pass_through_summarisation_outputs
 from tools.helper_functions import blank_summary_columns
 from tools.prompts import initial_table_prompt, omit_per_row_summary_instruction
 
@@ -30,6 +31,35 @@ class TestSkipAllSummarisation(unittest.TestCase):
     def test_do_summaries_from_config_matches_flag(self):
         expected = "No" if SKIP_ALL_SUMMARISATION else "Yes"
         self.assertEqual(do_summaries_from_config(), expected)
+
+    def test_pass_through_summarisation_outputs(self):
+        reference = pd.DataFrame(
+            {
+                "Response ID": ["1"],
+                "General topic": ["Housing"],
+                "Subtopic": ["Repairs"],
+                "Sentiment": ["Negative"],
+                "Summary": ["should not appear"],
+                "Group": ["All"],
+            }
+        )
+        topics = pd.DataFrame(
+            {
+                "General topic": ["Housing"],
+                "Subtopic": ["Repairs"],
+                "Sentiment": ["Negative"],
+                "Group": ["All"],
+                "Number of responses": [1],
+                "Summary": ["ignored"],
+            }
+        )
+        _, topic_out, ref_out, *_ = _pass_through_summarisation_outputs(
+            reference, topics, reference, []
+        )
+        self.assertFalse(topic_out.empty)
+        self.assertFalse(ref_out.empty)
+        self.assertEqual(topic_out["Revised summary"].iloc[0], "")
+        self.assertNotIn("Summary", ref_out.columns)
 
 
 if __name__ == "__main__":
