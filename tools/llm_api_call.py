@@ -53,6 +53,7 @@ from tools.config import (
     model_name_map,
 )
 from tools.dedup_summaries import (
+    _pass_through_summarisation_outputs,
     deduplicate_topics,
     deduplicate_topics_llm,
     overall_summary,
@@ -7523,6 +7524,25 @@ def all_in_one_pipeline(
         out_message + "\n" + f"Overall time for all processes: {total_time_taken:.2f}s"
     )
     print(out_message)
+
+    if SKIP_ALL_SUMMARISATION and (
+        master_reference_df_revised_summaries_state is None
+        or master_reference_df_revised_summaries_state.empty
+        or master_unique_topics_df_revised_summaries_state is None
+        or master_unique_topics_df_revised_summaries_state.empty
+    ):
+        if not ref_df_after_dedup.empty and not unique_df_after_dedup.empty:
+            (
+                summary_reference_table_sample_state,
+                master_unique_topics_df_revised_summaries_state,
+                master_reference_df_revised_summaries_state,
+                *_rest,
+            ) = _pass_through_summarisation_outputs(
+                ref_df_after_dedup,
+                unique_df_after_dedup,
+                ref_df_after_dedup,
+                out_logged_content if isinstance(out_logged_content, list) else list(),
+            )
 
     # Write logged content to file
     column_clean = clean_column_name(chosen_cols, max_length=20)

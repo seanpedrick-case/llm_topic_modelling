@@ -1362,6 +1362,7 @@ def deduplicate_topics_llm(
         CHOSEN_LOCAL_MODEL_TYPE=CHOSEN_LOCAL_MODEL_TYPE,
         random_seed=LLM_SEED,
         api_url=api_url,
+        apply_bedrock_guardrails=False,
     )
 
     # Generate debug files if enabled
@@ -2276,9 +2277,14 @@ def sample_reference_table_summaries(
         }
 
         if "Revised summary" in reference_df.columns:
-            out_message = "Summary has already been created for this file"
-            print(out_message)
-            raise Exception(out_message)
+            if SKIP_ALL_SUMMARISATION:
+                reference_df = reference_df.drop(
+                    columns=["Revised summary"], errors="ignore"
+                )
+            else:
+                out_message = "Summary has already been created for this file"
+                print(out_message)
+                raise Exception(out_message)
 
         for group_keys, reference_df_group in reference_df_grouped:
             if len(reference_df_group["General topic"]) > 1:
@@ -2768,6 +2774,7 @@ def summarise_output_topics_query(
         assistant_model=assistant_model,
         assistant_prefill=summary_assistant_prefill,
         api_url=api_url,
+        apply_bedrock_guardrails=False,
     )
 
     summarised_output = re.sub(
@@ -2979,6 +2986,120 @@ def process_debug_output_iteration(
     )
 
 
+def _pass_through_summarisation_outputs(
+    sampled_reference_table_df: pd.DataFrame,
+    topic_summary_df: pd.DataFrame,
+    reference_table_df: pd.DataFrame,
+    existing_logged_content: list,
+) -> tuple:
+    """Build summarisation-step outputs with empty summaries and no LLM calls."""
+    tic = time.perf_counter()
+
+    reference_table_df_revised = reference_table_df.copy()
+    reference_table_df_revised = blank_summary_columns(reference_table_df_revised)
+    reference_table_df_revised["Revised summary"] = ""
+    reference_table_df_revised = reference_table_df_revised.drop(
+        "Summary", axis=1, errors="ignore"
+    )
+
+    topic_summary_df_revised = topic_summary_df.copy()
+    topic_summary_df_revised = blank_summary_columns(topic_summary_df_revised)
+    topic_summary_df_revised["Revised summary"] = ""
+    topic_summary_df_revised = topic_summary_df_revised.drop(
+        "Summary", axis=1, errors="ignore"
+    )
+
+    if "Sentiment" in topic_summary_df_revised.columns:
+        topic_summary_df_revised = topic_summary_df_revised.loc[
+            topic_summary_df_revised["Sentiment"] != "Not Mentioned", :
+        ]
+    if "Sentiment" in reference_table_df_revised.columns:
+        reference_table_df_revised = reference_table_df_revised.loc[
+            reference_table_df_revised["Sentiment"] != "Not Mentioned", :
+        ]
+
+    topic_summary_df_revised = topic_summary_df_revised.reset_index(drop=True)
+    topic_summary_df_revised["Topic number"] = range(
+        1, len(topic_summary_df_revised) + 1
+    )
+
+    preferred_topic_cols = [
+        "General topic",
+        "Subtopic",
+        "Sentiment",
+        "Group",
+        "Number of responses",
+        "Revised summary",
+        "Topic number",
+    ]
+    topic_summary_df_revised = topic_summary_df_revised[
+        [c for c in preferred_topic_cols if c in topic_summary_df_revised.columns]
+    ]
+
+    reference_table_df_revised = reference_table_df_revised.drop(
+        "Topic number", axis=1, errors="ignore"
+    )
+    merge_cols = ["General topic", "Subtopic", "Sentiment", "Group"]
+    merge_cols = [c for c in merge_cols if c in reference_table_df_revised.columns]
+    topic_merge_cols = [
+        c
+        for c in merge_cols + ["Topic number", "Revised summary"]
+        if c in topic_summary_df_revised.columns
+    ]
+    if topic_merge_cols and merge_cols:
+        reference_table_df_revised = reference_table_df_revised.merge(
+            topic_summary_df_revised[topic_merge_cols],
+            on=merge_cols,
+            how="left",
+            suffixes=("", "_topic"),
+        )
+        if "Revised summary_topic" in reference_table_df_revised.columns:
+            reference_table_df_revised["Revised summary"] = reference_table_df_revised[
+                "Revised summary_topic"
+            ].fillna("")
+            reference_table_df_revised = reference_table_df_revised.drop(
+                columns=["Revised summary_topic"], errors="ignore"
+            )
+    elif "Revised summary" not in reference_table_df_revised.columns:
+        reference_table_df_revised["Revised summary"] = ""
+
+    sampled_out = sampled_reference_table_df.copy()
+    sampled_out = blank_summary_columns(sampled_out)
+    sampled_out["Revised summary"] = ""
+
+    if isinstance(existing_logged_content, pd.DataFrame):
+        existing_logged_content = existing_logged_content.to_dict(orient="records")
+    out_logged_content = (
+        existing_logged_content
+        if isinstance(existing_logged_content, list)
+        else list(existing_logged_content or [])
+    )
+
+    summarised_output_markdown = topic_summary_df_revised.to_markdown(index=False)
+    time_taken = time.perf_counter() - tic
+    out_message = f"Topic summarisation skipped (no LLM). Total time: {round(float(time_taken), 1)}s"
+    print(out_message)
+
+    return (
+        sampled_out,
+        topic_summary_df_revised,
+        reference_table_df_revised,
+        list(),
+        list(),
+        0,
+        "",
+        summarised_output_markdown,
+        list(),
+        list(),
+        0,
+        0,
+        0,
+        time_taken,
+        out_message,
+        out_logged_content,
+    )
+
+
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def summarise_output_topics(
     sampled_reference_table_df: pd.DataFrame,
@@ -3109,6 +3230,14 @@ def summarise_output_topics(
         out_message = "Please upload a unique topic table and reference table file to continue with summarisation."
         print(out_message)
         raise Exception(out_message)
+
+    if do_summaries != "Yes":
+        return _pass_through_summarisation_outputs(
+            sampled_reference_table_df,
+            topic_summary_df,
+            reference_table_df,
+            existing_logged_content,
+        )
 
     if "Revised summary" in reference_table_df.columns:
         out_message = "Summary has already been created for this file"
@@ -4257,6 +4386,42 @@ def wrapper_summarise_output_topics_per_group(
         acc_summarised_output_markdown = topic_summary_df_revised_display.to_markdown(
             index=False
         )
+
+    if (
+        do_summaries != "Yes"
+        and acc_topic_summary_df_revised.empty
+        and acc_reference_table_df_revised.empty
+        and not reference_table_df.empty
+        and not topic_summary_df.empty
+    ):
+        (
+            acc_sampled_reference_table_df,
+            acc_topic_summary_df_revised,
+            acc_reference_table_df_revised,
+            _,
+            _,
+            acc_latest_summary_completed,
+            _,
+            acc_summarised_output_markdown,
+            _,
+            _,
+            acc_input_tokens,
+            acc_output_tokens,
+            acc_number_of_calls,
+            acc_total_time_taken,
+            pass_message,
+            acc_logged_content,
+        ) = _pass_through_summarisation_outputs(
+            (
+                sampled_reference_table_df
+                if not sampled_reference_table_df.empty
+                else reference_table_df
+            ),
+            topic_summary_df,
+            reference_table_df,
+            all_groups_logged_content,
+        )
+        out_message.append(pass_message)
 
     out_message = "\n".join(out_message)
     out_message = (

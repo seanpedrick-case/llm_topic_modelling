@@ -27,6 +27,7 @@ from tools.config import (
     INCLUDE_GENERAL_TOPIC_PIVOT_TABLE,
     INCLUDE_RESPONSE_LEVEL_SUMMARY,
     OUTPUT_FOLDER,
+    SKIP_ALL_SUMMARISATION,
 )
 from tools.config import model_name_map as global_model_name_map
 from tools.helper_functions import (
@@ -919,6 +920,10 @@ def collect_output_csvs_and_create_excel_output(
     if structured_summaries == "Yes":
         structured_summaries = True
     else:
+        structured_summaries = False
+
+    # SKIP runs the normal topic-extraction pipeline; do not hide response/pivot sheets.
+    if SKIP_ALL_SUMMARISATION:
         structured_summaries = False
 
     run_settings = _build_run_settings_metadata(
