@@ -1192,16 +1192,24 @@ def _is_bedrock_sampling_param_deprecated_error(error: Exception) -> bool:
     )
 
 
-def _bedrock_guardrail_config_for_converse() -> dict | None:
+def _bedrock_guardrails_active(apply_bedrock_guardrails: bool = True) -> bool:
+    """Whether to attach guardrailConfig on this Converse call."""
+    from tools.config import ENABLE_BEDROCK_GUARDRAILS
+
+    return bool(ENABLE_BEDROCK_GUARDRAILS and apply_bedrock_guardrails)
+
+
+def _bedrock_guardrail_config_for_converse(
+    apply_bedrock_guardrails: bool = True,
+) -> dict | None:
     """Build guardrailConfig for Converse when enabled in tools.config."""
     from tools.config import (
         BEDROCK_GUARDRAIL_IDENTIFIER,
         BEDROCK_GUARDRAIL_TRACE,
         BEDROCK_GUARDRAIL_VERSION,
-        ENABLE_BEDROCK_GUARDRAILS,
     )
 
-    if not ENABLE_BEDROCK_GUARDRAILS:
+    if not _bedrock_guardrails_active(apply_bedrock_guardrails):
         return None
     guardrail_config = {
         "guardrailIdentifier": BEDROCK_GUARDRAIL_IDENTIFIER,
@@ -1219,6 +1227,7 @@ def _bedrock_converse(
     messages: list,
     system_prompt_list: list,
     inference_config: dict,
+    apply_bedrock_guardrails: bool = True,
 ) -> dict:
     """Invoke Bedrock Converse with optional guardrailConfig."""
     converse_kwargs = {
@@ -1227,7 +1236,7 @@ def _bedrock_converse(
         "system": system_prompt_list,
         "inferenceConfig": inference_config,
     }
-    guardrail_config = _bedrock_guardrail_config_for_converse()
+    guardrail_config = _bedrock_guardrail_config_for_converse(apply_bedrock_guardrails)
     if guardrail_config:
         converse_kwargs["guardrailConfig"] = guardrail_config
     return bedrock_runtime.converse(**converse_kwargs)
@@ -1273,6 +1282,7 @@ def call_aws_bedrock(
     model_choice: str,
     bedrock_runtime: boto3.Session.client,
     assistant_prefill: str = "",
+    apply_bedrock_guardrails: bool = True,
 ) -> ResponseObject:
     """
     This function sends a request to AWS Claude with the following parameters:
@@ -1350,6 +1360,7 @@ def call_aws_bedrock(
             messages=messages,
             system_prompt_list=system_prompt_list,
             inference_config=inference_config,
+            apply_bedrock_guardrails=apply_bedrock_guardrails,
         )
     except Exception as e:
         if (
@@ -1369,6 +1380,7 @@ def call_aws_bedrock(
                 messages=messages,
                 system_prompt_list=system_prompt_list,
                 inference_config=inference_config,
+                apply_bedrock_guardrails=apply_bedrock_guardrails,
             )
         else:
             raise
@@ -1638,6 +1650,7 @@ def send_request(
     assistant_prefill="",
     progress=Progress(track_tqdm=True),
     api_url: str = None,
+    apply_bedrock_guardrails: bool = True,
 ) -> Tuple[str, List[dict]]:
     """Sends a request to a language model and manages the conversation history.
 
@@ -1734,6 +1747,7 @@ def send_request(
                     model_choice,
                     bedrock_runtime=bedrock_runtime,
                     assistant_prefill=assistant_prefill,
+                    apply_bedrock_guardrails=apply_bedrock_guardrails,
                 )
 
                 if response.guardrail_intervened:
@@ -2089,6 +2103,7 @@ def process_requests(
     master: bool = False,
     assistant_prefill="",
     api_url: str = None,
+    apply_bedrock_guardrails: bool = True,
 ) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str, bool]:
     """
     Processes a list of prompts by sending them to the model, appending the responses to the conversation history, and updating the whole conversation and metadata.
@@ -2142,6 +2157,7 @@ def process_requests(
             bedrock_runtime=bedrock_runtime,
             model_source=model_source,
             api_url=api_url,
+            apply_bedrock_guardrails=apply_bedrock_guardrails,
         )
 
         responses.append(response)
@@ -2242,6 +2258,7 @@ def call_llm_with_markdown_table_checks(
     CHOSEN_LOCAL_MODEL_TYPE: str = CHOSEN_LOCAL_MODEL_TYPE,
     random_seed: int = seed,
     api_url: str = None,
+    apply_bedrock_guardrails: bool = True,
 ) -> Tuple[List[ResponseObject], List[dict], List[str], List[str], str, bool]:
     """
     Call the large language model with checks for a valid markdown table.
@@ -2312,6 +2329,7 @@ def call_llm_with_markdown_table_checks(
             master=master,
             assistant_prefill=assistant_prefill,
             api_url=api_url,
+            apply_bedrock_guardrails=apply_bedrock_guardrails,
         )
         guardrail_intervened = guardrail_intervened or batch_guardrail_intervened
 

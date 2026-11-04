@@ -47,6 +47,25 @@ class TestBedrockGuardrailConfig(unittest.TestCase):
                 },
             )
 
+    def test_guardrail_config_none_when_call_opts_out(self):
+        with (
+            patch(
+                "tools.config.ENABLE_BEDROCK_GUARDRAILS",
+                True,
+            ),
+            patch(
+                "tools.config.BEDROCK_GUARDRAIL_IDENTIFIER",
+                "abc123",
+            ),
+            patch(
+                "tools.config.BEDROCK_GUARDRAIL_VERSION",
+                "1",
+            ),
+        ):
+            self.assertIsNone(
+                _bedrock_guardrail_config_for_converse(apply_bedrock_guardrails=False)
+            )
+
     def test_guardrail_config_omits_trace_when_disabled(self):
         with (
             patch(
@@ -122,6 +141,41 @@ class TestCallAwsBedrockGuardrails(unittest.TestCase):
         self.assertEqual(kwargs["guardrailConfig"]["guardrailIdentifier"], "gr-id")
         self.assertEqual(kwargs["guardrailConfig"]["guardrailVersion"], "1")
         self.assertNotIn("trace", kwargs["guardrailConfig"])
+
+    def test_converse_omits_guardrail_config_when_call_opts_out(self):
+        runtime = MagicMock()
+        runtime.converse.return_value = self._mock_converse_response("ok")
+
+        with (
+            patch(
+                "tools.config.ENABLE_BEDROCK_GUARDRAILS",
+                True,
+            ),
+            patch(
+                "tools.config.BEDROCK_GUARDRAIL_IDENTIFIER",
+                "gr-id",
+            ),
+            patch(
+                "tools.config.BEDROCK_GUARDRAIL_VERSION",
+                "1",
+            ),
+            patch(
+                "tools.config.BEDROCK_GUARDRAIL_TRACE",
+                "disabled",
+            ),
+        ):
+            call_aws_bedrock(
+                "user prompt",
+                "system",
+                0.5,
+                100,
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+                runtime,
+                apply_bedrock_guardrails=False,
+            )
+
+        kwargs = runtime.converse.call_args.kwargs
+        self.assertNotIn("guardrailConfig", kwargs)
 
     def test_converse_omits_guardrail_config_when_disabled(self):
         runtime = MagicMock()
