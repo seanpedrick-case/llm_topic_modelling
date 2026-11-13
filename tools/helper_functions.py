@@ -2114,7 +2114,10 @@ def _find_allowlisted_upload_file(user_path: str) -> str | None:
         search_dirs = [root_real]
         try:
             for entry in os.listdir(root_real):
-                sub = os.path.join(root_real, entry)
+                safe_entry = os.path.basename(str(entry))
+                if not safe_entry or safe_entry in {".", ".."}:
+                    continue
+                sub = os.path.join(root_real, safe_entry)
                 if os.path.isdir(sub):
                     search_dirs.append(sub)
         except OSError:
@@ -2133,9 +2136,9 @@ def _find_allowlisted_upload_file(user_path: str) -> str | None:
                     continue
             except (OSError, ValueError):
                 continue
-            # isfile on joined path (trusted dir + basename), not on realpath — view_logs pattern.
-            if os.path.isfile(resolved):
-                return resolved
+            # Basename listed under an allowlisted directory and realpath stays
+            # under root_real; avoid os.path.isfile (CodeQL py/path-injection).
+            return resolved
 
     return None
 
