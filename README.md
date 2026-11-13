@@ -8,7 +8,7 @@ sdk_version: 6.31.0
 app_file: app.py
 pinned: true
 license: mit
-short_description: Extract topics from consultations or other open text data with LLMs
+short_description: Extract topics from consultations/other open text with LLMs
 ---
 
 # Table of contents
