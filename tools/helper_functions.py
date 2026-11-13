@@ -1332,7 +1332,7 @@ def put_columns_in_df(in_file: List[str]):
         )
 
     for file in in_file:
-        file_name = file.name
+        file_name = resolve_uploaded_file_path(file)
         file_type = detect_file_type(file_name)
         # print("File type is:", file_type)
 
@@ -2077,6 +2077,42 @@ _PIVOT_ID_COL_ALIASES = (
 _PIVOT_RESERVED_COLS = {"all"}
 
 
+def _resolve_missing_uploaded_file_path(candidate: str) -> str:
+    """
+    Return an on-disk path for bundled example files when Gradio cache paths are missing.
+
+    On Hugging Face Spaces (especially ZeroGPU), example files are copied into
+    ``gradio_tmp`` for the UI, but a later GPU task may receive that cache path
+    after the file no longer exists on the worker. Fall back to ``example_data/``.
+    """
+    candidate = str(candidate).strip().strip("'\"")
+    if not candidate:
+        return candidate
+    if os.path.isfile(candidate):
+        return os.path.realpath(candidate)
+
+    norm = candidate.replace("\\", "/")
+    if "example_data/" in norm:
+        rel = norm.split("example_data/", 1)[-1]
+        for bundled in (
+            os.path.join("example_data", rel),
+            os.path.abspath(os.path.join("example_data", rel)),
+        ):
+            if os.path.isfile(bundled):
+                return os.path.realpath(bundled)
+
+    basename = os.path.basename(norm)
+    if basename:
+        for bundled in (
+            os.path.join("example_data", basename),
+            os.path.abspath(os.path.join("example_data", basename)),
+        ):
+            if os.path.isfile(bundled):
+                return os.path.realpath(bundled)
+
+    return candidate
+
+
 def resolve_uploaded_file_path(file_obj: Any) -> str:
     """Resolve a Gradio File / FileData / path string to a filesystem path."""
     if file_obj is None:
@@ -2085,14 +2121,23 @@ def resolve_uploaded_file_path(file_obj: Any) -> str:
         if not file_obj:
             raise ValueError("No file uploaded.")
         return resolve_uploaded_file_path(file_obj[0])
+    if isinstance(file_obj, dict):
+        for key in ("path", "name"):
+            raw = file_obj.get(key)
+            if raw:
+                return _resolve_missing_uploaded_file_path(str(raw))
+        raise ValueError("Could not resolve uploaded file path.")
     if isinstance(file_obj, str):
         path = file_obj.strip().strip("'\"")
         if not path:
             raise ValueError("No file uploaded.")
-        return path
+        return _resolve_missing_uploaded_file_path(path)
+    path = getattr(file_obj, "path", None)
+    if path:
+        return _resolve_missing_uploaded_file_path(str(path))
     path = getattr(file_obj, "name", None)
     if path:
-        return str(path)
+        return _resolve_missing_uploaded_file_path(str(path))
     raise ValueError("Could not resolve uploaded file path.")
 
 
