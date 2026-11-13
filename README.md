@@ -4,44 +4,60 @@ emoji: 📚
 colorFrom: purple
 colorTo: yellow
 sdk: gradio
-sdk_version: 6.30.0
+sdk_version: 6.31.0
 app_file: app.py
 pinned: true
 license: mit
-short_description: Extract topics from open text data with LLMs
+short_description: Extract topics from consultations or other open text data with LLMs
 ---
 
-# Large language model topic modelling
+# Table of contents
 
-Extract topics and summarise outputs using Large Language Models (LLMs), either local or cloud based (AWS, Azure, Gemini). The app will query the LLM with batches of responses to produce summary tables, which are then compared iteratively to output a table with the general topics, subtopics, topic sentiment, and a topic summary. Instructions on use can be found in the README.md file. You can try out examples by clicking on one of the example datasets on the main app page, which will show you example outputs from a local model run. API keys for cloud services can be entered on the settings page.
+- [Introduction](#introduction)
+- [Using the app quickstart](#using-the-gui-interface-quickstart---test-the-app-with-built-in-examples)
+- [Installation guide (local GUI version)](#installation-guide)
+- [Using the GUI interface](#using-the-gui-interface)
+- [Reading the output results file](#using-the-output-results-xlsx-file)
+
+
+# Introduction
+
+The Large language model topic modelling app is designed to help you analyse open text responses from consultations, surveys, or other sources of feedback. It uses advanced natural language processing techniques to identify key topics and themes within your data that can inform decision-making and reporting. Used correctly, the outputs can save you time in analysing large volumes of text data, and help you identify key themes and topics that may not be immediately obvious from a manual review. However, it is not a tool that can be used without human oversight. 
+
+Here's how it can be used:
+
+- Without a user-suggested list of topics, the tool can generate an exploratory AI-suggested list of topics/themes from your data that can be used to guide your analysis.
+- If you have an approved list of topics/themes, you can use this app to assign your data to these topics/themes and generate a summary of the results that should then be verified before further use. **Important: Your topic names should be as clear as possible, and contain all the information necessary for someone unfamiliar with your consultation to fully undertand the meaning. Also, a maximum of 35 topics is highly recommended.**
+- You can also create analyses based on groups of data (e.g., by location, department, or other categories) to see how topics/themes vary across different segments of your data.
+- You can analyse the sentiment of responses (e.g., positive, negative, neutral) to understand how people feel about different topics/themes.
+
+**Note that the AI may not always agree with a human assessment of the topics/themes, so you should check the outputs carefully before using them in any reports or decision-making. Also, never copy and paste the outputs directly into reports without checking them first, as the AI may hallucinate or create biased outputs.**
+
+When accounting for ambiguous topics and analyst errors, the system has been shown to agree ~80% of the time with human analysts for real surveys where there are a moderate number of topics (~35 or less) to choose from. With this in mind, if providing a list of topics, it is important that their meaning is as clear as possible, and that their meaning does not overlap with other topics in the list.
+
+Below is an overview of how to access and use the app.
 
 NOTE: Large language models are not 100% accurate and may produce biased or harmful outputs. All outputs from this app **absolutely need to be checked by a human** to check for harmful outputs, hallucinations, and accuracy.
 
-Basic use:
-1. On the front page, choose your model for inference. Gemma 3/GPT-OSS will use 'on-device' inference. Calls to Gemini or AWS will require an API key that can be input on the 'LLM and topic extraction' page.
-1. Upload a csv/xlsx/parquet file containing at least one open text column.
-2. Select the relevant open text column from the dropdown.
-3. If you have your own suggested (zero shot) topics, upload this (see examples folder for an example file)
-4. Write a one sentence description of the consultation/context of the open text.
-5. Click 'Extract topics, deduplicate, and summarise'. This will run through the whole analysis process from topic extraction, to topic deduplication, to topic-level and overall summaries.
-6. A summary xlsx file workbook will be created on the front page in the box 'Overall summary xlsx file'. This will combine all the results from the different processes into one workbook.
+## Using the GUI interface quickstart - Test the app with built-in examples
 
-### Optional: Amazon Bedrock Guardrails (AWS models)
+The LLM topic modelling app comes with built-in example datasets to help you get started quickly. To test the application:
 
-When `RUN_AWS_BEDROCK_MODELS=1`, you can attach an existing Bedrock guardrail to every `Converse` call by setting variables in `config/app_config.env` (see `tools/config.py`):
+1. Try the example version of the app on Hugging Face [here](https://huggingface.co/spaces/seanpedrickcase/llm_topic_modelling), or [follow the installation instructions below to install locally](#installation-guide)
+2. Open the **'All in one topic extraction and summarisation'** tab
+3. Scroll down to the **'Try topic extraction and summarisation with an example dataset'** section
+4. Select one of the provided examples:
+   - **Main Street construction consultation** - A simple consultation dataset
+   - **Case notes for young people** - Social care case notes with grouped data
+   - **Main Street construction consultation with suggested topics** - Example showing how to provide candidate topics
+   - **Case notes grouped by person with suggested topics** - Example using grouped data with suggested topics
+   - **Case notes structured summary with suggested topics** - Example of structured summaries
 
-- `ENABLE_BEDROCK_GUARDRAILS=True`
-- `BEDROCK_GUARDRAIL_IDENTIFIER` — guardrail ID or ARN from the AWS console / CloudFormation output
-- `BEDROCK_GUARDRAIL_VERSION` — published version number (not `DRAFT` in production)
-- `BEDROCK_GUARDRAIL_TRACE` — `disabled`, `enabled`, or `enabled_full`. Defaults to **`enabled`** when `ENABLE_BEDROCK_GUARDRAILS` is true (so the **Guardrails interventions** sheet can list policy categories). Use `disabled` only if you do not want trace data returned from Bedrock.
+5. Click the example to load the data and populate the form fields
+6. Click the **'Extract topics...'** button to run the analysis
+7. Download the Excel output file to see the results (outputs explained [here](#using-the-output-results-xlsx-file))
 
-The guardrail must be created in the **same AWS Region** as Bedrock model invocation (`AWS_REGION`). Content filters, denied topics, and PII actions are defined on that guardrail version in AWS; the app only passes ID and version. For topic modelling, avoid chatbot-style topic denies on citizen open text; prefer PII and harmful-content policies. Optional Presidio redaction (`ENABLE_INPUT_REDACTION`, `REDACTION_ENTITIES`) runs before prompts are built and can be kept aligned with the guardrail’s PII policy when you publish new guardrail versions.
-
-**IAM:** The runtime role needs `bedrock:InvokeModel` (or inference-profile access) plus `bedrock:ApplyGuardrail` on the guardrail ARN. The ECS task role’s `AmazonBedrockLimitedAccess` managed policy may not include `ApplyGuardrail`; add a scoped inline policy via `POLICY_FILE_LOCATIONS` in CDK if Converse returns access denied.
-
-Guardrails apply to **topic extraction and validation** Converse calls (raw response text). They are **not** attached for LLM topic deduplication, per-topic summarisation, or overall summary, which use aggregated topic tables rather than citizen verbatim text.
-
-When a batch is blocked (`stopReason: guardrail_intervened`), topic extraction **continues** with other batches: affected responses get no assignments (they may appear under **Missing responses** in the workbook). If any batch was guardrail-blocked, the combined xlsx includes a **Guardrails interventions** sheet listing batch number, row range, task type, and intervention categories when guardrail tracing is enabled (`BEDROCK_GUARDRAIL_TRACE`).
+Further details on use are below in the [Using the GUI interface guide](#using-the-gui-interface)
 
 # Installation guide
 
@@ -150,8 +166,8 @@ The repo provides several requirements files that are relevant for different sit
 
 If you want to run models locally 'in app', then you have two further requirements files to choose from:
 
-- **requirements_cpu.txt**: Used for Python 3.11 CPU-only environments. Uncomment the requirements under 'Windows' for Windows compatibility. Make sure you have [Openblas](https://github.com/OpenMathLib/OpenBLAS) installed!
-- **requirements_gpu.txt**: Used for Python 3.11 GPU-enabled environments. Uncomment the requirements under 'Windows' for Windows compatibility (CUDA 12.4).
+- **requirements_cpu.txt**: Used for Python 3.1x CPU-only environments.
+- **requirements_gpu.txt**: Used for Python 3.1x GPU-enabled environments.
 
 Example The below instructions will guide you in how to install the GPU-enabled version of the app for local inference.
 
@@ -187,3 +203,162 @@ Go to the app project directory. Run python app.py
 ### Step 7: (optional) change default configuration
 
 A number of configuration options can be seen the tools/config.py file. You can either pass in these variables as environment variables, or you can create a file in config/app_config.env to read this into the app on initialisation.
+
+This is a great way to understand the output format and what the analysis can do before running with your own data.
+
+# Using the GUI interface
+
+The **'All in one topic extraction and summarisation'** tab is the main interface for analyzing your data. Follow these steps:
+
+### Step 1: Upload your data file
+
+- Click on **'Choose Excel or csv files'** to select your input file
+- Supported formats: `.xlsx`, `.xls`, `.csv`, or `.parquet`
+- You can upload single or multiple files at once
+- The file(s) will be processed together
+
+### Step 2: Select the text column to analyse
+
+- Use the **'Select the open text column of interest'** dropdown menu
+- This dropdown automatically populates with all available columns from your uploaded file(s)
+- Select the column containing the text you want to analyse for topics
+- The column should contain open-ended text responses or comments
+
+### Step 3: (Optional) Provide context to the LLM
+
+- In the **'Write context to the large language model'** textbox, enter up to one sentence describing your task
+- Example: *"Consultation for the construction of flats on Main Street"* or *"Social Care case notes for young people"*
+- This helps the language model understand the domain and provide more relevant topic analysis
+- If left blank, the model will still analyse the text but may use more generic topic categories
+
+### Step 4: (Optional) Group analysis by another column
+
+- If you want separate analysis for different groups within your data, click the **'Group analysis by values in another column'** accordion
+- Select the grouping column from the dropdown (e.g., by "Client", "Location", "Department")
+- The analysis will be performed separately for each unique value in that column
+- Results will show topic summaries broken down by group
+
+### Step 5: (Optional) Provide suggested topics
+
+- Click the **'Provide list of suggested topics'** accordion to expand this section
+- Upload a CSV file containing your candidate topics
+- **File format requirements:**
+  - Must have at least one column with a header
+  - Topic names should be listed below the header
+  - Optional column headers:
+    - `General topic` - used for top-level topic categories
+    - `Subtopic` - used for more specific sub-categories
+    - A third column can be included for topic descriptions
+- Using suggested topics helps guide the model toward relevant categories for your specific use case
+- **Note:** If using grouped analysis and suggested topics together, use the headers 'General topic' and/or 'Subtopic' for best results
+
+### Step 6: (Optional) Specify sentiment analysis categories
+
+- Click the **'Response sentiment analysis'** accordion
+- By default, responses are categorised as "Negative" or "Positive"
+- You can customise these categories by specifying different sentiment types
+- This will add an additional dimension to your topic analysis
+
+### Step 7: Set batch size (optional)
+
+- Adjust the **'Number of responses to submit in a single LLM query'** slider
+- The default batch size is already optimised for most use cases
+- Larger batch sizes may be faster but require more processing
+- Smaller batch sizes may be more reliable for very sensitive or nuanced content
+- Range: 1-50 responses per batch
+
+### Step 8: Run the analysis
+
+- Click the **'Extract topics...'** button to start the analysis
+- A progress indicator will show the number of files prepared
+- Processing time depends on file size, batch size, and your selected LLM model
+- Output messages will display any warnings or important information
+- Once complete, the Excel output file(s) will be available for download
+
+# Using the output results (XLSX) file
+
+The analysis results are provided as a multi-sheet Excel file (.xlsx). Each sheet contains different aspects of the analysis to help you explore and understand the topics identified in your data.
+
+### Sheet: Cover Sheet
+
+- **Overview**: Provides a summary of the analysis parameters and data coverage
+- **Contains**:
+  - The name of the column analyzed
+  - Number of response rows that contained text
+  - Number of responses that had at least one topic assigned
+  - This helps you understand data quality and completeness
+
+### Sheet: Overall summary
+
+- **Overview**: A high-level text summary of the entire analysis
+- **Contains**: A narrative description of the main findings, key themes, and significant patterns across all responses
+- **Use this to**: Get a quick overview of the key insights without reviewing individual topics
+
+### Sheet: Topic summary
+
+- **Overview**: A structured summary of all identified topics
+- **Contains**:
+  - General topic and subtopic categories (if applicable)
+  - Number of responses relevant to each topic (Column E)
+  - Summary statistics about topic distribution
+- **Use this to**: Understand which topics were most prevalent and how topics are distributed across your dataset
+- **Key column**: **Column E** shows the count of responses assigned to each topic, helping you prioritise which topics have the most feedback
+
+### Sheet: Response level data
+
+- **Overview**: Detailed response-by-response breakdown
+- **Contains**:
+  - Each topic assigned to a response on a separate row
+  - Original response text
+  - Topic assignments and any associated metadata
+- **Use this to**: Review individual responses and see exactly which topics were assigned to specific comments
+- **Useful for**: Validation and quality checking
+
+### Sheet: Topic response pivot table
+
+- **Overview**: A cross-tabulation view of responses and topics
+- **Contains**:
+  - Full text of original responses, each on a separate row
+  - Topic names across the columns
+  - Values of `1` where a response is relevant to a topic, empty cells where not relevant
+- **Format**: This is essentially a matrix with responses as rows and topics as columns
+- **Use this to**: Easily see which responses match which topics and identify response sets matching specific topic combinations
+
+### Sheet: General topic response pivot table
+
+- **Overview**: A cross-tabulation view of responses and general topics
+- **Contains**:
+  - Full text of original responses, each on a separate row
+  - Topic names across the columns
+  - Values of `1` (or more) where a response is relevant to a topic, empty cells where not relevant
+- **Format**: This is essentially a matrix with responses as rows and topics as columns
+- **Use this to**: Easily see which responses match which topics and identify response sets matching specific topic combinations
+
+### Sheet: Missing responses
+
+- **Overview**: Responses that did not receive any topic assignment
+- **Contains**:
+  - All comments without assigned topics
+  - Character length of each response
+- **Use this to**: 
+  - Identify comments that should have been categorised but weren't
+  - Spot very short responses that may not have had enough text for analysis
+  - Validate model performance and identify potential edge cases
+  - Potentially refine your suggested topics or context to improve coverage
+
+### Sheet: Original data
+
+- **Overview**: Your original input data for reference
+- **Contains**:
+  - All data from your input file
+  - A **Reference column (Column A)** that provides unique identifiers for each row
+- **Use this to**: Cross-reference analysis results back to your original data
+- **Reference column**: Use the values in Column A to link findings from other sheets back to the original source data
+
+### Tips for interpreting results
+
+- **Topic Prevalence**: Look at Column E in the "Topic summary" sheet to prioritise which topics to focus on - topics with higher counts represent broader concerns
+- **Completeness**: The "Cover Sheet" and "Missing responses" sheets help you assess whether the model successfully analysed your data
+- **Validation**: Spot-check responses in the "Response level data" sheet to ensure topics are being assigned appropriately
+- **Pivot Table**: The "Topic response pivot table" is useful for exporting to other tools or creating visualisations of topic coverage
+- **Group Analysis**: If you grouped your analysis by another variable, separate Excel files or sheets will be created for each group
