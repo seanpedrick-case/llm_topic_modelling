@@ -1,5 +1,5 @@
 # This requirements file is optimised for AWS ECS using Python 3.11 alongside the Dockerfile, without local torch and llama-cpp-python. For AWS ECS, torch and llama-cpp-python are optionally installed in the main Dockerfile
-gradio>=6.26.0,<7
+gradio>=6.31.0,<7
 transformers>=5.19.0,<6
 spaces
 boto3>=1.43.121,<2

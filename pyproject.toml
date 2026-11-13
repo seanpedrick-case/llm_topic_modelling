@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm_topic_modelling"
-version = "0.19.2"
+version = "0.19.3"
 description = "Generate topics and thematic summaries from open text in tabular data files with LLMs"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -52,7 +52,7 @@ classifiers = [
 ]
 
 dependencies = [    
-    "gradio>=6.26.0,<7",
+    "gradio>=6.31.0,<7",
     "transformers>=5.19.0,<6",
     "spaces",
     "boto3>=1.43.121,<2",
@@ -100,7 +100,7 @@ llamacpp = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]>=6.26.0,<7"
+    "gradio[mcp]>=6.31.0,<7"
 ]
 
 [project.urls]
