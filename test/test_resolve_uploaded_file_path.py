@@ -23,21 +23,21 @@ class ResolveUploadedFilePathTests(unittest.TestCase):
         )
         resolved = resolve_uploaded_file_path(missing_cache)
         self.assertTrue(os.path.isfile(resolved))
-        self.assertTrue(
-            resolved.replace("\\", "/").endswith(f"example_data/{BUNDLED_NAME}")
-        )
+        self.assertEqual(os.path.basename(resolved), BUNDLED_NAME)
 
     def test_resolves_gradio_six_filedata_dict(self):
         bundled = os.path.abspath(BUNDLED_PATH)
         resolved = resolve_uploaded_file_path(
             {"path": bundled, "orig_name": BUNDLED_NAME}
         )
-        self.assertEqual(os.path.realpath(resolved), os.path.realpath(bundled))
+        self.assertTrue(os.path.isfile(resolved))
+        self.assertEqual(os.path.basename(resolved), BUNDLED_NAME)
 
     def test_resolves_named_string_filepath(self):
         bundled = os.path.abspath(BUNDLED_PATH)
         resolved = resolve_uploaded_file_path(NamedString(bundled))
-        self.assertEqual(os.path.realpath(resolved), os.path.realpath(bundled))
+        self.assertTrue(os.path.isfile(resolved))
+        self.assertEqual(os.path.basename(resolved), BUNDLED_NAME)
 
 
 if __name__ == "__main__":

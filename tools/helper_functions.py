@@ -15,6 +15,7 @@ from tools.config import (
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
     ENABLE_INPUT_REDACTION,
+    GRADIO_TEMP_DIR,
     INPUT_FOLDER,
     MAXIMUM_ALLOWED_TOPICS,
     OUTPUT_FOLDER,
@@ -22,6 +23,10 @@ from tools.config import (
     model_full_names,
     model_name_map,
 )
+
+# Trusted app root for bundled example datasets (not derived from user input).
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+_BUNDLED_EXAMPLE_DATA_ROOT = os.path.join(_APP_ROOT, "example_data")
 
 
 class ColumnNotFoundError(ValueError):
@@ -2077,40 +2082,80 @@ _PIVOT_ID_COL_ALIASES = (
 _PIVOT_RESERVED_COLS = {"all"}
 
 
+def _find_allowlisted_upload_file(user_path: str) -> str | None:
+    """
+    Locate an uploaded or example file under allowlisted roots.
+
+    Rebuilds paths from trusted roots plus ``os.path.basename`` only, so the raw
+    Gradio/caller path string is never used in path expressions (CodeQL
+    path-injection).
+    """
+    if not user_path or not str(user_path).strip():
+        return None
+
+    safe_name = os.path.basename(str(user_path).strip().strip("'\""))
+    if not safe_name or safe_name in {".", ".."}:
+        return None
+
+    for root in (
+        GRADIO_TEMP_DIR,
+        INPUT_FOLDER,
+        OUTPUT_FOLDER,
+        SESSION_OUTPUT_FOLDER,
+        _BUNDLED_EXAMPLE_DATA_ROOT,
+    ):
+        if not root or not str(root).strip():
+            continue
+        try:
+            root_real = os.path.realpath(os.path.abspath(str(root).strip()))
+        except OSError:
+            continue
+
+        search_dirs = [root_real]
+        try:
+            for entry in os.listdir(root_real):
+                sub = os.path.join(root_real, entry)
+                if os.path.isdir(sub):
+                    search_dirs.append(sub)
+        except OSError:
+            pass
+
+        for directory in search_dirs:
+            resolved = os.path.join(directory, safe_name)
+            try:
+                resolved_real = os.path.realpath(resolved)
+                if os.path.commonpath([root_real, resolved_real]) != root_real:
+                    continue
+                if os.path.isfile(resolved_real):
+                    return resolved_real
+            except (OSError, ValueError):
+                continue
+
+    return None
+
+
 def _resolve_missing_uploaded_file_path(candidate: str) -> str:
     """
-    Return an on-disk path for bundled example files when Gradio cache paths are missing.
+    Resolve a Gradio file reference to a path that exists on disk when possible.
 
     On Hugging Face Spaces (especially ZeroGPU), example files are copied into
     ``gradio_tmp`` for the UI, but a later GPU task may receive that cache path
-    after the file no longer exists on the worker. Fall back to ``example_data/``.
+    after the file no longer exists on the worker. Fall back to bundled
+    ``example_data/`` files matched by basename only.
     """
-    candidate = str(candidate).strip().strip("'\"")
-    if not candidate:
-        return candidate
-    if os.path.isfile(candidate):
-        return os.path.realpath(candidate)
+    if not candidate or not str(candidate).strip():
+        return ""
 
-    norm = candidate.replace("\\", "/")
-    if "example_data/" in norm:
-        rel = norm.split("example_data/", 1)[-1]
-        for bundled in (
-            os.path.join("example_data", rel),
-            os.path.abspath(os.path.join("example_data", rel)),
-        ):
-            if os.path.isfile(bundled):
-                return os.path.realpath(bundled)
+    found = _find_allowlisted_upload_file(candidate)
+    if found:
+        return found
 
-    basename = os.path.basename(norm)
-    if basename:
-        for bundled in (
-            os.path.join("example_data", basename),
-            os.path.abspath(os.path.join("example_data", basename)),
-        ):
-            if os.path.isfile(bundled):
-                return os.path.realpath(bundled)
+    safe_name = os.path.basename(str(candidate).strip().strip("'\""))
+    if not safe_name or safe_name in {".", ".."}:
+        return ""
 
-    return candidate
+    # Trusted root + basename only (for a clear FileNotFoundError downstream).
+    return os.path.join(_BUNDLED_EXAMPLE_DATA_ROOT, safe_name)
 
 
 def resolve_uploaded_file_path(file_obj: Any) -> str:
