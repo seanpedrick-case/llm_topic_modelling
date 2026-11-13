@@ -15,6 +15,7 @@ from tools.config import (
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
     ENABLE_INPUT_REDACTION,
+    GRADIO_TEMP_DIR,
     INPUT_FOLDER,
     MAXIMUM_ALLOWED_TOPICS,
     OUTPUT_FOLDER,
@@ -22,6 +23,10 @@ from tools.config import (
     model_full_names,
     model_name_map,
 )
+
+# Trusted app root for bundled example datasets (not derived from user input).
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+_BUNDLED_EXAMPLE_DATA_ROOT = os.path.join(_APP_ROOT, "example_data")
 
 
 class ColumnNotFoundError(ValueError):
@@ -1332,7 +1337,7 @@ def put_columns_in_df(in_file: List[str]):
         )
 
     for file in in_file:
-        file_name = file.name
+        file_name = resolve_uploaded_file_path(file)
         file_type = detect_file_type(file_name)
         # print("File type is:", file_type)
 
@@ -2077,6 +2082,91 @@ _PIVOT_ID_COL_ALIASES = (
 _PIVOT_RESERVED_COLS = {"all"}
 
 
+def _find_allowlisted_upload_file(user_path: str) -> str | None:
+    """
+    Locate an uploaded or example file under allowlisted roots.
+
+    Rebuilds paths from trusted roots plus ``os.path.basename`` only, so the raw
+    Gradio/caller path string is never used in path expressions (CodeQL
+    path-injection).
+    """
+    if not user_path or not str(user_path).strip():
+        return None
+
+    safe_name = os.path.basename(str(user_path).strip().strip("'\""))
+    if not safe_name or safe_name in {".", ".."}:
+        return None
+
+    for root in (
+        GRADIO_TEMP_DIR,
+        INPUT_FOLDER,
+        OUTPUT_FOLDER,
+        SESSION_OUTPUT_FOLDER,
+        _BUNDLED_EXAMPLE_DATA_ROOT,
+    ):
+        if not root or not str(root).strip():
+            continue
+        try:
+            root_real = os.path.realpath(os.path.abspath(str(root).strip()))
+        except OSError:
+            continue
+
+        search_dirs = [root_real]
+        try:
+            for entry in os.listdir(root_real):
+                safe_entry = os.path.basename(str(entry))
+                if not safe_entry or safe_entry in {".", ".."}:
+                    continue
+                sub = os.path.join(root_real, safe_entry)
+                if os.path.isdir(sub):
+                    search_dirs.append(sub)
+        except OSError:
+            pass
+
+        for directory in search_dirs:
+            try:
+                if safe_name not in os.listdir(directory):
+                    continue
+            except OSError:
+                continue
+            resolved = os.path.join(directory, safe_name)
+            try:
+                resolved_real = os.path.realpath(resolved)
+                if os.path.commonpath([root_real, resolved_real]) != root_real:
+                    continue
+            except (OSError, ValueError):
+                continue
+            # Basename listed under an allowlisted directory and realpath stays
+            # under root_real; avoid os.path.isfile (CodeQL py/path-injection).
+            return resolved
+
+    return None
+
+
+def _resolve_missing_uploaded_file_path(candidate: str) -> str:
+    """
+    Resolve a Gradio file reference to a path that exists on disk when possible.
+
+    On Hugging Face Spaces (especially ZeroGPU), example files are copied into
+    ``gradio_tmp`` for the UI, but a later GPU task may receive that cache path
+    after the file no longer exists on the worker. Fall back to bundled
+    ``example_data/`` files matched by basename only.
+    """
+    if not candidate or not str(candidate).strip():
+        return ""
+
+    found = _find_allowlisted_upload_file(candidate)
+    if found:
+        return found
+
+    safe_name = os.path.basename(str(candidate).strip().strip("'\""))
+    if not safe_name or safe_name in {".", ".."}:
+        return ""
+
+    # Trusted root + basename only (for a clear FileNotFoundError downstream).
+    return os.path.join(_BUNDLED_EXAMPLE_DATA_ROOT, safe_name)
+
+
 def resolve_uploaded_file_path(file_obj: Any) -> str:
     """Resolve a Gradio File / FileData / path string to a filesystem path."""
     if file_obj is None:
@@ -2085,14 +2175,23 @@ def resolve_uploaded_file_path(file_obj: Any) -> str:
         if not file_obj:
             raise ValueError("No file uploaded.")
         return resolve_uploaded_file_path(file_obj[0])
+    if isinstance(file_obj, dict):
+        for key in ("path", "name"):
+            raw = file_obj.get(key)
+            if raw:
+                return _resolve_missing_uploaded_file_path(str(raw))
+        raise ValueError("Could not resolve uploaded file path.")
     if isinstance(file_obj, str):
         path = file_obj.strip().strip("'\"")
         if not path:
             raise ValueError("No file uploaded.")
-        return path
+        return _resolve_missing_uploaded_file_path(path)
+    path = getattr(file_obj, "path", None)
+    if path:
+        return _resolve_missing_uploaded_file_path(str(path))
     path = getattr(file_obj, "name", None)
     if path:
-        return str(path)
+        return _resolve_missing_uploaded_file_path(str(path))
     raise ValueError("Could not resolve uploaded file path.")
 
 
