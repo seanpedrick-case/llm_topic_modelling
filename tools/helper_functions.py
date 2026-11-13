@@ -2121,15 +2121,21 @@ def _find_allowlisted_upload_file(user_path: str) -> str | None:
             pass
 
         for directory in search_dirs:
+            try:
+                if safe_name not in os.listdir(directory):
+                    continue
+            except OSError:
+                continue
             resolved = os.path.join(directory, safe_name)
             try:
                 resolved_real = os.path.realpath(resolved)
                 if os.path.commonpath([root_real, resolved_real]) != root_real:
                     continue
-                if os.path.isfile(resolved_real):
-                    return resolved_real
             except (OSError, ValueError):
                 continue
+            # isfile on joined path (trusted dir + basename), not on realpath — view_logs pattern.
+            if os.path.isfile(resolved):
+                return resolved
 
     return None
 
